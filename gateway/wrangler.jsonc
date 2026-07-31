@@ -2,6 +2,9 @@
   "name": "cartis-gateway",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-30",
+  "kv_namespaces": [
+    { "binding": "SESSIONS", "id": "540329106cb74e56a5a2c659ccb98b49" }
+  ],
   "observability": {
     "enabled": false
   }
