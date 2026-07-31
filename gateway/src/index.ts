@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from 'hono'
+import { analyzeProduct, type ScrapedProduct } from './coach'
 
 type Env = {
   SESSIONS: KVNamespace
@@ -298,6 +299,18 @@ app.post('/api/sync/parse', auth, async (c) => {
 
   if (transactions.length === 0) return c.json({ transactions: [], source, count: 0, note: 'nothing recognized — check the message format', version: 'payee-v2' })
   return c.json({ transactions, source, count: transactions.length, version: 'payee-v2' })
+})
+
+app.post('/api/coach/analyze', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { product?: ScrapedProduct }
+  const p = body.product
+  if (!p || !p.name || typeof p.price !== 'number') return c.json({ error: 'product with name and price is required' }, 400)
+  try {
+    const verdict = await analyzeProduct(c.env, p)
+    return c.json(verdict)
+  } catch (e) {
+    return c.json({ error: String(e) }, 422)
+  }
 })
 
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw))
