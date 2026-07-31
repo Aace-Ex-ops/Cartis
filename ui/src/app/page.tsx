@@ -1,6 +1,6 @@
 import { ArrowRight } from "lucide-react";
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "https://cartis-gateway.rz8m4crnwt.workers.dev";
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 export default function Home() {
   return (

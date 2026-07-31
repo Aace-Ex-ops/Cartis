@@ -5,6 +5,7 @@ type Env = {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   WORKER_AUTH_SECRET: string
+  ASSETS: Fetcher
 }
 
 type Session = {
@@ -159,7 +160,7 @@ app.get('/auth/callback', async (c) => {
   await addUserSession(c, session.user_id, sessionToken)
 
   c.header('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL}`)
-  return c.redirect('/auth/me')
+  return c.redirect('/dashboard')
 })
 
 app.get('/auth/me', auth, (c) => {
@@ -205,5 +206,7 @@ app.delete('/auth/sessions/:sessionId', auth, async (c) => {
   }
   return c.json({ error: 'session not found' }, 404)
 })
+
+app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw))
 
 export default app

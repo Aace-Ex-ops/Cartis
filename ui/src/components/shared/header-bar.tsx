@@ -12,9 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AlertBell } from "@/components/shared/alert-bell";
 
-const GATEWAY =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ??
-  "https://cartis-gateway.rz8m4crnwt.workers.dev";
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 export function HeaderBar({
   user,

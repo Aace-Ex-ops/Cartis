@@ -5,9 +5,7 @@ import { ClipboardPaste, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-const GATEWAY =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ??
-  "https://cartis-gateway.rz8m4crnwt.workers.dev";
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 export function SyncPasteBox({ bank }: { bank?: string }) {
   const [paste, setPaste] = useState("");

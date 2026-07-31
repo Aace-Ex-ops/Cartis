@@ -7,9 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
-const GATEWAY =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ??
-  "https://cartis-gateway.rz8m4crnwt.workers.dev";
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 function SettingToggle({ title, desc, defaultOn }: { title: string; desc: string; defaultOn: boolean }) {
   const [on, setOn] = useState(defaultOn);
