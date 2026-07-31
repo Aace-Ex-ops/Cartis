@@ -1,7 +1,9 @@
-"""Cloudflare R2 client for model artifacts.
+"""AWS S3 client for model artifacts.
 
-Degrades gracefully: R2 is not enabled yet (account error 10042), so uploads
-log and return None instead of crashing the training jobs.
+boto3 uses the default credential chain: AWS_ACCESS_KEY_ID /
+AWS_SECRET_ACCESS_KEY / AWS_REGION env vars (or ~/.aws/credentials, or an
+EC2 instance role). Replaces the original Cloudflare R2 target (blocked:
+account error 10042).
 """
 import io
 import json
@@ -10,34 +12,22 @@ import os
 
 log = logging.getLogger(__name__)
 
-R2_ENDPOINT = os.environ.get("R2_ENDPOINT", "https://<account>.r2.cloudflarestorage.com")
-R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY", "")
-R2_SECRET_KEY = os.environ.get("R2_SECRET_KEY", "")
-BUCKET = os.environ.get("R2_BUCKET", "cartis-models")
+BUCKET = os.environ.get("S3_BUCKET", "cartis-models")
+REGION = os.environ.get("AWS_REGION", "ap-south-2")
 
 
-def _enabled() -> bool:
-    return bool(R2_ACCESS_KEY and R2_SECRET_KEY and "<account>" not in R2_ENDPOINT)
+def _client():
+    import boto3  # lazy import so training works without boto3 installed
+
+    return boto3.client("s3", region_name=REGION)
 
 
 def upload_artifact(key: str, data: bytes, metadata: dict | None = None) -> None:
-    if not _enabled():
-        log.warning("R2 not configured — skipping upload of %s (enable R2 in the Cloudflare dashboard)", key)
-        return
     try:
-        import boto3  # lazy import so training works without boto3 installed
-
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=R2_ENDPOINT,
-            aws_access_key_id=R2_ACCESS_KEY,
-            aws_secret_access_key=R2_SECRET_KEY,
-            region_name="auto",
-        )
-        s3.put_object(Bucket=BUCKET, Key=key, Body=data, Metadata=metadata or {})
-        log.info("uploaded %s", key)
+        _client().put_object(Bucket=BUCKET, Key=key, Body=io.BytesIO(data), Metadata=metadata or {})
+        log.info("uploaded s3://%s/%s", BUCKET, key)
     except Exception as e:  # noqa: BLE001
-        log.warning("R2 upload failed for %s: %s", key, e)
+        log.warning("S3 upload failed for %s: %s", key, e)
 
 
 def upload_json(key: str, obj: dict) -> None:
