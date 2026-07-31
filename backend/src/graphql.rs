@@ -94,7 +94,7 @@ impl QueryRoot {
                  WHERE al.user_id::text = $1
                  ORDER BY al.created_at DESC
                  LIMIT $2 OFFSET $3",
-                &[&uid, &limit.unwrap_or(50), &offset.unwrap_or(0)],
+                &[&uid, &(limit.unwrap_or(50) as i64), &(offset.unwrap_or(0) as i64)],
             )
             .await?;
         Ok(rows.iter().map(AnalysisLog::from_row).collect())
@@ -137,9 +137,9 @@ impl MutationRoot {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx)
             .query_one(
-                "UPDATE users SET monthly_tab_limit = $2 WHERE user_id::text = $1
+                "UPDATE users SET monthly_tab_limit = $2::text::numeric WHERE user_id::text = $1
                  RETURNING monthly_tab_limit::float8, annual_deferred_limit::float8",
-                &[&uid, &limit],
+                &[&uid, &limit.to_string()],
             )
             .await?;
         Ok(MonthlyTab {
@@ -153,9 +153,9 @@ impl MutationRoot {
         let row = pg(ctx)
             .query_one(
                 "INSERT INTO seller_finances (user_id, entry_type, amount, category, description, transaction_date)
-                 VALUES ($1::uuid, $2, $3, $4, $5, $6)
+                 VALUES ($1::text::uuid, $2, $3::text::numeric, $4, $5, $6::text::date)
                  RETURNING entry_id::text, entry_type, amount::float8, category, description, transaction_date::text, created_at::text",
-                &[&uid, &input.entry_type, &input.amount, &input.category, &input.description, &input.transaction_date],
+                &[&uid, &input.entry_type, &input.amount.to_string(), &input.category, &input.description, &input.transaction_date],
             )
             .await?;
         Ok(FinanceEntry::from_row(&row))
