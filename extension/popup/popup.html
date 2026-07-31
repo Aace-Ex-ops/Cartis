@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { width: 300px; font-family: system-ui; padding: 12px; margin: 0; }
+      h1 { font-size: 14px; margin: 0 0 8px; }
+      .entry { border-top: 1px solid #eee; padding: 6px 0; font-size: 12px; }
+      .entry .verdict { font-weight: 600; }
+      button { width: 100%; margin-top: 8px; padding: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>Cartis</h1>
+    <div id="summary">Sign in to see your budget status.</div>
+    <div id="history"></div>
+    <button id="logout" hidden>Log out</button>
+    <script type="module" src="popup.ts"></script>
+  </body>
+</html>

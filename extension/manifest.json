@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Cartis — AI Financial Coach",
+  "version": "0.1.0",
+  "description": "Auto-analyzes product pages and shows a verdict before you buy.",
+  "permissions": ["storage", "alarms", "tabs"],
+  "host_permissions": ["https://cartis-gateway.rz8m4crnwt.workers.dev/*"],
+  "background": {
+    "service_worker": "background.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Cartis",
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content_script.ts"],
+      "run_at": "document_idle"
+    }
+  ]
+}
