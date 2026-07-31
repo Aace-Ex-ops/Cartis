@@ -118,6 +118,7 @@ impl QueryRoot {
 
     async fn budget_alerts(&self, ctx: &Context<'_>, unread_only: Option<bool>) -> Result<Vec<BudgetAlert>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        generate_alerts(&uid, pg(ctx)).await?;
         let rows = pg(ctx)
             .query(
                 "SELECT alert_id::text, alert_type, message, channel, is_read, created_at::text
@@ -129,6 +130,213 @@ impl QueryRoot {
             .await?;
         Ok(rows.iter().map(BudgetAlert::from_row).collect())
     }
+
+    async fn financial_health_score(&self, ctx: &Context<'_>) -> Result<Option<FinancialHealthScore>> {
+        let Some(uid) = user_id(ctx) else { return Ok(None) };
+        let row = pg(ctx)
+            .query_opt(
+                "SELECT u.monthly_tab_limit::float8, u.wallet_balance::float8,
+                        u.coach_adherence_score::float8,
+                        COALESCE(SUM(l.amount), 0)::float8 AS spent,
+                        (SELECT EXTRACT(EPOCH FROM MAX(ba.last_sync_at)) FROM bank_accounts ba WHERE ba.user_id = u.user_id)::float8 AS last_sync
+                 FROM users u
+                 LEFT JOIN ledger_entries l ON l.user_id = u.user_id
+                    AND l.account_type = 'budget'
+                    AND l.created_at >= date_trunc('month', now())
+                 WHERE u.user_id::text = $1
+                 GROUP BY u.user_id",
+                &[&uid],
+            )
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let limit: f64 = row.get(0);
+        let wallet: f64 = row.get(1);
+        let adherence: f64 = row.get(2);
+        let spent: f64 = row.get(3);
+        let last_sync: Option<f64> = row.get(4);
+
+        let mut factors: Vec<HealthFactor> = vec![];
+        let mut score: i32 = 750;
+
+        let ratio = if limit > 0.0 { spent / limit } else { 0.0 };
+        if ratio < 0.5 {
+            score += 40;
+            factors.push(HealthFactor { key: "tab_utilization".into(), impact: "positive".into(), detail: format!("Using {:.0}% of monthly tab — healthy headroom", ratio * 100.0) });
+        } else if ratio >= 0.95 {
+            score -= 120;
+            factors.push(HealthFactor { key: "tab_utilization".into(), impact: "negative".into(), detail: format!("{:.0}% of monthly tab consumed", ratio * 100.0) });
+        } else if ratio >= 0.8 {
+            score -= 60;
+            factors.push(HealthFactor { key: "tab_utilization".into(), impact: "negative".into(), detail: format!("{:.0}% of monthly tab consumed", ratio * 100.0) });
+        } else {
+            factors.push(HealthFactor { key: "tab_utilization".into(), impact: "neutral".into(), detail: format!("{:.0}% of monthly tab consumed", ratio * 100.0) });
+        }
+
+        if wallet >= 2.0 * limit {
+            score += 30;
+            factors.push(HealthFactor { key: "wallet_buffer".into(), impact: "positive".into(), detail: "Wallet covers 2 months of tab limit".into() });
+        } else if wallet < 0.5 * limit {
+            score -= 40;
+            factors.push(HealthFactor { key: "wallet_buffer".into(), impact: "negative".into(), detail: "Wallet below half of monthly tab limit".into() });
+        } else {
+            factors.push(HealthFactor { key: "wallet_buffer".into(), impact: "neutral".into(), detail: "Wallet buffer is adequate".into() });
+        }
+
+        if adherence >= 80.0 {
+            score += 30;
+            factors.push(HealthFactor { key: "coach_adherence".into(), impact: "positive".into(), detail: "High adherence to coach recommendations".into() });
+        } else if adherence >= 50.0 {
+            factors.push(HealthFactor { key: "coach_adherence".into(), impact: "neutral".into(), detail: "Moderate adherence to coach recommendations".into() });
+        } else {
+            score -= 30;
+            factors.push(HealthFactor { key: "coach_adherence".into(), impact: "negative".into(), detail: "Low adherence to coach recommendations".into() });
+        }
+
+        let stale = last_sync.map(|ts| ts > 0.0 && chrono_since_days(ts) > 30.0).unwrap_or(false);
+        if stale {
+            score -= 20;
+            factors.push(HealthFactor { key: "bank_data_freshness".into(), impact: "negative".into(), detail: "Bank data older than 30 days — re-sync".into() });
+        }
+
+        let score = score.clamp(300, 850);
+        let factors_json = serde_json::json!(factors.iter().map(|f| {
+            serde_json::json!({"key": f.key, "impact": f.impact, "detail": f.detail})
+        }).collect::<Vec<_>>());
+        let out = pg(ctx)
+            .query_one(
+                "INSERT INTO financial_health_scores (user_id, score, factors)
+                 VALUES ($1::text::uuid, $2, $3::text::jsonb)
+                 RETURNING calculated_at::text",
+                &[&uid, &score, &factors_json.to_string()],
+            )
+            .await?;
+        Ok(Some(FinancialHealthScore {
+            score,
+            factors,
+            calculated_at: out.get(0),
+        }))
+    }
+
+    async fn affordability_check(&self, ctx: &Context<'_>, product_price: f64) -> Result<Option<AffordabilityCheck>> {
+        let Some(uid) = user_id(ctx) else { return Ok(None) };
+        let row = pg(ctx)
+            .query_opt(
+                "SELECT u.monthly_tab_limit::float8, u.annual_deferred_limit::float8,
+                        COALESCE(SUM(l.amount), 0)::float8 AS spent
+                 FROM users u
+                 LEFT JOIN ledger_entries l ON l.user_id = u.user_id
+                    AND l.account_type = 'budget'
+                    AND l.created_at >= date_trunc('month', now())
+                 WHERE u.user_id::text = $1
+                 GROUP BY u.user_id",
+                &[&uid],
+            )
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let tab_remaining = (row.get::<_, f64>(0) - row.get::<_, f64>(2)).max(0.0);
+        let deferred_remaining: f64 = row.get(1);
+        let total_remaining = tab_remaining + deferred_remaining;
+        let (verdict, reason) = if product_price <= tab_remaining {
+            ("buy".to_string(), format!("Price fits within your monthly tab remaining of ₹{tab_remaining:.0}"))
+        } else if product_price <= total_remaining {
+            ("watch".to_string(), format!("Exceeds monthly tab (₹{tab_remaining:.0} left) but within deferred credit of ₹{deferred_remaining:.0} — consider delaying a month"))
+        } else {
+            ("wait".to_string(), format!("Above your total available credit of ₹{total_remaining:.0} — defer this purchase"))
+        };
+        Ok(Some(AffordabilityCheck {
+            verdict,
+            reason,
+            tab_remaining,
+            deferred_remaining,
+        }))
+    }
+}
+
+fn chrono_since_days(unix_seconds: f64) -> f64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    ((now - unix_seconds) / 86400.0).max(0.0)
+}
+
+async fn generate_alerts(uid: &str, client: &Client) -> Result<()> {
+    let row = client
+        .query_opt(
+            "SELECT u.monthly_tab_limit::float8,
+                    COALESCE(SUM(l.amount), 0)::float8 AS spent,
+                    EXTRACT(DAY FROM now())::float8 AS day_of_month,
+                    (SELECT EXTRACT(EPOCH FROM MAX(ba.last_sync_at)) FROM bank_accounts ba WHERE ba.user_id = u.user_id)::float8 AS last_sync
+             FROM users u
+             LEFT JOIN ledger_entries l ON l.user_id = u.user_id
+                AND l.account_type = 'budget'
+                AND l.created_at >= date_trunc('month', now())
+             WHERE u.user_id::text = $1
+             GROUP BY u.user_id",
+            &[&uid],
+        )
+        .await?;
+    let Some(row) = row else { return Ok(()) };
+    let limit: f64 = row.get(0);
+    let spent: f64 = row.get(1);
+    let day_of_month: f64 = row.get(2);
+    let last_sync: Option<f64> = row.get(3);
+
+    let mut alerts: Vec<(String, String, &str)> = vec![];
+    let ratio = if limit > 0.0 { spent / limit } else { 0.0 };
+    if ratio >= 0.95 {
+        alerts.push((
+            "BUDGET_EXHAUSTION".into(),
+            format!("You've used {:.0}% of your monthly tab limit. Only ₹{:.0} remaining.", ratio * 100.0, limit - spent),
+            "dashboard",
+        ));
+    } else if ratio >= 0.80 {
+        alerts.push((
+            "BUDGET_EXHAUSTION".into(),
+            format!("You've used {:.0}% of your monthly tab limit. ₹{:.0} remaining.", ratio * 100.0, limit - spent),
+            "extension",
+        ));
+    }
+
+    let days = day_of_month.max(1.0);
+    let daily_avg = spent / days;
+    let baseline = if limit > 0.0 { limit / 30.0 } else { 0.0 };
+    if baseline > 0.0 && daily_avg > baseline * 1.25 {
+        alerts.push((
+            "OVERSPEND_RISK".into(),
+            format!("Spending pace is {:.0}% above your norm — on track to exceed budget.", (daily_avg / baseline - 1.0) * 100.0),
+            "dashboard",
+        ));
+    }
+
+    let stale = last_sync.map(|ts| ts > 0.0 && chrono_since_days(ts) > 30.0).unwrap_or(false);
+    if stale {
+        alerts.push((
+            "STALE_BANK_DATA".into(),
+            "Last bank sync is older than 30 days — re-sync for accurate advice".into(),
+            "dashboard",
+        ));
+    }
+
+    for (alert_type, message, channel) in alerts {
+        let existing = client
+            .query_opt(
+                "SELECT 1 FROM budget_alerts
+                 WHERE user_id::text = $1 AND alert_type = $2 AND is_read = FALSE
+                 LIMIT 1",
+                &[&uid, &alert_type],
+            )
+            .await?;
+        if existing.is_some() { continue; }
+        client
+            .execute(
+                "INSERT INTO budget_alerts (user_id, alert_type, message, channel)
+                 VALUES ($1::text::uuid, $2, $3, $4)",
+                &[&uid, &alert_type, &message, &channel],
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 #[Object]
@@ -358,6 +566,47 @@ impl BudgetAlert {
             created_at: r.get(5),
         }
     }
+}
+
+struct FinancialHealthScore {
+    score: i32,
+    factors: Vec<HealthFactor>,
+    calculated_at: String,
+}
+
+#[Object]
+impl FinancialHealthScore {
+    async fn score(&self) -> i32 { self.score }
+    async fn factors(&self) -> &[HealthFactor] { &self.factors }
+    async fn calculated_at(&self) -> &str { &self.calculated_at }
+}
+
+struct HealthFactor {
+    key: String,
+    impact: String,
+    detail: String,
+}
+
+#[Object]
+impl HealthFactor {
+    async fn key(&self) -> &str { &self.key }
+    async fn impact(&self) -> &str { &self.impact }
+    async fn detail(&self) -> &str { &self.detail }
+}
+
+struct AffordabilityCheck {
+    verdict: String,
+    reason: String,
+    tab_remaining: f64,
+    deferred_remaining: f64,
+}
+
+#[Object]
+impl AffordabilityCheck {
+    async fn verdict(&self) -> &str { &self.verdict }
+    async fn reason(&self) -> &str { &self.reason }
+    async fn tab_remaining(&self) -> f64 { self.tab_remaining }
+    async fn deferred_remaining(&self) -> f64 { self.deferred_remaining }
 }
 
 #[derive(async_graphql::InputObject)]
