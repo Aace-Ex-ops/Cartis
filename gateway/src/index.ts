@@ -6,6 +6,7 @@ type Env = {
   GOOGLE_CLIENT_SECRET: string
   WORKER_AUTH_SECRET: string
   ASSETS: Fetcher
+  AI: Ai
 }
 
 type Session = {
@@ -205,6 +206,98 @@ app.delete('/auth/sessions/:sessionId', auth, async (c) => {
     }
   }
   return c.json({ error: 'session not found' }, 404)
+})
+
+type ParsedTx = {
+  type: 'debit' | 'credit'
+  amount: number
+  account_last4?: string
+  balance?: number
+  date?: string
+  payee?: string
+  raw: string
+}
+
+function num(s?: string): number | undefined {
+  if (!s) return undefined
+  const n = parseFloat(s.replace(/[,\s]/g, ''))
+  return Number.isFinite(n) ? n : undefined
+}
+
+function parseWithRegex(text: string): ParsedTx[] {
+  const txs: ParsedTx[] = []
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const joined = lines.join('\n')
+  const re = /(?:UPI[:\s-]*|NEFT|IMPS|RTGS)?\s*(?:Rs\.?\s*)?([\d,]+(?:\.\d{1,2})?)\s*(debited from|credited to|sent to|received from|debited by|credit to)\s*(?:A\/C|account|from)?\s*\*{0,2}(\d{4})?/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(joined))) {
+    const amount = num(m[1])
+    if (amount === undefined) continue
+    const type = /debited|sent/i.test(m[2]) ? 'debit' : 'credit'
+    const lineStart = m.index
+    let lineEnd = joined.indexOf('\n', lineStart)
+    if (lineEnd < 0) lineEnd = joined.length
+    const line = joined.slice(lineStart, lineEnd)
+    const balLine = line + ' ' + joined.slice(lineEnd + 1, joined.indexOf('\n', lineEnd + 1) >= 0 ? joined.indexOf('\n', lineEnd + 1) : joined.length)
+    const balMatch = balLine.match(/Bal(?:ance)?:?\s*Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i)
+    const dateMatch = line.match(/\b(\d{1,2}-[A-Za-z]{3}-\d{2,4}|\d{1,2}-[A-Za-z]{3}|\d{2}[/-]\d{2}[/-]\d{2,4})\b/)
+    const payeeMatch = line.match(/(?:to|from|by)[:\s]+([A-Z0-9][A-Za-z0-9 .&-]{2,})/gi)
+    let payee: string | undefined
+    for (const pm of payeeMatch ?? []) {
+      let p = pm.split(/\s+(?:on|at|via|by|Bal)\b/)[0].replace(/^(?:to|from|by)[:\s]+/i, '')
+      if (/^(A\/C|account|a\/c)\b/i.test(p) || /^Bal/.test(p)) continue
+      p = p.replace(/[.\s]+$/, '')
+      payee = p
+      break
+    }
+    txs.push({
+      type,
+      amount,
+      account_last4: m[3] ?? undefined,
+      balance: balMatch ? num(balMatch[1]) : undefined,
+      date: dateMatch?.[1],
+      payee,
+      raw: line,
+    })
+  }
+  return txs
+}
+
+app.post('/api/sync/parse', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { text?: string }
+  const text = (body.text ?? '').trim()
+  if (!text) return c.json({ error: 'text is required' }, 400)
+
+  let transactions = parseWithRegex(text)
+  let source: 'regex' | 'ai' = 'regex'
+  if (transactions.length === 0) {
+    try {
+      const prompt = `Extract bank SMS alerts into a JSON array. Each item: {"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}. Output ONLY the JSON array, no markdown.\n\nSMS:\n${text}`
+      const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
+        response?: string
+        choices?: Array<{ message?: { content?: string } }>
+      }
+      const content =
+        typeof out.response === 'string'
+          ? out.response
+          : (out.choices?.[0]?.message?.content ?? '')
+      const match = content.match(/\[[\s\S]*\]/)
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]) as ParsedTx[]
+          transactions = parsed.filter((t) => typeof t.amount === 'number')
+          source = 'ai'
+        } catch {
+          transactions = []
+        }
+      }
+    } catch (e) {
+      return c.json({ transactions: [], source: 'none', count: 0, error: String(e) }, 502)
+    }
+  }
+
+  if (transactions.length === 0) return c.json({ transactions: [], source, count: 0, note: 'nothing recognized — check the message format', version: 'payee-v2' })
+  return c.json({ transactions, source, count: transactions.length, version: 'payee-v2' })
 })
 
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw))
