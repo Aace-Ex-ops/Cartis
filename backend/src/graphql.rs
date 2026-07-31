@@ -218,20 +218,40 @@ impl QueryRoot {
     }
 
     async fn affordability_check(&self, ctx: &Context<'_>, product_price: f64) -> Result<Option<AffordabilityCheck>> {
-        let Some(uid) = user_id(ctx) else { return Ok(None) };
-        let row = pg(ctx)
-            .query_opt(
-                "SELECT u.monthly_tab_limit::float8, u.annual_deferred_limit::float8,
-                        COALESCE(SUM(l.amount), 0)::float8 AS spent
-                 FROM users u
-                 LEFT JOIN ledger_entries l ON l.user_id = u.user_id
-                    AND l.account_type = 'budget'
-                    AND l.created_at >= date_trunc('month', now())
-                 WHERE u.user_id::text = $1
-                 GROUP BY u.user_id",
-                &[&uid],
-            )
-            .await?;
+        let row = match user_id(ctx) {
+            Some(uid) => pg(ctx)
+                .query_opt(
+                    "SELECT u.monthly_tab_limit::float8, u.annual_deferred_limit::float8,
+                            COALESCE(SUM(l.amount), 0)::float8 AS spent
+                     FROM users u
+                     LEFT JOIN ledger_entries l ON l.user_id = u.user_id
+                        AND l.account_type = 'budget'
+                        AND l.created_at >= date_trunc('month', now())
+                     WHERE u.user_id::text = $1
+                     GROUP BY u.user_id",
+                    &[&uid],
+                )
+                .await?,
+            // Anonymous coach check: default limits, zero spending.
+            None => {
+                let tab = 600.0;
+                let deferred = 2500.0;
+                let total = tab + deferred;
+                let (verdict, reason) = if product_price <= tab {
+                    ("buy".to_string(), format!("Price fits within your monthly tab remaining of ₹{tab:.0}"))
+                } else if product_price <= total {
+                    ("watch".to_string(), format!("Exceeds monthly tab (₹{tab:.0} left) but within deferred credit of ₹{deferred:.0} — consider delaying a month"))
+                } else {
+                    ("wait".to_string(), format!("Above your total available credit of ₹{total:.0} — defer this purchase"))
+                };
+                return Ok(Some(AffordabilityCheck {
+                    verdict,
+                    reason,
+                    tab_remaining: tab,
+                    deferred_remaining: deferred,
+                }));
+            }
+        };
         let Some(row) = row else { return Ok(None) };
         let tab_remaining = (row.get::<_, f64>(0) - row.get::<_, f64>(2)).max(0.0);
         let deferred_remaining: f64 = row.get(1);

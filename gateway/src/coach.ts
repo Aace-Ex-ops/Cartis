@@ -1,4 +1,4 @@
-type CoachEnv = { AI: Ai; SESSIONS: KVNamespace }
+type CoachEnv = { AI: Ai; SESSIONS: KVNamespace; BACKEND_URL: string; BACKEND_SECRET: string }
 
 export type ScrapedProduct = {
   site: string
@@ -63,12 +63,20 @@ async function step3(env: CoachEnv, p: ScrapedProduct) {
   )
 }
 
-async function step4(env: CoachEnv, p: ScrapedProduct, s1: unknown, s3: unknown) {
+async function step4(env: CoachEnv, p: ScrapedProduct, s1: unknown, s3: unknown, budget: unknown, price: unknown) {
   const system = `You are the Cartis financial coach. Decide if the user should buy now, wait, or avoid this product.
 Return ONLY JSON:
 {"verdict":"buy"|"wait"|"avoid","explanation":"2-3 plain-English sentences","alternatives":[{"site":"amazon.in","price":14500}]|[],"coach_note":"how this affects the user's goals"}`
+  const context = {
+    name: p.name,
+    price: p.price,
+    extraction: s1,
+    trust: s3,
+    budget: budget ?? 'unavailable',
+    price_index: price ?? 'unavailable',
+  }
   return extractJson<Omit<Verdict, 'cached' | 'sources'>>(
-    await llm(env, `${system}\n\nProduct: ${JSON.stringify({ name: p.name, price: p.price, category: s1, trust: s3 }).slice(0, 4000)}`)
+    await llm(env, `${system}\n\nProduct: ${JSON.stringify(context).slice(0, 4000)}`)
   )
 }
 
@@ -76,6 +84,22 @@ async function priceIndex(env: CoachEnv, p: ScrapedProduct): Promise<unknown | n
   if (!p.gtin) return null
   const raw = await env.SESSIONS.get(`price_index:${p.gtin}`)
   return raw ? (JSON.parse(raw) as unknown) : null
+}
+
+async function budgetCheck(env: CoachEnv, price: number): Promise<unknown | null> {
+  const res = await fetch(`${env.BACKEND_URL}/graphql`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-cartis-backend-secret': env.BACKEND_SECRET,
+    },
+    body: JSON.stringify({
+      query: `query { affordabilityCheck(productPrice: ${price}) { verdict reason tabRemaining deferredRemaining } }`,
+    }),
+  })
+  if (!res.ok) return null
+  const json = (await res.json()) as { data?: { affordabilityCheck?: unknown } }
+  return json.data?.affordabilityCheck ?? null
 }
 
 export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct): Promise<Verdict> {
@@ -91,12 +115,11 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct): Promise<
     throw new Error(`cannot analyze this product: ${String(e)}`)
   }
 
-  // Step 2 (parallel): RAG (Vectorize), budget (Rust), price index (KV/Redis)
-  // ponytail: Vectorize index and backend budget call are not reachable from the
-  // worker yet — both degrade to null per coach.md fallback ("use cached/known
-  // state"). Wire env.VECTORIZE + a gateway->API call when those land.
+  // Step 2 (parallel): RAG (Vectorize), budget (Rust backend), price index (KV)
+  // ponytail: Vectorize index is not provisioned — degrades to null per coach.md
+  // fallback. Wire env.VECTORIZE when the index exists.
   const [budget, price] = await Promise.all([
-    Promise.resolve(null),
+    budgetCheck(env, p.price).catch(() => null),
     priceIndex(env, p).catch(() => null),
   ])
 
@@ -112,7 +135,7 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct): Promise<
   // Step 4: verdict
   let verdict: Omit<Verdict, 'cached' | 'sources'>
   try {
-    verdict = await step4(env, p, s1, s3)
+    verdict = await step4(env, p, s1, s3, budget, price)
   } catch {
     verdict = {
       verdict: 'wait',

@@ -24,6 +24,7 @@ async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL required");
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let port = env::var("PORT").unwrap_or_else(|_| "8000".into());
+    let backend_secret = env::var("BACKEND_SECRET").unwrap_or_default();
 
     let (pg, connection) = tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
         .await
@@ -57,12 +58,38 @@ async fn main() {
         .route("/health", get(|| async { "ok" }))
         .route("/graphql", get(graphiql).post(graphql_handler))
         .with_state(state)
-        .layer(axum::extract::Extension(schema));
+        .layer(axum::extract::Extension(schema))
+        .layer(axum::middleware::from_fn_with_state(
+            backend_secret.clone(),
+            require_backend_secret,
+        ));
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("127.0.0.1:{port}");
     println!("cartis-api listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn require_backend_secret(
+    State(secret): State<String>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if !secret.is_empty() {
+        let ok = req
+            .headers()
+            .get("x-cartis-backend-secret")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v == secret)
+            .unwrap_or(false);
+        if !ok {
+            return axum::response::IntoResponse::into_response((
+                axum::http::StatusCode::UNAUTHORIZED,
+                "missing or invalid x-cartis-backend-secret",
+            ));
+        }
+    }
+    next.run(req).await
 }
 
 async fn graphiql() -> axum::response::Html<String> {

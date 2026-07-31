@@ -8,6 +8,8 @@ type Env = {
   WORKER_AUTH_SECRET: string
   ASSETS: Fetcher
   AI: Ai
+  BACKEND_URL: string
+  BACKEND_SECRET: string
 }
 
 type Session = {
