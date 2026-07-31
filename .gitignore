@@ -3,9 +3,6 @@
 .env.*
 .env.*.local
 
-# Secrets
-scripts/cartis-dbpass
-
 # Dependencies
 node_modules/
 target/
