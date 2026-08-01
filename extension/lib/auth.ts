@@ -1,4 +1,5 @@
 const STORAGE_KEY = "cartis_session";
+const GATEWAY = "https://cartis-gateway.rz8m4crnwt.workers.dev";
 
 export type Session = { token: string; expires_at: number };
 
@@ -21,12 +22,18 @@ export async function clearSession(): Promise<void> {
   await chrome.storage.local.remove(STORAGE_KEY);
 }
 
+async function cookieToken(): Promise<string | null> {
+  const c = await chrome.cookies.get({ url: `${GATEWAY}/`, name: "session" });
+  return c?.value ?? null;
+}
+
 export async function refreshSession(): Promise<Session | null> {
-  const sess = await getSession();
-  if (!sess) return null;
-  const res = await fetch("https://cartis-gateway.rz8m4crnwt.workers.dev/api/session/refresh", {
+  let token = (await getSession())?.token ?? null;
+  if (!token) token = await cookieToken();
+  if (!token) return null;
+  const res = await fetch(`${GATEWAY}/api/session/refresh`, {
     method: "POST",
-    headers: { authorization: `Bearer ${sess.token}` },
+    headers: { authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
     await clearSession();

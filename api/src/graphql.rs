@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_graphql::{Context, Object, Result};
-use tokio_postgres::Client;
 
 use crate::AppState;
 
@@ -9,7 +8,7 @@ fn user_id(ctx: &Context<'_>) -> Option<String> {
     ctx.data_opt::<String>().cloned()
 }
 
-fn pg<'a>(ctx: &'a Context<'_>) -> &'a Client {
+fn pg<'a>(ctx: &'a Context<'_>) -> &'a deadpool_postgres::Pool {
     &ctx.data_unchecked::<Arc<AppState>>().pg
 }
 
@@ -23,7 +22,7 @@ pub struct MutationRoot;
 impl QueryRoot {
     async fn me(&self, ctx: &Context<'_>) -> Result<Option<User>> {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_opt(
                 "SELECT user_id::text, email, full_name, avatar_url, user_type,
                         wallet_balance::float8, monthly_tab_limit::float8,
@@ -38,7 +37,7 @@ impl QueryRoot {
 
     async fn wallet(&self, ctx: &Context<'_>) -> Result<Option<Wallet>> {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_opt(
                 "SELECT wallet_balance::float8, monthly_tab_limit::float8, annual_deferred_limit::float8
                  FROM users WHERE user_id::text = $1",
@@ -50,7 +49,7 @@ impl QueryRoot {
 
     async fn monthly_tab(&self, ctx: &Context<'_>) -> Result<Option<MonthlyTab>> {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_opt(
                 "SELECT u.monthly_tab_limit::float8,
                         COALESCE(SUM(l.amount), 0)::float8 AS spent
@@ -71,7 +70,7 @@ impl QueryRoot {
 
     async fn bank_accounts(&self, ctx: &Context<'_>) -> Result<Vec<BankAccount>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
-        let rows = pg(ctx)
+        let rows = pg(ctx).get().await?
             .query(
                 "SELECT account_id::text, b.name, mobile_number, account_type,
                         balance::float8, last_sync_at::text
@@ -85,7 +84,7 @@ impl QueryRoot {
 
     async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>) -> Result<Vec<AnalysisLog>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
-        let rows = pg(ctx)
+        let rows = pg(ctx).get().await?
             .query(
                 "SELECT al.analysis_id::text, p.name, p.site_name,
                         p.price::float8, al.verdict, al.explanation,
@@ -102,7 +101,7 @@ impl QueryRoot {
 
     async fn seller_dashboard(&self, ctx: &Context<'_>) -> Result<Option<SellerDashboard>> {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_opt(
                 "SELECT
                     COALESCE(SUM(amount) FILTER (WHERE entry_type = 'revenue'), 0)::float8 AS revenue,
@@ -119,7 +118,7 @@ impl QueryRoot {
     async fn budget_alerts(&self, ctx: &Context<'_>, unread_only: Option<bool>) -> Result<Vec<BudgetAlert>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         generate_alerts(&uid, pg(ctx)).await?;
-        let rows = pg(ctx)
+        let rows = pg(ctx).get().await?
             .query(
                 "SELECT alert_id::text, alert_type, message, channel, is_read, created_at::text
                  FROM budget_alerts WHERE user_id::text = $1
@@ -133,7 +132,7 @@ impl QueryRoot {
 
     async fn financial_health_score(&self, ctx: &Context<'_>) -> Result<Option<FinancialHealthScore>> {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_opt(
                 "SELECT u.monthly_tab_limit::float8, u.wallet_balance::float8,
                         u.coach_adherence_score::float8,
@@ -202,7 +201,7 @@ impl QueryRoot {
         let factors_json = serde_json::json!(factors.iter().map(|f| {
             serde_json::json!({"key": f.key, "impact": f.impact, "detail": f.detail})
         }).collect::<Vec<_>>());
-        let out = pg(ctx)
+        let out = pg(ctx).get().await?
             .query_one(
                 "INSERT INTO financial_health_scores (user_id, score, factors)
                  VALUES ($1::text::uuid, $2, $3::text::jsonb)
@@ -219,7 +218,7 @@ impl QueryRoot {
 
     async fn affordability_check(&self, ctx: &Context<'_>, product_price: f64) -> Result<Option<AffordabilityCheck>> {
         let row = match user_id(ctx) {
-            Some(uid) => pg(ctx)
+            Some(uid) => pg(ctx).get().await?
                 .query_opt(
                     "SELECT u.monthly_tab_limit::float8, u.annual_deferred_limit::float8,
                             COALESCE(SUM(l.amount), 0)::float8 AS spent
@@ -280,7 +279,8 @@ fn chrono_since_days(unix_seconds: f64) -> f64 {
     ((now - unix_seconds) / 86400.0).max(0.0)
 }
 
-async fn generate_alerts(uid: &str, client: &Client) -> Result<()> {
+async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()> {
+    let client = pool.get().await?;
     let row = client
         .query_opt(
             "SELECT u.monthly_tab_limit::float8,
@@ -363,7 +363,7 @@ async fn generate_alerts(uid: &str, client: &Client) -> Result<()> {
 impl MutationRoot {
     async fn set_monthly_tab_limit(&self, ctx: &Context<'_>, limit: f64) -> Result<MonthlyTab> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_one(
                 "UPDATE users SET monthly_tab_limit = $2::text::numeric WHERE user_id::text = $1
                  RETURNING monthly_tab_limit::float8, annual_deferred_limit::float8",
@@ -378,7 +378,7 @@ impl MutationRoot {
 
     async fn add_finance_entry(&self, ctx: &Context<'_>, input: FinanceEntryInput) -> Result<FinanceEntry> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
-        let row = pg(ctx)
+        let row = pg(ctx).get().await?
             .query_one(
                 "INSERT INTO seller_finances (user_id, entry_type, amount, category, description, transaction_date)
                  VALUES ($1::text::uuid, $2, $3::text::numeric, $4, $5, $6::text::date)

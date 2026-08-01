@@ -19,13 +19,14 @@ async function syncAlerts(): Promise<void> {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({
-        query: `{ budgetAlerts { id alert_type message is_read } }`,
+        query: `{ monthlyTab { limit spent } }`,
       }),
     });
     if (res.ok) {
       const data = await res.json();
-      const unread = (data.data?.budgetAlerts ?? []).filter((a: { is_read: boolean }) => !a.is_read).length;
-      await chrome.action.setBadgeText({ text: unread ? String(unread) : "" });
+      const t = data.data?.monthlyTab;
+      const over = t && t.spent > t.limit;
+      await chrome.action.setBadgeText({ text: over ? "!" : "" });
       await chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
     }
   } catch {

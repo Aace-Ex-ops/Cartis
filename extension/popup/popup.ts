@@ -1,41 +1,45 @@
-import { getSession, clearSession } from "../lib/auth.js";
+import { getSession, refreshSession, clearSession } from "../lib/auth.js";
+
+const GATEWAY = "https://cartis-gateway.rz8m4crnwt.workers.dev";
 
 const summary = document.getElementById("summary")!;
 const historyEl = document.getElementById("history")!;
+const signInBtn = document.getElementById("signin") as HTMLButtonElement;
 const logoutBtn = document.getElementById("logout") as HTMLButtonElement;
 
 async function main(): Promise<void> {
-  const sess = await getSession();
+  let sess = await getSession();
+  if (!sess) sess = await refreshSession();
   if (!sess) {
     summary.textContent = "Not signed in.";
+    signInBtn.hidden = false;
     return;
   }
   try {
-    const res = await fetch("https://cartis-gateway.rz8m4crnwt.workers.dev/graphql", {
+    const res = await fetch(`${GATEWAY}/graphql`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${sess.token}` },
       body: JSON.stringify({
-        query: `{ me { email } walletBalance financialHealth { score } budgetAlerts { id message is_read } }`,
+        query: `{ me { email } wallet { balance tabLimit } monthlyTab { limit spent } }`,
       }),
     });
     const data = await res.json();
     const d = data.data;
-    summary.textContent = `${d.me.email} · wallet ${d.walletBalance} · health ${d.financialHealth?.score ?? "—"}`;
-    for (const alert of d.budgetAlerts ?? []) {
-      const div = document.createElement("div");
-      div.className = "entry";
-      div.textContent = alert.message;
-      historyEl.appendChild(div);
-    }
+    summary.textContent = `${d.me.email} · wallet ₹${d.wallet.balance} · tab ${d.monthlyTab.spent}/${d.monthlyTab.limit}`;
     logoutBtn.hidden = false;
   } catch {
     summary.textContent = "Could not reach Cartis.";
   }
 }
 
+signInBtn.addEventListener("click", () => {
+  void chrome.tabs.create({ url: `${GATEWAY}/auth/login` });
+});
+
 logoutBtn.addEventListener("click", async () => {
   await clearSession();
   summary.textContent = "Not signed in.";
+  signInBtn.hidden = false;
   logoutBtn.hidden = true;
 });
 

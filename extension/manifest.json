@@ -3,7 +3,7 @@
   "name": "Cartis — AI Financial Coach",
   "version": "0.1.0",
   "description": "Auto-analyzes product pages and shows a verdict before you buy.",
-  "permissions": ["storage", "alarms", "tabs"],
+  "permissions": ["storage", "alarms", "tabs", "cookies"],
   "host_permissions": ["https://cartis-gateway.rz8m4crnwt.workers.dev/*"],
   "background": {
     "service_worker": "background.ts",

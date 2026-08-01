@@ -31,6 +31,24 @@ const SESSION_TTL = 604800
 const STATE_TTL = 600
 const ROTATION_SECONDS = 600
 
+// Self-verifying OAuth state: id.provider.exp.hex-sig — no KV read-after-write race (KV is only globally consistent within ~60s).
+async function signState(c: { env: { WORKER_AUTH_SECRET: string } }, provider: string): Promise<string> {
+  const id = randomHex()
+  const exp = Math.floor(Date.now() / 1000) + STATE_TTL
+  const sig = await sha256Hex(`${id}.${provider}.${exp}.${c.env.WORKER_AUTH_SECRET}`)
+  return `${id}.${provider}.${exp}.${sig}`
+}
+
+async function verifyState(c: { env: { WORKER_AUTH_SECRET: string } }, state: string): Promise<string | null> {
+  const parts = state.split('.')
+  if (parts.length !== 4) return null
+  const [id, provider, expStr, sig] = parts
+  const exp = Number(expStr)
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null
+  const expected = await sha256Hex(`${id}.${provider}.${exp}.${c.env.WORKER_AUTH_SECRET}`)
+  return expected === sig ? provider : null
+}
+
 const app = new Hono<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }>()
 
 async function sha256Hex(input: string) {
@@ -112,7 +130,7 @@ async function rotateSession(c: { env: { SESSIONS: KVNamespace; WORKER_AUTH_SECR
 }
 
 const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }> = async (c, next) => {
-  const token = cookieToken(c)
+  const token = cookieToken(c) ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
   if (!token) return c.json({ error: 'unauthenticated' }, 401)
   const raw = await c.env.SESSIONS.get(`session:${token}`)
   if (!raw) return c.json({ error: 'unauthenticated' }, 401)
@@ -141,8 +159,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }))
 app.get('/auth/login', async (c) => {
   const provider = c.req.query('provider') ?? 'google'
   if (provider !== 'google') return c.json({ error: `provider '${provider}' not configured` }, 501)
-  const state = randomHex()
-  await c.env.SESSIONS.put(`state:${state}`, provider, { expirationTtl: STATE_TTL })
+  const state = await signState(c, provider)
   const params = new URLSearchParams({
     client_id: c.env.GOOGLE_CLIENT_ID,
     redirect_uri: new URL('/auth/callback', c.req.url).toString(),
@@ -158,9 +175,8 @@ app.get('/auth/callback', async (c) => {
   const code = c.req.query('code')
   const state = c.req.query('state')
   if (!code || !state) return c.json({ error: 'missing code or state' }, 400)
-  const stored = await c.env.SESSIONS.get(`state:${state}`)
-  if (!stored) return c.json({ error: 'invalid state' }, 400)
-  await c.env.SESSIONS.delete(`state:${state}`)
+  const provider = await verifyState(c, state)
+  if (!provider) return c.json({ error: 'invalid state' }, 400)
 
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
@@ -189,7 +205,7 @@ app.get('/auth/callback', async (c) => {
     email: info.email,
     name: info.name ?? '',
     avatar: info.picture ?? '',
-    provider: stored,
+    provider,
     exp: expiration,
     last_rotation: Math.floor(Date.now() / 1000),
   }
@@ -242,6 +258,34 @@ app.delete('/auth/sessions/:sessionId', auth, async (c) => {
     }
   }
   return c.json({ error: 'session not found' }, 404)
+})
+
+app.post('/api/session/refresh', auth, (c) => {
+  const session = c.get('session')
+  return c.json({
+    token: c.get('sessionToken'),
+    ttl_ms: SESSION_TTL * 1000,
+    user: { id: session.user_id, email: session.email, name: session.name, avatar: session.avatar },
+  })
+})
+
+app.all('/graphql', auth, async (c) => {
+  const target = new URL(`${c.env.BACKEND_URL}/graphql`)
+  const qs = c.req.url.split('?')[1]
+  if (qs) target.search = qs
+  const res = await fetch(target, {
+    method: c.req.method,
+    headers: {
+      'content-type': c.req.header('content-type') ?? 'application/json',
+      'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+      'x-user-id': c.get('session').user_id,
+    },
+    body: c.req.method === 'GET' ? undefined : await c.req.text(),
+  })
+  return new Response(res.body, {
+    status: res.status,
+    headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' },
+  })
 })
 
 type ParsedTx = {

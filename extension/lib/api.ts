@@ -1,3 +1,5 @@
+import type { ScrapedProduct } from "./scraper.js";
+
 const GATEWAY = "https://cartis-gateway.rz8m4crnwt.workers.dev";
 
 export type Verdict = {

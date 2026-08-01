@@ -10,12 +10,10 @@ use axum::extract::Extension;
 use axum::http::HeaderMap;
 use axum::routing::get;
 use axum::Router;
-use tokio_postgres::Client;
-
 mod graphql;
 
 pub struct AppState {
-    pub pg: Client,
+    pub pg: deadpool_postgres::Pool,
     pub redis: Option<redis::Client>,
 }
 
@@ -26,14 +24,11 @@ async fn main() {
     let port = env::var("PORT").unwrap_or_else(|_| "8000".into());
     let backend_secret = env::var("BACKEND_SECRET").unwrap_or_default();
 
-    let (pg, connection) = tokio_postgres::connect(&database_url, tokio_postgres::NoTls)
-        .await
-        .expect("postgres connection failed");
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("postgres connection error: {e}");
-        }
-    });
+    let mut pg_cfg = deadpool_postgres::Config::new();
+    pg_cfg.url = Some(database_url);
+    let pg = pg_cfg
+        .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
+        .expect("postgres pool creation failed");
 
     let redis = match redis::Client::open(redis_url) {
         Ok(c) => match c.get_async_connection().await {
