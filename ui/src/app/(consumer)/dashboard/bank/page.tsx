@@ -1,10 +1,52 @@
-import { Landmark, MessageCircle, RefreshCw } from "lucide-react";
+"use client";
+
+import { useEffect, useState } from "react";
+import { Landmark, MessageCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SyncPasteBox } from "@/components/shared/sync-paste-box";
-import { bankAccount } from "@/lib/mock";
+import { gql } from "@/lib/gql";
+
+type BankAccount = {
+  accountId: string;
+  bankName: string;
+  mobileNumber: string;
+  accountType: string | null;
+  balance: number | null;
+  lastSyncAt: string | null;
+};
+
+const QUERY = `{ bankAccounts { accountId bankName mobileNumber accountType balance lastSyncAt } }`;
+
+const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
+function formatSync(iso: string | null): string {
+  if (!iso) return "Never synced";
+  return new Date(iso.replace(" ", "T")).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function BankPage() {
+  const [accounts, setAccounts] = useState<BankAccount[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void gql<{ bankAccounts: BankAccount[] }>(QUERY)
+      .then((d) => {
+        if (!cancelled) setAccounts(d.bankAccounts);
+      })
+      .catch(() => {
+        if (!cancelled) setAccounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -18,45 +60,52 @@ export default function BankPage() {
             <Landmark className="h-4 w-4" /> Connected accounts
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-3">
-            <div>
-              <div className="text-[14px] font-medium text-foreground">{bankAccount.bank}</div>
-              <div className="text-[12px] text-muted-foreground">A/C •••• {bankAccount.last4}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-[16px] font-semibold text-foreground">
-                ₹{bankAccount.balance.toLocaleString("en-IN")}
+        <CardContent className="flex flex-col gap-3">
+          {accounts === null && <div className="h-20 rounded-lg border border-border/50" />}
+          {accounts !== null && accounts.length === 0 && (
+            <p className="rounded-lg border border-border/50 bg-background/50 px-4 py-6 text-center text-[13px] text-muted-foreground">
+              No bank connected yet — link one below.
+            </p>
+          )}
+          {accounts?.map((a) => (
+            <div key={a.accountId} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-3">
+              <div>
+                <div className="text-[14px] font-medium text-foreground">{a.bankName}</div>
+                <div className="text-[12px] text-muted-foreground">
+                  {a.accountType ? `A/C · ${a.accountType}` : `+91 ${a.mobileNumber}`} · synced {formatSync(a.lastSyncAt)}
+                </div>
               </div>
-              <div className="text-[12px] text-muted-foreground">Balance</div>
+              <div className="text-right">
+                <div className="text-[16px] font-semibold text-foreground">
+                  {a.balance != null ? fmt(a.balance) : "—"}
+                </div>
+                <div className="text-[11px] text-muted-foreground">Balance</div>
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-center justify-between text-[13px] text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <RefreshCw className="h-3.5 w-3.5" /> Last synced {bankAccount.lastSync}
-            </span>
-            <Button asChild variant="outline" size="sm">
-              <a
-                href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000"}?text=${encodeURIComponent("Hi Cartis, sync my latest transactions.")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <MessageCircle className="mr-1.5 h-3.5 w-3.5" /> Sync on WhatsApp
-              </a>
-            </Button>
-          </div>
+          ))}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Paste bank alerts</CardTitle>
-          <CardDescription>Copy alerts from your SMS app and paste them here.</CardDescription>
+          <CardTitle className="text-sm font-medium text-muted-foreground">Sync transactions</CardTitle>
+          <CardDescription>Paste a bank alert or continue on WhatsApp.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <SyncPasteBox bank={bankAccount.bank} />
+        <CardContent className="flex flex-col gap-3">
+          <SyncPasteBox bank={accounts?.[0]?.bankName ?? ""} />
         </CardContent>
       </Card>
+
+      <Button asChild variant="outline">
+        <a
+          href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000"}?text=${encodeURIComponent("Hi Cartis, I want to sync my transactions.")}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <MessageCircle className="mr-2 h-4 w-4" />
+          Continue on WhatsApp
+        </a>
+      </Button>
     </div>
   );
 }

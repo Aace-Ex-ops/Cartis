@@ -70,6 +70,22 @@ impl QueryRoot {
         }))
     }
 
+    #[graphql(name = "spending30d")]
+    async fn spending_30d(&self, ctx: &Context<'_>) -> Result<Vec<SpendingDay>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT to_char(created_at, 'DD') AS day, COALESCE(SUM(amount), 0)::float8 AS spend
+                 FROM ledger_entries
+                 WHERE user_id::text = $1 AND account_type = 'budget'
+                   AND created_at >= now() - interval '30 days'
+                 GROUP BY 1 ORDER BY 1",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(|r| SpendingDay { day: r.get(0), spend: r.get(1) }).collect())
+    }
+
     async fn bank_accounts(&self, ctx: &Context<'_>) -> Result<Vec<BankAccount>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
@@ -545,6 +561,17 @@ struct MonthlyTab {
 impl MonthlyTab {
     async fn limit(&self) -> f64 { self.limit }
     async fn spent(&self) -> f64 { self.spent }
+}
+
+struct SpendingDay {
+    day: String,
+    spend: f64,
+}
+
+#[Object]
+impl SpendingDay {
+    async fn day(&self) -> &str { &self.day }
+    async fn spend(&self) -> f64 { self.spend }
 }
 
 struct BankAccount {
