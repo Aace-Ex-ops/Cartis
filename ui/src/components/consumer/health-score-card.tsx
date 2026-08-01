@@ -9,8 +9,8 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 function scoreColor(score: number) {
-  if (score >= 70) return "#10b981";
-  if (score >= 40) return "#f59e0b";
+  if (score >= 750) return "#10b981";
+  if (score >= 670) return "#f59e0b";
   return "#ef4444";
 }
 
@@ -36,13 +36,13 @@ export function HealthScoreCard({ score, level, insight }: { score: number; leve
               startAngle={90}
               endAngle={-270}
             >
-              <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+              <PolarAngleAxis type="number" domain={[300, 850]} tick={false} />
               <RadialBar dataKey="value" cornerRadius={8} fill={color} background={{ fill: "rgba(255,255,255,0.06)" }} />
             </RadialBarChart>
           </ResponsiveContainer>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-3xl font-semibold text-foreground">{score}</span>
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">/ 100</span>
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">/ 850</span>
           </div>
         </div>
         <div className="flex flex-col gap-1.5">

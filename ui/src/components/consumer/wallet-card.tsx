@@ -5,11 +5,11 @@ const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
 export function WalletCard({ balance, credits, monthlySpend, monthlyBudget }: {
   balance: number;
-  credits: number;
+  credits?: number;
   monthlySpend: number;
   monthlyBudget: number;
 }) {
-  const usedPct = Math.round((monthlySpend / monthlyBudget) * 100);
+  const usedPct = monthlyBudget > 0 ? Math.round((monthlySpend / monthlyBudget) * 100) : 0;
 
   return (
     <Card>
@@ -22,10 +22,12 @@ export function WalletCard({ balance, credits, monthlySpend, monthlyBudget }: {
           <div className="text-2xl font-semibold text-foreground">{fmt(balance)}</div>
           <div className="text-[12px] text-muted-foreground">Available balance</div>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-[13px] text-primary">
-          <Sparkles className="h-4 w-4" strokeWidth={1.5} />
-          {credits} coach credits
-        </div>
+        {credits !== undefined && (
+          <div className="flex items-center gap-2 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-[13px] text-primary">
+            <Sparkles className="h-4 w-4" strokeWidth={1.5} />
+            {credits} coach credits
+          </div>
+        )}
         <div className="flex items-center justify-between text-[13px]">
           <span className="flex items-center gap-1.5 text-muted-foreground">
             <TrendingDown className="h-3.5 w-3.5" />
