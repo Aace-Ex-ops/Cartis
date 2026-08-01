@@ -1,4 +1,5 @@
 import { ArrowRight, Sparkles, Wallet, LineChart, MousePointerClick, ShoppingCart, CheckCircle2 } from "lucide-react";
+import { LandingAuth } from "@/components/shared/landing-auth";
 
 const STATS = [
   { value: "3", label: "marketplaces covered" },
@@ -50,12 +51,7 @@ export default function Home() {
           </div>
           <span className="text-[15px] font-semibold tracking-tight">Cartis</span>
         </div>
-        <a
-          href="/signin"
-          className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-card px-4 py-2 text-sm font-medium transition-colors hover:border-primary/50 hover:text-primary"
-        >
-          Sign in
-        </a>
+        <LandingAuth />
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 px-6">
