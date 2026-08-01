@@ -7,6 +7,7 @@ const env = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.e
 const get = (k) => env.match(new RegExp(`^${k}=(.+)$`, 'm'))?.[1]
 const TOKEN = get('POLAR_ACCESS_TOKEN')
 const API = get('POLAR_API_URL')
+const WEBHOOK_URL = get('POLAR_WEBHOOK_URL')
 
 async function api(path, method = 'GET', body) {
   const res = await fetch(`${API}${path}`, {
@@ -48,18 +49,18 @@ for (const p of products) {
 }
 
 const endpoints = (await api('/v1/webhooks/endpoints?limit=50')).items ?? []
-const existingWh = endpoints.find((e) => e.url.includes('cartis-gateway'))
+const existingWh = endpoints.find((e) => e.url === WEBHOOK_URL)
 if (existingWh) {
   console.log('webhook exists:', existingWh.url, `(${existingWh.id})`)
 } else {
-  const secret = randomBytes(32).toString('hex')
+  const secret = get('POLAR_WEBHOOK_SECRET') ?? randomBytes(32).toString('hex')
   const wh = await api('/v1/webhooks/endpoints', 'POST', {
     organization_id: orgId,
-    url: 'https://cartis-gateway.rz8m4crnwt.workers.dev/webhooks/polar',
+    url: WEBHOOK_URL,
     format: 'raw',
     secret,
     events: ['checkout.created', 'order.created', 'subscription.created', 'subscription.updated', 'subscription.canceled', 'product.updated', 'benefit_grant.created'],
   })
   console.log('created webhook:', wh.url, `(${wh.id})`)
-  console.log(`POLAR_WEBHOOK_SECRET=${secret}`)
+  if (!get('POLAR_WEBHOOK_SECRET')) console.log(`POLAR_WEBHOOK_SECRET=${secret}`)
 }

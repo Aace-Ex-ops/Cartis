@@ -10,6 +10,7 @@ type Env = {
   AI: Ai
   BACKEND_URL: string
   BACKEND_SECRET: string
+  POLAR_WEBHOOK_SECRET: string
 }
 
 type Session = {
@@ -39,6 +40,38 @@ async function sha256Hex(input: string) {
 
 function randomHex(bytes = 32) {
   return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function hmacSha256(key: ArrayBuffer | ArrayBufferView, message: string): Promise<string> {
+  const keyBytes = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const sig = await crypto.subtle.sign('HMAC', keyBytes, new TextEncoder().encode(message))
+  let bin = ''
+  for (const b of new Uint8Array(sig)) bin += String.fromCharCode(b)
+  return btoa(bin)
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+// Standard Webhooks spec (as used by Polar): signature = "v1," + base64(HMAC-SHA256(key, `${webhookId}.${timestamp}.${rawBody}`))
+// HMAC key convention varies by SDK; try both the raw secret and its base64-decoded form.
+async function verifyPolarWebhook(secret: string, webhookId: string, timestamp: string, rawBody: string, signature: string): Promise<boolean> {
+  const message = `${webhookId}.${timestamp}.${rawBody}`
+  const keys = [new TextEncoder().encode(secret)]
+  try {
+    keys.push(Uint8Array.from(atob(secret), (c) => c.charCodeAt(0)))
+  } catch {
+    // not valid base64 — only raw form applies
+  }
+  for (const key of keys) {
+    const expected = `v1,${await hmacSha256(key, message)}`
+    if (constantTimeEqual(signature, expected)) return true
+  }
+  return false
 }
 
 function cookieToken(c: { req: { header: (n: string) => string | undefined } }) {
@@ -313,6 +346,27 @@ app.post('/api/coach/analyze', async (c) => {
   } catch (e) {
     return c.json({ error: String(e) }, 422)
   }
+})
+
+app.post('/webhooks/polar', async (c) => {
+  const secret = c.env.POLAR_WEBHOOK_SECRET
+  if (!secret) return c.json({ error: 'webhook not configured' }, 500)
+  const webhookId = c.req.header('webhook-id')
+  const timestamp = c.req.header('webhook-timestamp')
+  const signature = c.req.header('webhook-signature')
+  if (!webhookId || !timestamp || !signature) return c.json({ error: 'missing webhook headers' }, 400)
+  const ts = Number(timestamp)
+  if (!Number.isFinite(ts) || Math.abs(Math.floor(Date.now() / 1000) - ts) > 300) {
+    return c.json({ error: 'stale webhook' }, 400)
+  }
+  const raw = await c.req.text()
+  if (!(await verifyPolarWebhook(secret, webhookId, timestamp, raw, signature))) {
+    return c.json({ error: 'bad signature' }, 401)
+  }
+  await c.env.SESSIONS.put(`polar:event:${webhookId}`, raw, { expirationTtl: 2592000 })
+  const event = JSON.parse(raw) as { type?: string; data?: { id?: string } }
+  console.log('[polar]', event.type ?? 'unknown', event.data?.id ?? '')
+  return c.json({ ok: true })
 })
 
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw))
