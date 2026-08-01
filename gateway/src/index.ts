@@ -186,7 +186,10 @@ app.get('/', (c) => c.json({ status: 'ok', service: 'cartis-gateway' }))
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
+app.get('/login', (c) => c.redirect('/auth/login?provider=google'))
+
 app.get('/auth/login', async (c) => {
+  c.header('Cache-Control', 'no-store')
   const provider = c.req.query('provider') ?? 'google'
   if (provider !== 'google') return c.json({ error: `provider '${provider}' not configured` }, 501)
   const state = await signState(c, provider)
@@ -202,6 +205,8 @@ app.get('/auth/login', async (c) => {
 })
 
 app.get('/auth/callback', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  if (c.req.query('error')) return c.redirect('/signin?error=google_denied')
   const code = c.req.query('code')
   const state = c.req.query('state')
   if (!code || !state) return c.json({ error: 'missing code or state' }, 400)
@@ -226,12 +231,24 @@ app.get('/auth/callback', async (c) => {
   const info = (await infoRes.json()) as { email?: string; sub?: string; name?: string; picture?: string }
   if (!infoRes.ok || !info.email || !info.sub) return c.json({ error: 'userinfo failed', details: info }, 401)
 
+  let data: { upsertGoogleUser?: string | null }
+  try {
+    data = (await backendGql(
+      c,
+      `mutation { upsertGoogleUser(email: ${JSON.stringify(info.email)}, fullName: ${JSON.stringify(info.name ?? '')}, avatarUrl: ${JSON.stringify(info.picture ?? '')}) }`,
+    )) as { upsertGoogleUser?: string | null }
+  } catch (e) {
+    return c.json({ error: 'user provisioning failed', details: String(e) }, 502)
+  }
+  if (!data?.upsertGoogleUser) return c.json({ error: 'user provisioning failed' }, 502)
+  const userId = data.upsertGoogleUser
+
   const sessionId = randomHex()
   const expiration = Math.floor(Date.now() / 1000) + SESSION_TTL
   const sessionToken = await sha256Hex(sessionId + expiration + c.env.WORKER_AUTH_SECRET)
   const session: Session = {
     session_id: sessionId,
-    user_id: info.sub,
+    user_id: userId,
     email: info.email,
     name: info.name ?? '',
     avatar: info.picture ?? '',

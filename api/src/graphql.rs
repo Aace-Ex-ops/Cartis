@@ -363,6 +363,22 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
 
 #[Object]
 impl MutationRoot {
+    async fn upsert_google_user(&self, ctx: &Context<'_>, email: String, full_name: String, avatar_url: String) -> Result<Option<String>> {
+        if !email.contains('@') {
+            return Err("invalid email".into());
+        }
+        let row = pg(ctx).get().await?
+            .query_opt(
+                "INSERT INTO users (email, full_name, avatar_url, oauth_provider)
+                 VALUES ($1, $2, $3, 'google')
+                 ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name, avatar_url = EXCLUDED.avatar_url
+                 RETURNING user_id::text",
+                &[&email, &full_name, &avatar_url],
+            )
+            .await?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
     async fn signup(&self, ctx: &Context<'_>, email: String, full_name: String, password: String) -> Result<Option<String>> {
         if !email.contains('@') || password.len() < 8 {
             return Err("invalid email or password (min 8 chars)".into());
