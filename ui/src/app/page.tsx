@@ -1,5 +1,6 @@
 import { ArrowRight, Sparkles, Wallet, LineChart, MousePointerClick, ShoppingCart, CheckCircle2 } from "lucide-react";
 import { LandingAuth } from "@/components/shared/landing-auth";
+import { LandingCta } from "@/components/shared/landing-cta";
 
 const STATS = [
   { value: "3", label: "marketplaces covered" },
@@ -68,13 +69,7 @@ export default function Home() {
             you an honest verdict before every purchase. No lectures. Just the truth.
           </p>
           <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
-            <a
-              href="/signup"
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              Get started free
-              <ArrowRight className="h-4 w-4" />
-            </a>
+            <LandingCta />
             <a
               href="#how"
               className="inline-flex items-center gap-2 rounded-lg border border-border/60 px-6 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -131,13 +126,9 @@ export default function Home() {
             Your future self will thank your wallet. Join Cartis and get an honest
             answer before every purchase.
           </p>
-          <a
-            href="/signup"
-            className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            Get started free
-            <ArrowRight className="h-4 w-4" />
-          </a>
+          <div className="mt-8 flex justify-center">
+            <LandingCta />
+          </div>
         </section>
       </main>
 
