@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Sidebar, type NavGroup } from "@/components/shared/sidebar";
 import { HeaderBar } from "@/components/shared/header-bar";
-
-const MOCK_USER = { name: "Aarav Mehta", email: "aarav@cartis.app" };
+import { getMe, type User } from "@/lib/auth";
 
 export function DashboardShell({
   groups,
@@ -17,6 +16,22 @@ export function DashboardShell({
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getMe().then((me) => {
+      if (cancelled) return;
+      if (!me) {
+        window.location.href = "/";
+        return;
+      }
+      setUser(me);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -25,12 +40,12 @@ export function DashboardShell({
           collapsed ? "w-0 opacity-0" : "w-[240px] opacity-100"
         }`}
       >
-        <Sidebar groups={groups} upgrade={upgrade} user={MOCK_USER} />
+        {user && <Sidebar groups={groups} upgrade={upgrade} user={user} />}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <HeaderBar
-          user={MOCK_USER}
+          user={user ?? undefined}
           leading={
             <button
               onClick={() => setCollapsed(!collapsed)}
