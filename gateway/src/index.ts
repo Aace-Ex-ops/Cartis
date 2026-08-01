@@ -186,9 +186,17 @@ app.get('/', (c) => c.json({ status: 'ok', service: 'cartis-gateway' }))
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
 
-app.get('/login', (c) => c.redirect('/auth/login?provider=google'))
+app.get('/login', (c) => {
+  c.header('Cache-Control', 'no-store')
+  return c.redirect('/auth/start?provider=google')
+})
 
-app.get('/auth/login', async (c) => {
+app.get('/auth/login', (c) => {
+  c.header('Cache-Control', 'no-store')
+  return c.redirect('/auth/start?provider=google')
+})
+
+app.get('/auth/start', async (c) => {
   c.header('Cache-Control', 'no-store')
   const provider = c.req.query('provider') ?? 'google'
   if (provider !== 'google') return c.json({ error: `provider '${provider}' not configured` }, 501)
@@ -495,6 +503,10 @@ app.post('/webhooks/polar', async (c) => {
   return c.json({ ok: true })
 })
 
-app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw))
+app.all('*', async (c) => {
+  const res = await c.env.ASSETS.fetch(c.req.raw)
+  if (!res.headers.get('content-type')?.includes('text/html')) return res
+  return new Response(res.body, { status: res.status, headers: { ...res.headers, 'Cache-Control': 'no-store' } })
+})
 
 export default app
