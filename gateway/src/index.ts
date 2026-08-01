@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { analyzeProduct, type ScrapedProduct } from './coach'
 
 type Env = {
@@ -129,6 +129,36 @@ async function rotateSession(c: { env: { SESSIONS: KVNamespace; WORKER_AUTH_SECR
   return { newSession, newToken }
 }
 
+async function createSession(c: Context<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }>, user: { user_id: string; email: string; name: string; avatar: string; provider: string }) {
+  const sessionId = randomHex()
+  const expiration = Math.floor(Date.now() / 1000) + SESSION_TTL
+  const sessionToken = await sha256Hex(sessionId + expiration + c.env.WORKER_AUTH_SECRET)
+  const session: Session = {
+    session_id: sessionId,
+    user_id: user.user_id,
+    email: user.email,
+    name: user.name,
+    avatar: user.avatar,
+    provider: user.provider,
+    exp: expiration,
+    last_rotation: Math.floor(Date.now() / 1000),
+  }
+  await c.env.SESSIONS.put(`session:${sessionToken}`, JSON.stringify(session), { expirationTtl: SESSION_TTL })
+  await addUserSession(c, session.user_id, sessionToken)
+  c.header('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL}`)
+  return { session, sessionToken }
+}
+
+async function backendGql(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } }, query: string): Promise<unknown> {
+  const res = await fetch(`${c.env.BACKEND_URL}/graphql`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-cartis-backend-secret': c.env.BACKEND_SECRET },
+    body: JSON.stringify({ query }),
+  })
+  if (!res.ok) throw new Error(`backend error ${res.status}`)
+  return ((await res.json()) as { data?: unknown }).data
+}
+
 const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }> = async (c, next) => {
   const token = cookieToken(c) ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
   if (!token) return c.json({ error: 'unauthenticated' }, 401)
@@ -214,6 +244,41 @@ app.get('/auth/callback', async (c) => {
 
   c.header('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL}`)
   return c.redirect('/dashboard')
+})
+
+app.post('/auth/signup', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string; name?: string }
+  const email = (body.email ?? '').trim().toLowerCase()
+  const password = body.password ?? ''
+  const name = (body.name ?? '').trim()
+  if (!email.includes('@') || password.length < 8 || !name) return c.json({ error: 'invalid email, password (min 8 chars), or name' }, 400)
+  try {
+    const data = (await backendGql(c, `mutation { signup(email: ${JSON.stringify(email)}, fullName: ${JSON.stringify(name)}, password: ${JSON.stringify(password)}) }`)) as {
+      signup?: string | null
+    }
+    if (!data?.signup) return c.json({ error: 'email already registered' }, 409)
+    await createSession(c, { user_id: data.signup, email, name, avatar: '', provider: 'password' })
+    return c.json({ ok: true })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/auth/login', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string }
+  const email = (body.email ?? '').trim().toLowerCase()
+  const password = body.password ?? ''
+  if (!email || !password) return c.json({ error: 'email and password required' }, 400)
+  try {
+    const data = (await backendGql(c, `mutation { login(email: ${JSON.stringify(email)}, password: ${JSON.stringify(password)}) { userId fullName avatarUrl } }`)) as {
+      login?: { userId: string; fullName: string; avatarUrl?: string | null } | null
+    }
+    if (!data?.login) return c.json({ error: 'invalid email or password' }, 401)
+    await createSession(c, { user_id: data.login.userId, email, name: data.login.fullName, avatar: data.login.avatarUrl ?? '', provider: 'password' })
+    return c.json({ ok: true })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
 })
 
 app.get('/auth/me', auth, (c) => {

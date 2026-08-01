@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString, rand_core::OsRng};
+use argon2::{Argon2, PasswordVerifier};
 use async_graphql::{Context, Object, Result};
 
 use crate::AppState;
@@ -361,6 +363,47 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
 
 #[Object]
 impl MutationRoot {
+    async fn signup(&self, ctx: &Context<'_>, email: String, full_name: String, password: String) -> Result<Option<String>> {
+        if !email.contains('@') || password.len() < 8 {
+            return Err("invalid email or password (min 8 chars)".into());
+        }
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let row = pg(ctx).get().await?
+            .query_opt(
+                "INSERT INTO users (email, full_name, oauth_provider, password_hash)
+                 VALUES ($1, $2, 'password', $3)
+                 ON CONFLICT (email) DO NOTHING RETURNING user_id::text",
+                &[&email, &full_name, &hash],
+            )
+            .await?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
+    async fn login(&self, ctx: &Context<'_>, email: String, password: String) -> Result<Option<AuthUser>> {
+        let row = pg(ctx).get().await?
+            .query_opt(
+                "SELECT user_id::text, password_hash, full_name, avatar_url
+                 FROM users WHERE email = $1 AND oauth_provider = 'password' AND password_hash IS NOT NULL",
+                &[&email],
+            )
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        let hash: String = row.get(1);
+        let parsed = PasswordHash::new(&hash).map_err(|e| e.to_string())?;
+        if Argon2::default().verify_password(password.as_bytes(), &parsed).is_err() {
+            return Ok(None);
+        }
+        Ok(Some(AuthUser {
+            user_id: row.get(0),
+            full_name: row.get(2),
+            avatar_url: row.get(3),
+        }))
+    }
+
     async fn set_monthly_tab_limit(&self, ctx: &Context<'_>, limit: f64) -> Result<MonthlyTab> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
@@ -415,6 +458,19 @@ impl User {
     async fn annual_deferred_limit(&self) -> f64 { self.annual_deferred_limit }
     async fn financial_health_score(&self) -> i32 { self.financial_health_score }
     async fn coach_adherence_score(&self) -> f64 { self.coach_adherence_score }
+}
+
+struct AuthUser {
+    user_id: String,
+    full_name: String,
+    avatar_url: Option<String>,
+}
+
+#[Object]
+impl AuthUser {
+    async fn user_id(&self) -> &str { &self.user_id }
+    async fn full_name(&self) -> &str { &self.full_name }
+    async fn avatar_url(&self) -> Option<&str> { self.avatar_url.as_deref() }
 }
 
 impl User {

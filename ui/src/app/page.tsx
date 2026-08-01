@@ -1,7 +1,5 @@
 import { ArrowRight, Sparkles, Wallet, LineChart, MousePointerClick, ShoppingCart, CheckCircle2 } from "lucide-react";
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
-
 const STATS = [
   { value: "3", label: "marketplaces covered" },
   { value: "<10s", label: "verdict, not a lecture" },
@@ -53,10 +51,10 @@ export default function Home() {
           <span className="text-[15px] font-semibold tracking-tight">Cartis</span>
         </div>
         <a
-          href={`${GATEWAY}/auth/login?provider=google`}
+          href="/signin"
           className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-card px-4 py-2 text-sm font-medium transition-colors hover:border-primary/50 hover:text-primary"
         >
-          Continue with Google
+          Sign in
         </a>
       </header>
 
@@ -75,7 +73,7 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
             <a
-              href={`${GATEWAY}/auth/login?provider=google`}
+              href="/signup"
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
               Get started free
@@ -138,10 +136,10 @@ export default function Home() {
             answer before every purchase.
           </p>
           <a
-            href={`${GATEWAY}/auth/login?provider=google`}
+            href="/signup"
             className="mt-8 inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
           >
-            Continue with Google
+            Get started free
             <ArrowRight className="h-4 w-4" />
           </a>
         </section>
