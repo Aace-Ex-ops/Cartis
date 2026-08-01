@@ -31,22 +31,23 @@ const SESSION_TTL = 604800
 const STATE_TTL = 600
 const ROTATION_SECONDS = 600
 
-// Self-verifying OAuth state: id.provider.exp.hex-sig — no KV read-after-write race (KV is only globally consistent within ~60s).
-async function signState(c: { env: { WORKER_AUTH_SECRET: string } }, provider: string): Promise<string> {
+// Self-verifying OAuth state: id.provider.intent.exp.hex-sig — no KV read-after-write race (KV is only globally consistent within ~60s).
+async function signState(c: { env: { WORKER_AUTH_SECRET: string } }, provider: string, intent: string): Promise<string> {
   const id = randomHex()
   const exp = Math.floor(Date.now() / 1000) + STATE_TTL
-  const sig = await sha256Hex(`${id}.${provider}.${exp}.${c.env.WORKER_AUTH_SECRET}`)
-  return `${id}.${provider}.${exp}.${sig}`
+  const sig = await sha256Hex(`${id}.${provider}.${intent}.${exp}.${c.env.WORKER_AUTH_SECRET}`)
+  return `${id}.${provider}.${intent}.${exp}.${sig}`
 }
 
-async function verifyState(c: { env: { WORKER_AUTH_SECRET: string } }, state: string): Promise<string | null> {
+async function verifyState(c: { env: { WORKER_AUTH_SECRET: string } }, state: string): Promise<{ provider: string; intent: string } | null> {
   const parts = state.split('.')
-  if (parts.length !== 4) return null
-  const [id, provider, expStr, sig] = parts
+  if (parts.length !== 5) return null
+  const [id, provider, intent, expStr, sig] = parts
+  if (!['signin', 'signup'].includes(intent)) return null
   const exp = Number(expStr)
   if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null
-  const expected = await sha256Hex(`${id}.${provider}.${exp}.${c.env.WORKER_AUTH_SECRET}`)
-  return expected === sig ? provider : null
+  const expected = await sha256Hex(`${id}.${provider}.${intent}.${exp}.${c.env.WORKER_AUTH_SECRET}`)
+  return expected === sig ? { provider, intent } : null
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }>()
@@ -200,7 +201,8 @@ app.get('/auth/start', async (c) => {
   c.header('Cache-Control', 'no-store')
   const provider = c.req.query('provider') ?? 'google'
   if (provider !== 'google') return c.json({ error: `provider '${provider}' not configured` }, 501)
-  const state = await signState(c, provider)
+  const intent = c.req.query('intent') === 'signup' ? 'signup' : c.req.query('intent') === 'signin' ? 'signin' : ''
+  const state = await signState(c, provider, intent)
   const params = new URLSearchParams({
     client_id: c.env.GOOGLE_CLIENT_ID,
     redirect_uri: new URL('/auth/callback', c.req.url).toString(),
@@ -218,7 +220,7 @@ app.get('/auth/callback', async (c) => {
   const code = c.req.query('code')
   const state = c.req.query('state')
   if (!code || !state) return c.json({ error: 'missing code or state' }, 400)
-  const provider = await verifyState(c, state)
+  const { provider, intent } = (await verifyState(c, state)) ?? {}
   if (!provider) return c.json({ error: 'invalid state' }, 400)
 
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -239,17 +241,22 @@ app.get('/auth/callback', async (c) => {
   const info = (await infoRes.json()) as { email?: string; sub?: string; name?: string; picture?: string }
   if (!infoRes.ok || !info.email || !info.sub) return c.json({ error: 'userinfo failed', details: info }, 401)
 
-  let data: { upsertGoogleUser?: string | null }
+  let data: { upsertGoogleUser?: { userId?: string | null; created?: boolean } | null }
   try {
     data = (await backendGql(
       c,
-      `mutation { upsertGoogleUser(email: ${JSON.stringify(info.email)}, fullName: ${JSON.stringify(info.name ?? '')}, avatarUrl: ${JSON.stringify(info.picture ?? '')}) }`,
-    )) as { upsertGoogleUser?: string | null }
+      `mutation { upsertGoogleUser(email: ${JSON.stringify(info.email)}, fullName: ${JSON.stringify(info.name ?? '')}, avatarUrl: ${JSON.stringify(info.picture ?? '')}) { userId created } }`,
+    )) as { upsertGoogleUser?: { userId?: string | null; created?: boolean } | null }
   } catch (e) {
     return c.json({ error: 'user provisioning failed', details: String(e) }, 502)
   }
-  if (!data?.upsertGoogleUser) return c.json({ error: 'user provisioning failed' }, 502)
-  const userId = data.upsertGoogleUser
+  const created = data?.upsertGoogleUser?.created
+  if (created == null) return c.json({ error: 'user provisioning failed' }, 502)
+  const userId = data.upsertGoogleUser?.userId
+  if (!userId) return c.json({ error: 'user provisioning failed' }, 502)
+
+  if (!created && intent === 'signup') return c.redirect('/signin?error=already_exists')
+  if (created && intent === 'signin') return c.redirect('/signup?error=no_account')
 
   const sessionId = randomHex()
   const expiration = Math.floor(Date.now() / 1000) + SESSION_TTL
@@ -268,7 +275,7 @@ app.get('/auth/callback', async (c) => {
   await addUserSession(c, session.user_id, sessionToken)
 
   c.header('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL}`)
-  return c.redirect('/dashboard')
+  return c.redirect(created ? '/onboarding' : '/dashboard')
 })
 
 app.post('/auth/signup', async (c) => {
@@ -317,7 +324,7 @@ app.get('/auth/logout', auth, async (c) => {
   await c.env.SESSIONS.delete(`session:${sessionToken}`)
   await removeUserSession(c, session.user_id, sessionToken)
   c.header('Set-Cookie', 'session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0')
-  return c.json({ ok: true })
+  return c.redirect('/')
 })
 
 app.get('/auth/sessions', auth, async (c) => {

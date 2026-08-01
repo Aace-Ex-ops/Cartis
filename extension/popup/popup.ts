@@ -33,7 +33,7 @@ async function main(): Promise<void> {
 }
 
 signInBtn.addEventListener("click", () => {
-  void chrome.tabs.create({ url: `${GATEWAY}/auth/login` });
+  void chrome.tabs.create({ url: `${GATEWAY}/auth/start` });
 });
 
 logoutBtn.addEventListener("click", async () => {

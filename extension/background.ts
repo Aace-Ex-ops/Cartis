@@ -36,7 +36,7 @@ async function syncAlerts(): Promise<void> {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "cartis_open_login") {
-    void chrome.tabs.create({ url: `${GATEWAY}/auth/login` });
+    void chrome.tabs.create({ url: `${GATEWAY}/auth/start` });
   }
   sendResponse({ ok: true });
 });

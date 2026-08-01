@@ -1,43 +1,22 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
+
+const ERRORS: Record<string, string> = {
+  google_denied:
+    "Google declined the sign-in. If this is your app, add your Google account as a Test user in Google Cloud Console, then try again.",
+  already_exists:
+    "An account with this email already exists — sign in instead.",
+  no_account:
+    "No Cartis account found with this email — create one instead.",
+};
 
 export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
   const isSignup = mode === "signup";
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      const res = await fetch(`/auth/${mode}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          isSignup ? { email, password, name } : { email, password },
-        ),
-      });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        setError(body.error ?? "Something went wrong");
-        return;
-      }
-      window.location.href = "/dashboard";
-    } catch {
-      setError("Network error — try again");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const input =
-    "w-full rounded-lg border border-border/60 bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 outline-none transition-colors focus:border-primary/60";
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setError(ERRORS[new URLSearchParams(window.location.search).get("error") ?? ""] ?? "");
+  }, []);
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center px-6 py-16">
@@ -56,59 +35,18 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
           </p>
         </div>
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          {isSignup && (
-            <input
-              className={input}
-              type="text"
-              placeholder="Full name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              autoComplete="name"
-            />
-          )}
-          <input
-            className={input}
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-          />
-          <input
-            className={input}
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-            autoComplete={isSignup ? "new-password" : "current-password"}
-          />
-          {isSignup && (
-            <p className="text-[12px] text-muted-foreground">
-              Minimum 8 characters. No emails, no spam — promise.
-            </p>
-          )}
-          {error && (
-            <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
-              {error}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            {loading
-              ? "One sec…"
-              : isSignup
-                ? "Create account"
-                : "Sign in"}
-          </button>
-        </form>
+        {error && (
+          <p className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+            {error}
+          </p>
+        )}
+
+        <a
+          href={`/auth/start?provider=google&intent=${mode}`}
+          className="flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-card px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/50 hover:text-primary"
+        >
+          Continue with Google
+        </a>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           {isSignup ? (
@@ -127,19 +65,6 @@ export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
             </>
           )}
         </p>
-
-        <div className="my-6 flex items-center gap-3 text-[12px] text-muted-foreground">
-          <span className="h-px flex-1 bg-border/60" />
-          or
-          <span className="h-px flex-1 bg-border/60" />
-        </div>
-
-        <a
-          href="/auth/login?provider=google"
-          className="flex items-center justify-center gap-2 rounded-lg border border-border/60 bg-card px-4 py-2.5 text-sm font-medium transition-colors hover:border-primary/50 hover:text-primary"
-        >
-          Continue with Google
-        </a>
       </div>
     </div>
   );

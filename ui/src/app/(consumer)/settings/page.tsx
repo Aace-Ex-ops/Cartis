@@ -40,7 +40,7 @@ export default function SettingsPage() {
         <CardContent className="flex items-center justify-between">
           <div className="text-[14px] text-foreground">aarav@cartis.app</div>
           <Button asChild variant="outline" size="sm">
-            <a href={`${GATEWAY}/auth/login?provider=google`}>Re-connect</a>
+            <a href={`${GATEWAY}/auth/start?provider=google`}>Re-connect</a>
           </Button>
         </CardContent>
       </Card>

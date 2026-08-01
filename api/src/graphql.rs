@@ -363,7 +363,7 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
 
 #[Object]
 impl MutationRoot {
-    async fn upsert_google_user(&self, ctx: &Context<'_>, email: String, full_name: String, avatar_url: String) -> Result<Option<String>> {
+    async fn upsert_google_user(&self, ctx: &Context<'_>, email: String, full_name: String, avatar_url: String) -> Result<Option<UpsertedUser>> {
         if !email.contains('@') {
             return Err("invalid email".into());
         }
@@ -372,11 +372,11 @@ impl MutationRoot {
                 "INSERT INTO users (email, full_name, avatar_url, oauth_provider)
                  VALUES ($1, $2, $3, 'google')
                  ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name, avatar_url = EXCLUDED.avatar_url
-                 RETURNING user_id::text",
+                 RETURNING user_id::text, (xmax = 0) AS created",
                 &[&email, &full_name, &avatar_url],
             )
             .await?;
-        Ok(row.map(|r| r.get(0)))
+        Ok(row.map(|r| UpsertedUser { user_id: r.get(0), created: r.get(1) }))
     }
 
     async fn signup(&self, ctx: &Context<'_>, email: String, full_name: String, password: String) -> Result<Option<String>> {
@@ -487,6 +487,17 @@ impl AuthUser {
     async fn user_id(&self) -> &str { &self.user_id }
     async fn full_name(&self) -> &str { &self.full_name }
     async fn avatar_url(&self) -> Option<&str> { self.avatar_url.as_deref() }
+}
+
+struct UpsertedUser {
+    user_id: String,
+    created: bool,
+}
+
+#[Object]
+impl UpsertedUser {
+    async fn user_id(&self) -> &str { &self.user_id }
+    async fn created(&self) -> bool { self.created }
 }
 
 impl User {
