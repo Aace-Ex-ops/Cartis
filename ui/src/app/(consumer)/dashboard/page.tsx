@@ -8,9 +8,13 @@ import { AlertList } from "@/components/consumer/alert-list";
 import { gql } from "@/lib/gql";
 
 type DashboardData = {
-  me: { fullName: string; financialHealthScore: number };
+  me: { fullName: string };
   wallet: { balance: number; tabLimit: number; deferredLimit: number };
   monthlyTab: { limit: number; spent: number };
+  financialHealthScore: {
+    score: number;
+    factors: { key: string; impact: string; detail: string }[];
+  };
   budgetAlerts: {
     alertId: string;
     alertType: string;
@@ -20,9 +24,10 @@ type DashboardData = {
 };
 
 const QUERY = `{
-  me { fullName financialHealthScore }
+  me { fullName }
   wallet { balance }
   monthlyTab { limit spent }
+  financialHealthScore { score factors { key impact detail } }
   budgetAlerts { alertId alertType message createdAt }
 }`;
 
@@ -96,10 +101,15 @@ export default function OverviewPage() {
   const spent = data.monthlyTab.spent;
   const budget = data.monthlyTab.limit;
   const usedPct = budget > 0 ? Math.round((spent / budget) * 100) : 0;
+  const health = data.financialHealthScore;
+  const factorInsight =
+    health.factors.find((f) => f.impact === "negative")?.detail ??
+    health.factors[0]?.detail;
   const insight =
-    budget > 0
+    factorInsight ??
+    (budget > 0
       ? `You've used ${usedPct}% of your monthly tab — ${fmt(Math.max(budget - spent, 0))} remaining.`
-      : "No monthly budget set yet — set one to start tracking.";
+      : "No monthly budget set yet — set one to start tracking.");
 
   return (
     <div className="flex flex-col gap-6">
@@ -111,8 +121,8 @@ export default function OverviewPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <HealthScoreCard
-            score={data.me.financialHealthScore}
-            level={healthLevel(data.me.financialHealthScore)}
+            score={health.score}
+            level={healthLevel(health.score)}
             insight={insight}
           />
         </div>
