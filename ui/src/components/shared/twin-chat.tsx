@@ -15,11 +15,13 @@ export function TwinChat({
   subtitle,
   welcome,
   placeholder,
+  mode,
 }: {
   title: string;
   subtitle: string;
   welcome: string;
   placeholder: string;
+  mode?: "seller";
 }) {
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: welcome },
@@ -46,7 +48,7 @@ export function TwinChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({ messages: next, mode }),
       });
       const body = (await res.json()) as { reply?: string; error?: string };
       if (!res.ok || !body.reply) {

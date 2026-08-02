@@ -125,6 +125,17 @@ CREATE TABLE seller_finances (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE seller_inventory (
+    item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id),
+    sku VARCHAR(50) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    stock INT NOT NULL DEFAULT 0,
+    reorder_level INT NOT NULL DEFAULT 0,
+    unit_cost NUMERIC(12,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE financial_health_scores (
     score_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id),

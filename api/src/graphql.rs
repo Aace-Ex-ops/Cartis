@@ -137,15 +137,76 @@ impl QueryRoot {
         let row = pg(ctx).get().await?
             .query_opt(
                 "SELECT
-                    COALESCE(SUM(amount) FILTER (WHERE entry_type = 'revenue'), 0)::float8 AS revenue,
-                    COALESCE(SUM(amount) FILTER (WHERE entry_type IN ('expense','cogs','salary','rent','other')), 0)::float8 AS expenses,
-                    COALESCE(SUM(amount) FILTER (WHERE entry_type IN ('revenue')), 0)::float8 -
-                    COALESCE(SUM(amount) FILTER (WHERE entry_type IN ('expense','cogs','salary','rent','other')), 0)::float8 AS cash
-                 FROM seller_finances WHERE user_id::text = $1 AND transaction_date >= date_trunc('month', now())",
+                    COALESCE(SUM(amount) FILTER (WHERE entry_type = 'revenue' AND transaction_date >= date_trunc('month', now())), 0)::float8 AS revenue,
+                    COALESCE(SUM(amount) FILTER (WHERE entry_type IN ('expense','cogs','salary','rent','other') AND transaction_date >= date_trunc('month', now())), 0)::float8 AS expenses,
+                    COALESCE(SUM(amount) FILTER (WHERE entry_type = 'revenue' AND transaction_date >= date_trunc('month', now())), 0)::float8 -
+                    COALESCE(SUM(amount) FILTER (WHERE entry_type IN ('expense','cogs','salary','rent','other') AND transaction_date >= date_trunc('month', now())), 0)::float8 AS cash,
+                    COALESCE(SUM(amount) FILTER (WHERE entry_type = 'revenue' AND transaction_date >= date_trunc('month', now()) - interval '1 month' AND transaction_date < date_trunc('month', now())), 0)::float8 AS last_revenue,
+                    COALESCE(SUM(amount) FILTER (WHERE entry_type IN ('expense','cogs','salary','rent','other') AND transaction_date >= date_trunc('month', now()) - interval '1 month' AND transaction_date < date_trunc('month', now())), 0)::float8 AS last_expenses
+                 FROM seller_finances WHERE user_id::text = $1",
                 &[&uid],
             )
             .await?;
         Ok(row.map(SellerDashboard::from_row))
+    }
+
+    async fn seller_finances(&self, ctx: &Context<'_>, limit: Option<i32>) -> Result<Vec<FinanceEntry>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT entry_id::text, entry_type, amount::float8, category, description, transaction_date::text, created_at::text
+                 FROM seller_finances WHERE user_id::text = $1
+                 ORDER BY transaction_date DESC, created_at DESC LIMIT $2",
+                &[&uid, &(limit.unwrap_or(50) as i64)],
+            )
+            .await?;
+        Ok(rows.iter().map(FinanceEntry::from_row).collect())
+    }
+
+    async fn seller_series(&self, ctx: &Context<'_>, months: Option<i32>) -> Result<Vec<SellerSeriesPoint>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let n = months.unwrap_or(6);
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT to_char(d, 'Mon') AS month,
+                        COALESCE(SUM(sf.amount) FILTER (WHERE sf.entry_type = 'revenue'), 0)::float8 AS income,
+                        COALESCE(SUM(sf.amount) FILTER (WHERE sf.entry_type IN ('expense','cogs','salary','rent','other')), 0)::float8 AS expenses
+                 FROM generate_series(date_trunc('month', now()) - ($1::int - 1) * interval '1 month', date_trunc('month', now()), interval '1 month') AS d
+                 LEFT JOIN seller_finances sf
+                    ON sf.user_id::text = $2 AND date_trunc('month', sf.transaction_date) = d
+                 GROUP BY d ORDER BY d",
+                &[&n, &uid],
+            )
+            .await?;
+        Ok(rows.iter().map(SellerSeriesPoint::from_row).collect())
+    }
+
+    async fn seller_categories(&self, ctx: &Context<'_>, entry_type: String) -> Result<Vec<SellerCategory>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT COALESCE(category, 'Other') AS name, COALESCE(SUM(amount), 0)::float8 AS spent
+                 FROM seller_finances
+                 WHERE user_id::text = $1
+                   AND ($2 = 'revenue' AND entry_type = 'revenue' OR $2 <> 'revenue' AND entry_type IN ('expense','cogs','salary','rent','other'))
+                   AND transaction_date >= date_trunc('month', now())
+                 GROUP BY 1 ORDER BY spent DESC",
+                &[&uid, &entry_type],
+            )
+            .await?;
+        Ok(rows.iter().map(|r| SellerCategory { name: r.get(0), spent: r.get(1) }).collect())
+    }
+
+    async fn seller_inventory(&self, ctx: &Context<'_>) -> Result<Vec<SellerInventoryItem>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT item_id::text, sku, name, stock, reorder_level, unit_cost::float8
+                 FROM seller_inventory WHERE user_id::text = $1 ORDER BY name",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(SellerInventoryItem::from_row).collect())
     }
 
     async fn budget_alerts(&self, ctx: &Context<'_>, unread_only: Option<bool>) -> Result<Vec<BudgetAlert>> {
@@ -559,6 +620,84 @@ impl MutationRoot {
         Ok(FinanceEntry::from_row(&row))
     }
 
+    async fn delete_finance_entry(&self, ctx: &Context<'_>, entry_id: String) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let rows = pg(ctx).get().await?
+            .execute(
+                "DELETE FROM seller_finances WHERE entry_id::text = $1 AND user_id::text = $2",
+                &[&entry_id, &uid],
+            )
+            .await?;
+        Ok(rows > 0)
+    }
+
+    async fn add_inventory_item(
+        &self,
+        ctx: &Context<'_>,
+        sku: String,
+        name: String,
+        stock: i32,
+        reorder_level: i32,
+        unit_cost: f64,
+    ) -> Result<SellerInventoryItem> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO seller_inventory (user_id, sku, name, stock, reorder_level, unit_cost)
+                 VALUES ($1::text::uuid, $2, $3, $4, $5, $6::text::numeric)
+                 RETURNING item_id::text, sku, name, stock, reorder_level, unit_cost::float8",
+                &[&uid, &sku, &name, &stock, &reorder_level, &unit_cost.to_string()],
+            )
+            .await?;
+        Ok(SellerInventoryItem::from_row(&row))
+    }
+
+    async fn update_inventory_item(
+        &self,
+        ctx: &Context<'_>,
+        item_id: String,
+        stock: Option<i32>,
+        reorder_level: Option<i32>,
+        unit_cost: Option<f64>,
+        name: Option<String>,
+        sku: Option<String>,
+    ) -> Result<Option<SellerInventoryItem>> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_opt(
+                "UPDATE seller_inventory SET
+                    stock = COALESCE($3::int, stock),
+                    reorder_level = COALESCE($4::int, reorder_level),
+                    unit_cost = COALESCE($5::text::numeric, unit_cost),
+                    name = COALESCE($6, name),
+                    sku = COALESCE($7, sku)
+                 WHERE item_id::text = $1 AND user_id::text = $2
+                 RETURNING item_id::text, sku, name, stock, reorder_level, unit_cost::float8",
+                &[
+                    &item_id,
+                    &uid,
+                    &stock,
+                    &reorder_level,
+                    &unit_cost.map(|v| v.to_string()),
+                    &name,
+                    &sku,
+                ],
+            )
+            .await?;
+        Ok(row.map(|r| SellerInventoryItem::from_row(&r)))
+    }
+
+    async fn delete_inventory_item(&self, ctx: &Context<'_>, item_id: String) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let rows = pg(ctx).get().await?
+            .execute(
+                "DELETE FROM seller_inventory WHERE item_id::text = $1 AND user_id::text = $2",
+                &[&item_id, &uid],
+            )
+            .await?;
+        Ok(rows > 0)
+    }
+
     async fn add_ledger_entries(
         &self,
         ctx: &Context<'_>,
@@ -899,6 +1038,8 @@ struct SellerDashboard {
     revenue: f64,
     expenses: f64,
     cash_on_hand: f64,
+    last_month_revenue: f64,
+    last_month_expenses: f64,
 }
 
 #[Object]
@@ -909,11 +1050,19 @@ impl SellerDashboard {
         if self.revenue == 0.0 { 0.0 } else { ((self.revenue - self.expenses) / self.revenue) * 100.0 }
     }
     async fn cash_on_hand(&self) -> f64 { self.cash_on_hand }
+    async fn last_month_revenue(&self) -> f64 { self.last_month_revenue }
+    async fn last_month_expenses(&self) -> f64 { self.last_month_expenses }
 }
 
 impl SellerDashboard {
     fn from_row(r: tokio_postgres::Row) -> Self {
-        Self { revenue: r.get(0), expenses: r.get(1), cash_on_hand: r.get(2) }
+        Self {
+            revenue: r.get(0),
+            expenses: r.get(1),
+            cash_on_hand: r.get(2),
+            last_month_revenue: r.get(3),
+            last_month_expenses: r.get(4),
+        }
     }
 }
 
@@ -1049,6 +1198,68 @@ impl FinanceEntry {
             description: r.get(4),
             transaction_date: r.get(5),
             created_at: r.get(6),
+        }
+    }
+}
+
+struct SellerSeriesPoint {
+    month: String,
+    income: f64,
+    expenses: f64,
+}
+
+#[Object]
+impl SellerSeriesPoint {
+    async fn month(&self) -> &str { &self.month }
+    async fn income(&self) -> f64 { self.income }
+    async fn expenses(&self) -> f64 { self.expenses }
+}
+
+impl SellerSeriesPoint {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self { month: r.get(0), income: r.get(1), expenses: r.get(2) }
+    }
+}
+
+struct SellerCategory {
+    name: String,
+    spent: f64,
+}
+
+#[Object]
+impl SellerCategory {
+    async fn name(&self) -> &str { &self.name }
+    async fn spent(&self) -> f64 { self.spent }
+}
+
+struct SellerInventoryItem {
+    item_id: String,
+    sku: String,
+    name: String,
+    stock: i32,
+    reorder_level: i32,
+    unit_cost: f64,
+}
+
+#[Object]
+impl SellerInventoryItem {
+    async fn item_id(&self) -> &str { &self.item_id }
+    async fn sku(&self) -> &str { &self.sku }
+    async fn name(&self) -> &str { &self.name }
+    async fn stock(&self) -> i32 { self.stock }
+    async fn reorder_level(&self) -> i32 { self.reorder_level }
+    async fn unit_cost(&self) -> f64 { self.unit_cost }
+}
+
+impl SellerInventoryItem {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            item_id: r.get(0),
+            sku: r.get(1),
+            name: r.get(2),
+            stock: r.get(3),
+            reorder_level: r.get(4),
+            unit_cost: r.get(5),
         }
     }
 }
