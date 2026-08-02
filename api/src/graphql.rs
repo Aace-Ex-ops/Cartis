@@ -664,7 +664,7 @@ impl SpendingDay {
 struct BankAccount {
     account_id: String,
     bank_name: String,
-    mobile_number: String,
+    mobile_number: Option<String>,
     account_type: Option<String>,
     balance: Option<f64>,
     last_sync_at: Option<String>,
@@ -674,7 +674,7 @@ struct BankAccount {
 impl BankAccount {
     async fn account_id(&self) -> &str { &self.account_id }
     async fn bank_name(&self) -> &str { &self.bank_name }
-    async fn mobile_number(&self) -> &str { &self.mobile_number }
+    async fn mobile_number(&self) -> Option<&str> { self.mobile_number.as_deref() }
     async fn account_type(&self) -> Option<&str> { self.account_type.as_deref() }
     async fn balance(&self) -> Option<f64> { self.balance }
     async fn last_sync_at(&self) -> Option<&str> { self.last_sync_at.as_deref() }
