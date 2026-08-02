@@ -6,11 +6,15 @@ import { HealthScoreCard } from "@/components/consumer/health-score-card";
 import { WalletCard } from "@/components/consumer/wallet-card";
 import { TabGauge } from "@/components/consumer/tab-gauge";
 import { AlertList } from "@/components/consumer/alert-list";
+import { TaxCard } from "@/components/consumer/tax-card";
+import { InsightCards, type Insight } from "@/components/shared/insight-cards";
 import SpecularButton from "@/components/shared/specular-button";
 import { gql } from "@/lib/gql";
+import { RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type DashboardData = {
-  me: { fullName: string };
+  me: { fullName: string; monthlyIncome: number | null; monthlyTax: number | null };
   bankAccounts: { balance: number | null }[];
   monthlyTab: { limit: number; spent: number };
   financialHealthScore: {
@@ -26,7 +30,7 @@ type DashboardData = {
 };
 
 const QUERY = `{
-  me { fullName }
+  me { fullName monthlyIncome monthlyTax }
   bankAccounts { balance }
   monthlyTab { limit spent }
   financialHealthScore { score factors { key impact detail } }
@@ -60,7 +64,27 @@ const PLACEHOLDER = "h-[190px]";
 export default function OverviewPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
+  const [insights, setInsights] = useState<Insight[] | null>(null);
+  const [insightFailed, setInsightFailed] = useState(false);
   const router = useRouter();
+
+  async function loadInsights() {
+    setInsights(null);
+    setInsightFailed(false);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_GATEWAY_URL ?? ""}/api/consumer/coach`, {
+        credentials: "include",
+      });
+      const body = (await res.json()) as { insights?: Insight[]; error?: string };
+      if (!res.ok || !body.insights) {
+        setInsightFailed(true);
+        return;
+      }
+      setInsights(body.insights);
+    } catch {
+      setInsightFailed(true);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +95,7 @@ export default function OverviewPage() {
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
+    void loadInsights();
     return () => {
       cancelled = true;
     };
@@ -151,6 +176,28 @@ export default function OverviewPage() {
           />
         </div>
       </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">AI Coach</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Insights from your money, tax included.</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => void loadInsights()} disabled={!insights}>
+          <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+        </Button>
+      </div>
+
+      {insightFailed && (
+        <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-[13px] text-destructive">
+          Couldn&apos;t generate insights — try again.
+        </p>
+      )}
+
+      {!insights && !insightFailed && <div className="h-[190px]" />}
+
+      {insights && insights.length > 0 && <InsightCards insights={insights} />}
+
+      <TaxCard monthlyIncome={data.me.monthlyIncome} monthlyTax={data.me.monthlyTax} />
 
       {!hasBank && (
         <div className="mt-8 flex justify-center">

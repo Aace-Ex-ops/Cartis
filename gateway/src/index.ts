@@ -222,6 +222,52 @@ async function sellerContext(c: Context): Promise<string> {
   return lines.length ? lines.join('\n') : 'No business data recorded yet.'
 }
 
+type ConsumerGql = {
+  wallet?: { balance: number; tabLimit: number }
+  monthlyTab?: { limit: number; spent: number }
+  spending30d?: { day: string; spend: number }[]
+  bankAccounts?: { bankName: string; balance: number | null }[]
+  me?: {
+    monthlyIncome: number | null
+    monthlySpend: number | null
+    investmentPct: number | null
+    housingCost: number | null
+    dependents: number | null
+    debtEmis: number | null
+    monthlyTax: number | null
+  }
+}
+
+async function consumerContext(c: Context): Promise<string> {
+  const data = (await backendGql(
+    c,
+    `query { wallet { balance tabLimit } monthlyTab { limit spent } spending30d { day spend }
+      bankAccounts { bankName balance } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } }`,
+    c.get('session').user_id,
+  )) as ConsumerGql
+  const lines: string[] = []
+  const w = data.wallet
+  if (w) lines.push(`Wallet: balance ₹${w.balance}, monthly tab limit ₹${w.tabLimit}.`)
+  const t = data.monthlyTab
+  if (t) lines.push(`Spent this month: ₹${t.spent} of ₹${t.limit} (${t.limit ? Math.round((t.spent / t.limit) * 100) : 0}%).`)
+  if (data.spending30d?.length) {
+    const total = data.spending30d.reduce((s, d) => s + d.spend, 0)
+    lines.push(`Spent last 30 days: ₹${total}.`)
+  }
+  if (data.bankAccounts?.length) {
+    lines.push(`Accounts: ${data.bankAccounts.map((a) => `${a.bankName} ₹${a.balance ?? 0}`).join(', ')}`)
+  }
+  const p = data.me
+  if (p?.monthlyIncome) {
+    const tax = p.monthlyTax ?? 0
+    const invest = p.investmentPct ? Math.round((p.monthlyIncome * p.investmentPct) / 100) : 0
+    lines.push(
+      `Profile: income ₹${p.monthlyIncome}/mo, TDS ₹${tax}/mo, spend ₹${p.monthlySpend ?? '?'}/mo, invests ${p.investmentPct ?? 0}% (₹${invest}/mo), housing ₹${p.housingCost ?? 0}/mo, dependents ${p.dependents ?? 0}, EMIs ₹${p.debtEmis ?? 0}/mo.`,
+    )
+  }
+  return lines.length ? lines.join('\n') : 'No financial data recorded yet. Complete onboarding for personalized help.'
+}
+
 const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }> = async (c, next) => {
   const token = cookieToken(c) ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
   if (!token) return c.json({ error: 'unauthenticated' }, 401)
@@ -669,6 +715,37 @@ warn = problem to fix, good = opportunity to grow, info = neutral update. Never 
     return c.json({ insights })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/consumer/coach', auth, async (c) => {
+  let content = ''
+  try {
+    const context = await consumerContext(c)
+    const prompt = `You are the Cartis personal finance coach for an Indian salaried user. Based ONLY on this live data:
+${context}
+Generate exactly 3 insights. Return ONLY JSON:
+{"insights":[{"title":"short headline","detail":"2-3 plain-English sentences with ₹ amounts","tone":"warn"|"good"|"info"}]}
+warn = problem to fix, good = opportunity to grow, info = neutral update.
+One insight MUST cover income tax: estimate yearly income tax under the new regime (slabs: 0-4L nil, 4-8L 5%, 8-12L 10%, 12-16L 15%, 16-20L 20%, 20-24L 25%, above 24L 30%; standard deduction ₹75,000), compare with TDS already deducted, and flag the ITR deadline of 31 July (or 31 Dec for business) with a filing reminder. Never invent numbers.`
+    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 2048,
+    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
+    content =
+      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
+    const match = content.match(/\{[\s\S]*\}/)
+    if (!match) return c.json({ error: 'no insights', raw: content.slice(0, 400) }, 502)
+    const parsed = JSON.parse(match[0]) as { insights?: { title: string; detail: string; tone: string }[] }
+    const insights = (parsed.insights ?? []).slice(0, 3).map((i) => ({
+      title: i.title ?? '',
+      detail: i.detail ?? '',
+      tone: ['warn', 'good', 'info'].includes(i.tone) ? i.tone : 'info',
+    }))
+    if (!insights.length) return c.json({ error: 'no insights', raw: content.slice(0, 400) }, 502)
+    return c.json({ insights })
+  } catch (e) {
+    return c.json({ error: String(e), raw: content.slice(0, 400) }, 502)
   }
 })
 

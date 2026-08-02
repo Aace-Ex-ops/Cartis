@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { Bot, Search } from "lucide-react";
 import { AlertBell } from "@/components/shared/alert-bell";
 import { UserMenu } from "@/components/shared/user-menu";
+import { TwinDrawer } from "@/components/shared/twin-drawer";
 
 export function HeaderBar({
   user,
@@ -15,11 +16,12 @@ export function HeaderBar({
   leading?: React.ReactNode;
 }) {
   const [query, setQuery] = useState("");
+  const [twinOpen, setTwinOpen] = useState(false);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 bg-card px-4">
+    <header className="grid h-14 shrink-0 grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-border/50 bg-card px-4">
       {leading}
-      <div className="relative hidden w-64 md:block">
+      <div className="relative hidden w-64 justify-self-center md:block">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
         <input
           value={query}
@@ -29,12 +31,22 @@ export function HeaderBar({
         />
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setTwinOpen(true)}
+          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          aria-label="Open AI Twin"
+          title="AI Twin"
+        >
+          <Bot className="h-[18px] w-[18px]" strokeWidth={1.5} />
+        </button>
         <AlertBell alerts={alerts} />
         {user && (
           <UserMenu user={{ fullName: user.name, email: user.email, avatarUrl: user.avatar, userType: "" }} />
         )}
       </div>
+
+      <TwinDrawer open={twinOpen} onClose={() => setTwinOpen(false)} />
     </header>
   );
 }

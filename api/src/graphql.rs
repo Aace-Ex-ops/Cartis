@@ -115,6 +115,13 @@ impl QueryRoot {
         Ok(rows.iter().map(BankAccount::from_row).collect())
     }
 
+    async fn banks(&self, ctx: &Context<'_>) -> Result<Vec<Bank>> {
+        let rows = pg(ctx).get().await?
+            .query("SELECT name, whatsapp_number FROM banks ORDER BY name", &[])
+            .await?;
+        Ok(rows.iter().map(Bank::from_row).collect())
+    }
+
     async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>) -> Result<Vec<AnalysisLog>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
@@ -990,6 +997,26 @@ impl BankAccount {
             account_type: r.get(3),
             balance: r.get(4),
             last_sync_at: r.get(5),
+        }
+    }
+}
+
+struct Bank {
+    name: String,
+    whatsapp_number: String,
+}
+
+#[Object]
+impl Bank {
+    async fn name(&self) -> &str { &self.name }
+    async fn whatsapp_number(&self) -> &str { &self.whatsapp_number }
+}
+
+impl Bank {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            name: r.get(0),
+            whatsapp_number: r.get(1),
         }
     }
 }
