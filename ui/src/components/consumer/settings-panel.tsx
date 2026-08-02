@@ -145,10 +145,10 @@ export function SettingsPanel() {
           <CardTitle>Budget preference</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          <Label htmlFor="budget">Monthly budget (₹)</Label>
+          <Label htmlFor="budget-limit">Monthly budget (₹)</Label>
           <div className="flex max-w-64 gap-2">
             <Input
-              id="budget"
+              id="budget-limit"
               type="number"
               value={budget}
               onChange={(e) => {
