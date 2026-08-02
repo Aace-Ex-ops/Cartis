@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -19,8 +18,6 @@ import { ModelPanel } from "@/components/consumer/model-panel";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
 import { TermsPanel } from "@/components/consumer/terms-panel";
-
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 type User = {
   fullName: string;
@@ -41,7 +38,6 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
-  const router = useRouter();
 
   const initials = user.fullName
     ?.split(" ")
@@ -74,13 +70,6 @@ export function UserMenu({ user }: { user: User }) {
               {PANELS[key].label}
             </DropdownMenuItem>
           ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/start?provider=google&intent=signin`; }}>
-            Switch account
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
-            Sign out
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
