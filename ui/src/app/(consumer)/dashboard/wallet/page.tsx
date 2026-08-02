@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Landmark, MessageCircle } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { WalletCard } from "@/components/consumer/wallet-card";
+import { SyncPasteBox } from "@/components/shared/sync-paste-box";
 import { gql } from "@/lib/gql";
 
 type BankAccount = {
@@ -105,11 +105,25 @@ export default function WalletPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium text-muted-foreground">Sync transactions</CardTitle>
+          <CardDescription>Paste a bank alert or continue on WhatsApp.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <SyncPasteBox bank={data?.bankAccounts[0]?.bankName ?? ""} />
+        </CardContent>
+      </Card>
+
       <Button asChild variant="outline">
-        <Link href="/dashboard/bank">
+        <a
+          href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000"}?text=${encodeURIComponent("Hi Cartis, I want to sync my transactions.")}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <MessageCircle className="mr-2 h-4 w-4" />
-          Sync transactions
-        </Link>
+          Continue on WhatsApp
+        </a>
       </Button>
     </div>
   );
