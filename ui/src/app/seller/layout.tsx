@@ -9,6 +9,7 @@ import {
   Waves,
   Package,
   Sparkles,
+  Bot,
 } from "lucide-react";
 import { DashboardShell } from "@/components/shared/dashboard-shell";
 
@@ -24,6 +25,7 @@ const SELLER_NAV = [
       { id: "cashflow", title: "Cash Flow", href: "/seller/cashflow", icon: Waves },
       { id: "inventory", title: "Inventory", href: "/seller/inventory", icon: Package },
       { id: "coach", title: "Business Coach", href: "/seller/coach", icon: Sparkles },
+      { id: "twin", title: "AI Twin", href: "/seller/twin", icon: Bot },
     ],
   },
 ];
