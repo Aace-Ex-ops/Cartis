@@ -1,6 +1,10 @@
 import { ArrowRight, Sparkles, Wallet, LineChart, MousePointerClick, ShoppingCart, CheckCircle2 } from "lucide-react";
 import { LandingAuth } from "@/components/shared/landing-auth";
 import { LandingCta } from "@/components/shared/landing-cta";
+import Ferrofluid from "@/components/shared/ferrofluid";
+import { MetallicLogo } from "@/components/shared/metallic-logo";
+import GlareHover from "@/components/shared/glare-hover";
+import DecryptedText from "@/components/shared/decrypted-text";
 
 const STATS = [
   { value: "3", label: "marketplaces covered" },
@@ -45,12 +49,24 @@ export default function Home() {
         }}
       />
 
+      <div aria-hidden className="absolute inset-0 z-0">
+        <Ferrofluid
+          colors={["#10b981", "#34d399", "#a7f3d0"]}
+          opacity={0.35}
+          speed={0.5}
+          flowDirection="down"
+          mouseInteraction
+        />
+      </div>
+
       <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
         <div className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
             C
           </div>
-          <span className="text-[15px] font-semibold tracking-tight">Cartis</span>
+          <span className="text-[15px] font-semibold tracking-tight">
+            <MetallicLogo className="h-[28px] w-[90px]" />
+          </span>
         </div>
         <LandingAuth />
       </header>
@@ -62,7 +78,16 @@ export default function Home() {
             AI financial coach
           </span>
           <h1 className="max-w-3xl text-4xl font-semibold tracking-tight md:text-6xl">
-            Know before you <span className="text-primary">spend</span>.
+            <DecryptedText
+              text="Know before you spend."
+              animateOn="view"
+              sequential
+              revealDirection="start"
+              speed={50}
+              className="text-primary"
+              parentClassName="inline"
+              encryptedClassName="text-muted-foreground"
+            />
           </h1>
           <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
             Cartis reads your real money — wallet, budget, spending pace — and gives

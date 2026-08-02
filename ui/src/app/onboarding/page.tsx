@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { OnboardingForm } from "@/components/shared/onboarding-form";
+import { MetallicLogo } from "@/components/shared/metallic-logo";
 
 export default function OnboardingPage() {
   return (
@@ -17,7 +18,9 @@ export default function OnboardingPage() {
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[12px] font-bold text-primary-foreground">
               C
             </div>
-            <span className="text-sm font-semibold">Cartis</span>
+            <span className="text-sm font-semibold">
+              <MetallicLogo className="h-[16px] w-[52px]" />
+            </span>
           </div>
         </div>
 
@@ -28,9 +31,7 @@ export default function OnboardingPage() {
           Pick your bank, tap a link, and your transactions start flowing in.
         </p>
 
-        <div className="rounded-xl border border-border/50 bg-card p-6 shadow-sm">
-          <OnboardingForm />
-        </div>
+        <OnboardingForm />
       </div>
     </main>
   );

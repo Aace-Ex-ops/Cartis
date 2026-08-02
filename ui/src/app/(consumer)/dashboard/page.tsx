@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { HealthScoreCard } from "@/components/consumer/health-score-card";
 import { WalletCard } from "@/components/consumer/wallet-card";
 import { TabGauge } from "@/components/consumer/tab-gauge";
 import { AlertList } from "@/components/consumer/alert-list";
+import SpecularButton from "@/components/shared/specular-button";
 import { gql } from "@/lib/gql";
 
 type DashboardData = {
   me: { fullName: string };
-  wallet: { balance: number; tabLimit: number; deferredLimit: number };
+  bankAccounts: { balance: number | null }[];
   monthlyTab: { limit: number; spent: number };
   financialHealthScore: {
     score: number;
@@ -25,7 +27,7 @@ type DashboardData = {
 
 const QUERY = `{
   me { fullName }
-  wallet { balance }
+  bankAccounts { balance }
   monthlyTab { limit spent }
   financialHealthScore { score factors { key impact detail } }
   budgetAlerts { alertId alertType message createdAt }
@@ -58,6 +60,7 @@ const PLACEHOLDER = "h-[190px]";
 export default function OverviewPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -108,8 +111,10 @@ export default function OverviewPage() {
   const insight =
     factorInsight ??
     (budget > 0
-      ? `You've used ${usedPct}% of your monthly tab — ${fmt(Math.max(budget - spent, 0))} remaining.`
+      ? `You\'ve used ${usedPct}% of your monthly tab — ${fmt(Math.max(budget - spent, 0))} remaining.`
       : "No monthly budget set yet — set one to start tracking.");
+
+  const hasBank = data.bankAccounts && data.bankAccounts[0]?.balance !== null && data.bankAccounts[0]?.balance !== 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -127,7 +132,7 @@ export default function OverviewPage() {
           />
         </div>
         <WalletCard
-          balance={data.wallet.balance}
+          balance={data.bankAccounts[0]?.balance ?? 0}
           monthlySpend={spent}
           monthlyBudget={budget}
         />
@@ -146,6 +151,26 @@ export default function OverviewPage() {
           />
         </div>
       </div>
+
+      {!hasBank && (
+        <div className="mt-8 flex justify-center">
+          <SpecularButton
+            size="lg"
+            tint="#ffffff"
+            lineColor="#ffffff"
+            baseColor="#525252"
+            intensity={1}
+            thickness={1}
+            speed={0.35}
+            proximity={250}
+            autoAnimate={false}
+            onClick={() => router.push("/onboarding")}
+            className="text-center mx-auto"
+          >
+            Connect your first account
+          </SpecularButton>
+        </div>
+      )}
     </div>
   );
 }

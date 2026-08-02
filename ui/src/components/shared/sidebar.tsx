@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType } from "react";
 import { Sparkles, ChevronDown } from "lucide-react";
+import LineSidebar from "@/components/shared/line-sidebar";
+import { MetallicLogo } from "@/components/shared/metallic-logo";
 
 export type NavItem = {
   id: string;
@@ -24,34 +26,8 @@ function Logo() {
         C
       </div>
       <span className="text-[15px] font-semibold tracking-wide text-foreground">
-        Cartis
+        <MetallicLogo className="h-[18px] w-[58px]" />
       </span>
-    </Link>
-  );
-}
-
-function NavLink({ item }: { item: NavItem }) {
-  const pathname = usePathname();
-  const isActive = pathname === item.href;
-
-  return (
-    <Link
-      href={item.href}
-      className={`group flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors ${
-        isActive
-          ? "bg-white/10 font-medium text-foreground"
-          : "text-muted-foreground hover:bg-white/5 hover:text-foreground/90"
-      }`}
-    >
-      <item.icon
-        className={`h-4 w-4 transition-colors ${
-          isActive
-            ? "text-primary"
-            : "text-muted-foreground/70 group-hover:text-foreground/70"
-        }`}
-        strokeWidth={1.5}
-      />
-      <span className="truncate">{item.title}</span>
     </Link>
   );
 }
@@ -65,24 +41,43 @@ export function Sidebar({
   upgrade?: { title: string; subtitle: string; href: string };
   user?: { name: string; email: string };
 }) {
+  const pathname = usePathname();
+  const router = useRouter();
+
   return (
     <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-border/50 bg-card/50 p-3">
       <Logo />
 
-      <nav className="mt-2 flex flex-1 flex-col gap-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {groups.map((group, i) => (
-          <div key={i} className="flex flex-col gap-0.5">
-            {group.heading && (
-              <span className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                {group.heading}
-              </span>
-            )}
-            {group.items.map((item) => (
-              <NavLink key={item.id} item={item} />
-            ))}
-          </div>
-        ))}
-      </nav>
+      <div className="mt-2 flex flex-1 flex-col gap-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {groups.map((group, i) => {
+          const activeIndex = group.items.findIndex((item) => item.href === pathname);
+          return (
+            <div key={i} className="flex flex-col">
+              {group.heading && (
+                <span className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                  {group.heading}
+                </span>
+              )}
+              <LineSidebar
+                key={`${group.heading ?? i}-${pathname}`}
+                items={group.items.map((item) => item.title)}
+                accentColor="#10b981"
+                textColor="#a1a1aa"
+                markerColor="#52525b"
+                defaultActive={activeIndex >= 0 ? activeIndex : null}
+                proximityRadius={80}
+                maxShift={16}
+                markerLength={40}
+                tickScale={0.5}
+                itemGap={6}
+                fontSize={0.8}
+                smoothing={90}
+                onItemClick={(index) => router.push(group.items[index].href)}
+              />
+            </div>
+          );
+        })}
+      </div>
 
       <div className="flex flex-col gap-3 border-t border-border/50 pt-4">
         {upgrade && (

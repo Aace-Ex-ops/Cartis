@@ -22,6 +22,16 @@ pub struct MutationRoot;
 
 #[Object]
 impl QueryRoot {
+    async fn google_user_by_email(&self, ctx: &Context<'_>, email: String) -> Result<Option<String>> {
+        let row = pg(ctx).get().await?
+            .query_opt(
+                "SELECT user_id::text FROM users WHERE email = $1",
+                &[&email],
+            )
+            .await?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
     async fn me(&self, ctx: &Context<'_>) -> Result<Option<User>> {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
         let row = pg(ctx).get().await?
@@ -463,6 +473,83 @@ impl MutationRoot {
             .await?;
         Ok(FinanceEntry::from_row(&row))
     }
+
+    async fn add_ledger_entries(
+        &self,
+        ctx: &Context<'_>,
+        entries: Vec<LedgerEntryInput>,
+        balance: Option<f64>,
+        bank_name: Option<String>,
+        mobile_number: Option<String>,
+    ) -> Result<SyncResult> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let mut conn = pg(ctx).get().await?;
+        let tx = conn.transaction().await?;
+        let mut account_id: Option<String> = None;
+        if let Some(name) = &bank_name {
+            tx.execute(
+                "INSERT INTO banks (name, whatsapp_number) VALUES ($1, '') ON CONFLICT (name) DO NOTHING",
+                &[name],
+            )
+            .await?;
+            let bank_id: String = tx
+                .query_one("SELECT bank_id::text FROM banks WHERE name = $1", &[name])
+                .await?
+                .get(0);
+            account_id = tx
+                .query_opt(
+                    "SELECT account_id::text FROM bank_accounts WHERE user_id::text = $1 AND bank_id::text = $2 ORDER BY created_at DESC LIMIT 1",
+                    &[&uid, &bank_id],
+                )
+                .await?
+                .map(|r| r.get(0));
+            if account_id.is_none() {
+                account_id = tx
+                    .query_one(
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, $3) RETURNING account_id::text",
+                        &[&uid, &bank_id, &mobile_number],
+                    )
+                    .await
+                    .map(|r| r.get(0))
+                    .ok();
+            }
+        }
+        let mut inserted = 0u64;
+        for e in &entries {
+            let key = uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_OID,
+                format!("{uid}|{}|{}", e.transaction_type, e.amount).as_bytes(),
+            )
+            .to_string();
+            let res = tx
+                .execute(
+                    "INSERT INTO ledger_entries (user_id, account_type, transaction_type, amount, idempotency_key)
+                     VALUES ($1::text::uuid, 'budget', $2, $3::text::numeric, $4)
+                     ON CONFLICT (idempotency_key) DO NOTHING",
+                    &[&uid, &e.transaction_type, &e.amount.to_string(), &key],
+                )
+                .await?;
+            inserted += res;
+        }
+        let synced_balance = if let Some(bal) = balance {
+            tx.execute(
+                "UPDATE bank_accounts SET balance = $2::text::numeric, last_sync_at = now()
+                 WHERE account_id = (SELECT account_id FROM bank_accounts WHERE user_id::text = $1 ORDER BY created_at DESC LIMIT 1)",
+                &[&uid, &bal.to_string()],
+            )
+            .await?;
+            Some(bal)
+        } else {
+            None
+        };
+        tx.commit().await?;
+        Ok(SyncResult {
+            inserted: inserted as i32,
+            balance: synced_balance,
+            account_id,
+        })
+    }
 }
 
 struct User {
@@ -746,6 +833,25 @@ struct FinanceEntryInput {
     category: Option<String>,
     description: Option<String>,
     transaction_date: String,
+}
+
+#[derive(async_graphql::InputObject)]
+struct LedgerEntryInput {
+    transaction_type: String,
+    amount: f64,
+}
+
+struct SyncResult {
+    inserted: i32,
+    balance: Option<f64>,
+    account_id: Option<String>,
+}
+
+#[Object]
+impl SyncResult {
+    async fn inserted(&self) -> i32 { self.inserted }
+    async fn balance(&self) -> Option<f64> { self.balance }
+    async fn account_id(&self) -> Option<&str> { self.account_id.as_deref() }
 }
 
 struct FinanceEntry {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowRight, MessageCircle } from "lucide-react";
 import {
   Select,
@@ -12,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SyncPasteBox } from "@/components/shared/sync-paste-box";
+import Stepper, { Step } from "@/components/shared/stepper";
 
 const BANKS = [
   "State Bank of India",
@@ -40,27 +42,38 @@ const BANKS = [
 const WHATSAPP_NUMBER =
   process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000";
 
+function StepHeading({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="mb-4 flex flex-col gap-1">
+      <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+        {title}
+      </h2>
+      <p className="text-sm text-muted-foreground">{body}</p>
+    </div>
+  );
+}
+
 export function OnboardingForm() {
   const [bank, setBank] = useState("");
   const [mobile, setMobile] = useState("");
+  const router = useRouter();
 
   const waLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
     `Hi Cartis, I bank with ${bank || "my bank"} and want to sync my transactions.`
   )}`;
 
-    return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-            Step 1 · Your bank
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Cartis reads your bank alerts over WhatsApp. We never get your
-            passwords.
-          </p>
-        </div>
-
+  return (
+    <Stepper
+      onFinalStepCompleted={() => router.push("/dashboard")}
+      backButtonText="Back"
+      nextButtonText="Continue"
+      contentClassName="min-h-[190px]"
+    >
+      <Step>
+        <StepHeading
+          title="Step 1 · Your bank"
+          body="Cartis reads your bank alerts over WhatsApp. We never get your passwords."
+        />
         <Select value={bank} onValueChange={setBank}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="Select your bank" />
@@ -73,18 +86,13 @@ export function OnboardingForm() {
             ))}
           </SelectContent>
         </Select>
-      </section>
+      </Step>
 
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-            Step 2 · Your number
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The number where your bank sends transaction alerts.
-          </p>
-        </div>
-
+      <Step>
+        <StepHeading
+          title="Step 2 · Your number"
+          body="The number where your bank sends transaction alerts."
+        />
         <div className="flex gap-2">
           <div className="flex items-center rounded-md border border-border/50 bg-background/50 px-3 text-sm text-muted-foreground">
             +91
@@ -100,32 +108,22 @@ export function OnboardingForm() {
           />
         </div>
 
-        <Button asChild className="w-full" disabled={!bank || mobile.length !== 10}>
+        <Button asChild className="mt-4 w-full" disabled={!bank || mobile.length !== 10}>
           <a href={waLink} target="_blank" rel="noopener noreferrer">
             <MessageCircle className="mr-2 h-4 w-4" />
             Continue on WhatsApp
             <ArrowRight className="ml-2 h-4 w-4" />
           </a>
         </Button>
-      </section>
+      </Step>
 
-      <div className="flex items-center gap-3">
-        <div className="h-px flex-1 bg-border/50" />
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/50">
-          or sync manually
-        </span>
-        <div className="h-px flex-1 bg-border/50" />
-      </div>
-
-      <section className="flex flex-col gap-3">
-        <label
-          htmlFor="paste-box"
-          className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground/60"
-        >
-          Paste bank alerts
-        </label>
-        <SyncPasteBox bank={bank} />
-      </section>
-    </div>
+      <Step>
+        <StepHeading
+          title="Step 3 · Connect your account"
+          body="Paste a bank SMS to connect your account and jump into your dashboard."
+        />
+        <SyncPasteBox bank={bank} mobile={mobile} onSynced={() => router.push("/dashboard")} />
+      </Step>
+    </Stepper>
   );
 }

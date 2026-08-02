@@ -150,10 +150,18 @@ async function createSession(c: Context<{ Bindings: Env; Variables: { session: S
   return { session, sessionToken }
 }
 
-async function backendGql(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } }, query: string): Promise<unknown> {
+async function backendGql(
+  c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } },
+  query: string,
+  userId?: string,
+): Promise<unknown> {
   const res = await fetch(`${c.env.BACKEND_URL}/graphql`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-cartis-backend-secret': c.env.BACKEND_SECRET },
+    headers: {
+      'content-type': 'application/json',
+      'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+      ...(userId ? { 'x-user-id': userId } : {}),
+    },
     body: JSON.stringify({ query }),
   })
   if (!res.ok) throw new Error(`backend error ${res.status}`)
@@ -241,6 +249,18 @@ app.get('/auth/callback', async (c) => {
   const info = (await infoRes.json()) as { email?: string; sub?: string; name?: string; picture?: string }
   if (!infoRes.ok || !info.email || !info.sub) return c.json({ error: 'userinfo failed', details: info }, 401)
 
+  let existing: { googleUserByEmail?: string | null } | null = null
+  try {
+    existing = (await backendGql(
+      c,
+      `query { googleUserByEmail(email: ${JSON.stringify(info.email)}) }`,
+    )) as { googleUserByEmail?: string | null } | null
+  } catch {
+    existing = null
+  }
+  if (intent === 'signin' && !existing?.googleUserByEmail) return c.redirect('/signup?error=no_account')
+  if (intent === 'signup' && existing?.googleUserByEmail) return c.redirect('/signin?error=already_exists')
+
   let data: { upsertGoogleUser?: { userId?: string | null; created?: boolean } | null }
   try {
     data = (await backendGql(
@@ -254,9 +274,6 @@ app.get('/auth/callback', async (c) => {
   if (created == null) return c.json({ error: 'user provisioning failed' }, 502)
   const userId = data.upsertGoogleUser?.userId
   if (!userId) return c.json({ error: 'user provisioning failed' }, 502)
-
-  if (!created && intent === 'signup') return c.redirect('/signin?error=already_exists')
-  if (created && intent === 'signin') return c.redirect('/signup?error=no_account')
 
   const sessionId = randomHex()
   const expiration = Math.floor(Date.now() / 1000) + SESSION_TTL
@@ -446,35 +463,47 @@ app.post('/api/sync/parse', auth, async (c) => {
   if (!text) return c.json({ error: 'text is required' }, 400)
 
   let transactions = parseWithRegex(text)
-  let source: 'regex' | 'ai' = 'regex'
+  let source: 'regex' | 'ai' | 'none' = 'regex'
+  let balance: number | undefined = transactions[transactions.length - 1]?.balance
+  const bankName =
+    text.match(/^\s*([A-Za-z][A-Za-z .&'-]*(?:Bank|SBI|Union))\s*(?::|[-–]|\()/i)?.[1] ?? null
+
   if (transactions.length === 0) {
-    try {
-      const prompt = `Extract bank SMS alerts into a JSON array. Each item: {"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}. Output ONLY the JSON array, no markdown.\n\nSMS:\n${text}`
-      const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
-        response?: string
-        choices?: Array<{ message?: { content?: string } }>
-      }
-      const content =
-        typeof out.response === 'string'
-          ? out.response
-          : (out.choices?.[0]?.message?.content ?? '')
-      const match = content.match(/\[[\s\S]*\]/)
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[0]) as ParsedTx[]
-          transactions = parsed.filter((t) => typeof t.amount === 'number')
-          source = 'ai'
-        } catch {
-          transactions = []
+    const balOnly = text.match(/bal(?:ance)?[:\s]+(?:is\s+)?rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i)
+    if (balOnly) {
+      balance = num(balOnly[1])
+    } else if (/rs\.?|₹|inr/i.test(text)) {
+      try {
+        const prompt = `Extract bank SMS transactions into a JSON array. Each item: {"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}. Only include entries explicitly described as debited/credited/sent/received. If the message states a balance but no transaction, return an empty array. Output ONLY the JSON array, no markdown.\n\nSMS:\n${text}`
+        const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
+          response?: string
+          choices?: Array<{ message?: { content?: string } }>
         }
+        const content =
+          typeof out.response === 'string'
+            ? out.response
+            : (out.choices?.[0]?.message?.content ?? '')
+        const match = content.match(/\[[\s\S]*\]/)
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[0]) as ParsedTx[]
+            transactions = parsed.filter((t) => typeof t.amount === 'number')
+            source = 'ai'
+            balance = transactions[transactions.length - 1]?.balance ?? balance
+          } catch {
+            transactions = []
+          }
+        }
+      } catch (e) {
+        return c.json({ transactions: [], source: 'none', count: 0, error: String(e) }, 502)
       }
-    } catch (e) {
-      return c.json({ transactions: [], source: 'none', count: 0, error: String(e) }, 502)
+    } else {
+      source = 'none'
     }
   }
 
-  if (transactions.length === 0) return c.json({ transactions: [], source, count: 0, note: 'nothing recognized — check the message format', version: 'payee-v2' })
-  return c.json({ transactions, source, count: transactions.length, version: 'payee-v2' })
+  if (transactions.length === 0 && balance === undefined) return c.json({ transactions: [], source, count: 0, note: 'nothing recognized — check the message format', version: 'payee-v2' })
+  return c.json({ transactions, balance: balance ?? null, bank_name: bankName, source, count: transactions.length, version: 'payee-v2' })
 })
 
 app.post('/api/coach/analyze', async (c) => {
@@ -486,6 +515,62 @@ app.post('/api/coach/analyze', async (c) => {
     return c.json(verdict)
   } catch (e) {
     return c.json({ error: String(e) }, 422)
+  }
+})
+
+app.post('/api/coach/chat', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { messages?: { role: 'user' | 'assistant'; content: string }[] }
+  const messages = (body.messages ?? []).filter((m) => m.content?.trim()).slice(-10)
+  if (!messages.length) return c.json({ error: 'messages required' }, 400)
+
+  let context = 'No financial data available yet.'
+  try {
+    const data = (await backendGql(
+      c,
+      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } }`,
+      c.get('session').user_id,
+    )) as {
+      wallet?: { balance: number; tabLimit: number }
+      monthlyTab?: { limit: number; spent: number }
+      bankAccounts?: { bankName: string; balance: number | null }[]
+      spending30d?: { day: string; spend: number }[]
+    }
+    const lines: string[] = []
+    if (data?.bankAccounts?.length) {
+      lines.push(
+        `Bank accounts: ${data.bankAccounts
+          .map((a) => `${a.bankName} balance ${a.balance ?? 'unknown'}`)
+          .join('; ')}`,
+      )
+    }
+    if (data?.wallet) lines.push(`Cartis wallet balance: ${data.wallet.balance}`)
+    if (data?.monthlyTab) {
+      lines.push(`Monthly tab: limit ${data.monthlyTab.limit}, spent ${data.monthlyTab.spent}`)
+    }
+    if (data?.spending30d?.length) {
+      const total = data.spending30d.reduce((s, d) => s + d.spend, 0)
+      lines.push(`Spend last 30 days: ${total} across ${data.spending30d.length} days`)
+    }
+    if (lines.length) context = lines.join('\n')
+  } catch {
+    // context stays empty — chat still works without data
+  }
+
+  const system = `You are the Cartis AI financial twin — a friendly, blunt personal finance coach for India (₹).
+Here is the user's live financial data:
+${context}
+Give concise, actionable advice (2-4 sentences). Use ₹ amounts. If data is missing, say so and suggest how to add it. Never invent numbers.`
+
+  try {
+    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+      messages: [{ role: 'system', content: system }, ...messages],
+    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
+    const reply =
+      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
+    if (!reply.trim()) return c.json({ error: 'empty model reply' }, 502)
+    return c.json({ reply: reply.trim() })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
   }
 })
 
