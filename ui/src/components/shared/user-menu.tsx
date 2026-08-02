@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { Repeat } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -40,6 +42,10 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const isSeller = pathname?.startsWith("/seller") ?? false;
 
   const initials = user.fullName
     ?.split(" ")
@@ -61,11 +67,16 @@ export function UserMenu({ user }: { user: User }) {
             </Avatar>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuItem onClick={() => setOpenPanel("profile")} className="cursor-pointer">
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-foreground">{user.fullName}</span>
-              <span className="text-xs text-muted-foreground">{user.email}</span>
+            <div className="flex w-full items-center gap-2">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium text-foreground">{user.fullName}</span>
+                <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+              </div>
+              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                {isSeller ? "Seller" : "Consumer"}
+              </span>
             </div>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -75,6 +86,10 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")}>
+            <Repeat className="mr-2 h-4 w-4" />
+            {isSeller ? "Switch to Consumer" : "Switch to Seller"}
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>
