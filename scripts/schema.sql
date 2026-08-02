@@ -17,7 +17,13 @@ CREATE TABLE users (
     annual_deferred_limit NUMERIC(12,2) DEFAULT 2500.00,
     financial_health_score INT DEFAULT 750,
     coach_adherence_score NUMERIC(5,2) DEFAULT 0.00,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    monthly_income NUMERIC(12,2),
+    monthly_spend NUMERIC(12,2),
+    investment_pct NUMERIC(5,2),
+    housing_cost NUMERIC(12,2),
+    dependents INT DEFAULT 0,
+    debt_emis NUMERIC(12,2)
 );
 
 CREATE TABLE sessions (

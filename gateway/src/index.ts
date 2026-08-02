@@ -585,11 +585,19 @@ app.post('/api/budget/suggest', auth, async (c) => {
     monthlyTab?: { limit: number; spent: number }
     bankAccounts?: { bankName: string; balance: number | null }[]
     spending30d?: { day: string; spend: number }[]
+    me?: {
+      monthlyIncome: number | null
+      monthlySpend: number | null
+      investmentPct: number | null
+      housingCost: number | null
+      dependents: number | null
+      debtEmis: number | null
+    }
   } = {}
   try {
     data = (await backendGql(
       c,
-      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } }`,
+      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis } }`,
       userId,
     )) as typeof data
   } catch {
@@ -600,12 +608,31 @@ app.post('/api/budget/suggest', auth, async (c) => {
   const currentLimit = data.monthlyTab?.limit ?? data.wallet?.tabLimit ?? 600
   const spent = data.monthlyTab?.spent ?? 0
   const balance = data.wallet?.balance ?? 0
+  const profile = data.me
 
-  if (total30d === 0 && spent === 0) {
-    return c.json({ suggestedLimit: currentLimit, reasoning: 'Not enough spending data yet. Keep using Cartis and I\'ll suggest a budget once I see your patterns.' })
+  if (total30d === 0 && spent === 0 && !profile?.monthlyIncome) {
+    return c.json({ suggestedLimit: currentLimit, reasoning: 'Not enough spending data yet. Keep using Cartis and I\'ll suggest a budget once I see your patterns. Complete onboarding for a personalized budget.' })
   }
 
   const bankSummary = data.bankAccounts?.map((a) => `${a.bankName}: ₹${a.balance ?? 0}`).join(', ') ?? 'none'
+
+  // Build profile section for the prompt
+  let profileSection = ''
+  if (profile?.monthlyIncome) {
+    const investmentAmt = profile.investmentPct ? Math.round(profile.monthlyIncome * profile.investmentPct / 100) : 0
+    profileSection = `
+User's financial profile (self-declared):
+- Monthly income: ₹${profile.monthlyIncome}
+- Estimated monthly spend: ₹${profile.monthlySpend ?? 'unknown'}
+- Invests/saves ${profile.investmentPct ?? 0}% of income (₹${investmentAmt}/month)
+- Housing/rent cost: ₹${profile.housingCost ?? 0}/month
+- Dependents: ${profile.dependents ?? 0}
+- Total EMIs/loans: ₹${profile.debtEmis ?? 0}/month
+
+HARD RULE: The suggested budget MUST NOT exceed income minus savings minus housing minus EMIs (₹${profile.monthlyIncome} - ₹${investmentAmt} - ₹${profile.housingCost ?? 0} - ₹${profile.debtEmis ?? 0} = ₹${Math.max(500, profile.monthlyIncome - investmentAmt - (profile.housingCost ?? 0) - (profile.debtEmis ?? 0))}).`
+  } else {
+    profileSection = '\nNo financial profile set. Advise the user to complete onboarding for a more accurate budget.'
+  }
 
   const prompt = `You are Cartis, an AI financial coach for Indian users (₹).
 
@@ -615,8 +642,9 @@ User's financial snapshot:
 - Bank balance: ₹${balance}
 - Bank accounts: ${bankSummary}
 - Spending last 30 days: ₹${total30d}
+${profileSection}
 
-Based on this user's actual spending patterns and bank balance, recommend a realistic monthly budget limit in INR.
+Based on this user's actual spending patterns, bank balance, and stated financial profile (if available), recommend a realistic monthly budget limit in INR.
 
 Rules:
 - The budget should be achievable — not too aggressive, not too loose
@@ -624,6 +652,7 @@ Rules:
 - Round to nearest ₹500, minimum ₹500
 - If the user is underspending, suggest a tighter budget
 - If overspending, suggest a realistic adjustment, not a drastic cut
+- If a financial profile is provided, the budget MUST respect the hard cap (income - savings - housing - EMIs)
 
 Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence explanation>" }`
 
@@ -641,6 +670,14 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
     let limit = parsed.suggestedLimit ?? currentLimit
     limit = Math.round(limit / 500) * 500
     limit = Math.max(500, limit)
+
+    // Hard cap: income - savings - housing - EMIs
+    if (profile?.monthlyIncome) {
+      const investmentAmt = profile.investmentPct ? Math.round(profile.monthlyIncome * profile.investmentPct / 100) : 0
+      const cap = Math.max(500, profile.monthlyIncome - investmentAmt - (profile.housingCost ?? 0) - (profile.debtEmis ?? 0))
+      if (limit > cap) limit = cap
+    }
+
     const reasoning = parsed.reasoning ?? 'Budget adjusted based on your spending patterns.'
 
     // Apply via backend

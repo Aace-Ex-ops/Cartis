@@ -39,7 +39,10 @@ impl QueryRoot {
                 "SELECT user_id::text, email, full_name, avatar_url, user_type,
                         wallet_balance::float8, monthly_tab_limit::float8,
                         annual_deferred_limit::float8, financial_health_score,
-                        coach_adherence_score::float8
+                        coach_adherence_score::float8,
+                        monthly_income::float8, monthly_spend::float8,
+                        investment_pct::float8, housing_cost::float8,
+                        dependents, debt_emis::float8
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -477,6 +480,47 @@ impl MutationRoot {
         })
     }
 
+    async fn update_financial_profile(
+        &self, ctx: &Context<'_>,
+        monthly_income: Option<f64>,
+        monthly_spend: Option<f64>,
+        investment_pct: Option<f64>,
+        housing_cost: Option<f64>,
+        dependents: Option<i32>,
+        debt_emis: Option<f64>,
+    ) -> Result<User> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "UPDATE users SET
+                    monthly_income = COALESCE($2::text::numeric, monthly_income),
+                    monthly_spend = COALESCE($3::text::numeric, monthly_spend),
+                    investment_pct = COALESCE($4::text::numeric, investment_pct),
+                    housing_cost = COALESCE($5::text::numeric, housing_cost),
+                    dependents = COALESCE($6::int, dependents),
+                    debt_emis = COALESCE($7::text::numeric, debt_emis)
+                 WHERE user_id::text = $1
+                 RETURNING user_id::text, email, full_name, avatar_url, user_type,
+                           wallet_balance::float8, monthly_tab_limit::float8,
+                           annual_deferred_limit::float8, financial_health_score,
+                           coach_adherence_score::float8,
+                           monthly_income::float8, monthly_spend::float8,
+                           investment_pct::float8, housing_cost::float8,
+                           dependents, debt_emis::float8",
+                &[
+                    &uid,
+                    &monthly_income.map(|v| v.to_string()),
+                    &monthly_spend.map(|v| v.to_string()),
+                    &investment_pct.map(|v| v.to_string()),
+                    &housing_cost.map(|v| v.to_string()),
+                    &dependents,
+                    &debt_emis.map(|v| v.to_string()),
+                ],
+            )
+            .await?;
+        Ok(User::from_row(row))
+    }
+
     async fn add_finance_entry(&self, ctx: &Context<'_>, input: FinanceEntryInput) -> Result<FinanceEntry> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
@@ -605,6 +649,12 @@ struct User {
     annual_deferred_limit: f64,
     financial_health_score: i32,
     coach_adherence_score: f64,
+    monthly_income: Option<f64>,
+    monthly_spend: Option<f64>,
+    investment_pct: Option<f64>,
+    housing_cost: Option<f64>,
+    dependents: Option<i32>,
+    debt_emis: Option<f64>,
 }
 
 #[Object]
@@ -619,6 +669,12 @@ impl User {
     async fn annual_deferred_limit(&self) -> f64 { self.annual_deferred_limit }
     async fn financial_health_score(&self) -> i32 { self.financial_health_score }
     async fn coach_adherence_score(&self) -> f64 { self.coach_adherence_score }
+    async fn monthly_income(&self) -> Option<f64> { self.monthly_income }
+    async fn monthly_spend(&self) -> Option<f64> { self.monthly_spend }
+    async fn investment_pct(&self) -> Option<f64> { self.investment_pct }
+    async fn housing_cost(&self) -> Option<f64> { self.housing_cost }
+    async fn dependents(&self) -> Option<i32> { self.dependents }
+    async fn debt_emis(&self) -> Option<f64> { self.debt_emis }
 }
 
 struct AuthUser {
@@ -658,6 +714,12 @@ impl User {
             annual_deferred_limit: r.get(7),
             financial_health_score: r.get(8),
             coach_adherence_score: r.get(9),
+            monthly_income: r.get(10),
+            monthly_spend: r.get(11),
+            investment_pct: r.get(12),
+            housing_cost: r.get(13),
+            dependents: r.get(14),
+            debt_emis: r.get(15),
         }
     }
 }

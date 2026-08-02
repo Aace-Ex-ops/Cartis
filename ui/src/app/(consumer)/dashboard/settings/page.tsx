@@ -24,7 +24,16 @@ function SettingToggle({ title, desc, defaultOn }: { title: string; desc: string
 }
 
 type SettingsData = {
-  me: { fullName: string; email: string };
+  me: {
+    fullName: string;
+    email: string;
+    monthlyIncome: number | null;
+    monthlySpend: number | null;
+    investmentPct: number | null;
+    housingCost: number | null;
+    dependents: number | null;
+    debtEmis: number | null;
+  };
   monthlyTab: { limit: number };
 };
 
@@ -33,16 +42,36 @@ export default function SettingsPage() {
   const [budget, setBudget] = useState("");
   const [saved, setSaved] = useState(false);
 
+  const [profile, setProfile] = useState({
+    monthlyIncome: "",
+    monthlySpend: "",
+    investmentPct: "",
+    housingCost: "",
+    dependents: "",
+    debtEmis: "",
+  });
+  const [profileSaved, setProfileSaved] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
-    void gql<SettingsData>(`{ me { fullName email } monthlyTab { limit } }`)
+    void gql<SettingsData>(
+      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis } monthlyTab { limit } }`
+    )
       .then((d) => {
         if (cancelled) return;
         setData(d);
         setBudget(String(Math.round(d.monthlyTab.limit)));
+        setProfile({
+          monthlyIncome: d.me.monthlyIncome != null ? String(d.me.monthlyIncome) : "",
+          monthlySpend: d.me.monthlySpend != null ? String(d.me.monthlySpend) : "",
+          investmentPct: d.me.investmentPct != null ? String(d.me.investmentPct) : "",
+          housingCost: d.me.housingCost != null ? String(d.me.housingCost) : "",
+          dependents: d.me.dependents != null ? String(d.me.dependents) : "",
+          debtEmis: d.me.debtEmis != null ? String(d.me.debtEmis) : "",
+        });
       })
       .catch(() => {
-        if (!cancelled) setData({ me: { fullName: "", email: "" }, monthlyTab: { limit: 0 } });
+        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null }, monthlyTab: { limit: 0 } });
       });
     return () => {
       cancelled = true;
@@ -60,6 +89,27 @@ export default function SettingsPage() {
       setSaved(true);
     } catch {
       setSaved(false);
+    }
+  }
+
+  async function saveProfile() {
+    setProfileSaved(false);
+    try {
+      const fields: string[] = [];
+      if (profile.monthlyIncome) fields.push(`monthlyIncome: ${profile.monthlyIncome}`);
+      if (profile.monthlySpend) fields.push(`monthlySpend: ${profile.monthlySpend}`);
+      if (profile.investmentPct) fields.push(`investmentPct: ${profile.investmentPct}`);
+      if (profile.housingCost) fields.push(`housingCost: ${profile.housingCost}`);
+      if (profile.dependents) fields.push(`dependents: ${profile.dependents}`);
+      if (profile.debtEmis) fields.push(`debtEmis: ${profile.debtEmis}`);
+      if (fields.length > 0) {
+        await gql<{ updateFinancialProfile: unknown }>(
+          `mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`,
+        );
+      }
+      setProfileSaved(true);
+    } catch {
+      setProfileSaved(false);
     }
   }
 
@@ -105,6 +155,47 @@ export default function SettingsPage() {
             <Button onClick={saveBudget} disabled={!budget || saved}>
               {saved ? "Saved" : "Save"}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Financial profile</CardTitle>
+          <CardDescription>Used by the AI budget coach to personalize your monthly limit.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-income" className="text-xs text-muted-foreground">Monthly income (₹)</Label>
+              <Input id="sp-income" type="number" placeholder="e.g. 80000" value={profile.monthlyIncome} onChange={(e) => setProfile((p) => ({ ...p, monthlyIncome: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-spend" className="text-xs text-muted-foreground">Monthly spending (₹)</Label>
+              <Input id="sp-spend" type="number" placeholder="e.g. 40000" value={profile.monthlySpend} onChange={(e) => setProfile((p) => ({ ...p, monthlySpend: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-invest" className="text-xs text-muted-foreground">Save/invest (%)</Label>
+              <Input id="sp-invest" type="number" placeholder="e.g. 20" value={profile.investmentPct} onChange={(e) => setProfile((p) => ({ ...p, investmentPct: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-housing" className="text-xs text-muted-foreground">Rent/EMI (₹)</Label>
+              <Input id="sp-housing" type="number" placeholder="e.g. 15000" value={profile.housingCost} onChange={(e) => setProfile((p) => ({ ...p, housingCost: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-dependents" className="text-xs text-muted-foreground">Household size</Label>
+              <Input id="sp-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => setProfile((p) => ({ ...p, dependents: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
+              <Input id="sp-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => setProfile((p) => ({ ...p, debtEmis: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button onClick={saveProfile} disabled={profileSaved}>
+              {profileSaved ? "Saved" : "Save profile"}
+            </Button>
+            {profileSaved && <span className="text-sm text-green-600">Profile updated.</span>}
           </div>
         </CardContent>
       </Card>
