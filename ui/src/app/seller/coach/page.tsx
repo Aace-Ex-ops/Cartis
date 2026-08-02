@@ -15,7 +15,10 @@ export default function CoachPage() {
     setInsights(null);
     setFailed(false);
     try {
-      const res = await fetch(`${GATEWAY}/api/seller/coach`, { credentials: "include" });
+      const res = await fetch(`${GATEWAY}/api/seller/coach`, {
+        method: "POST",
+        credentials: "include",
+      });
       const body = (await res.json()) as { insights?: Insight[]; error?: string };
       if (!res.ok || !body.insights) {
         setFailed(true);

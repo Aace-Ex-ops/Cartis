@@ -73,6 +73,7 @@ export default function OverviewPage() {
     setInsightFailed(false);
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_GATEWAY_URL ?? ""}/api/consumer/coach`, {
+        method: "POST",
         credentials: "include",
       });
       const body = (await res.json()) as { insights?: Insight[]; error?: string };
