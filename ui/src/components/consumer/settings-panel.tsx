@@ -38,7 +38,7 @@ type SettingsData = {
   monthlyTab: { limit: number };
 };
 
-export default function SettingsPage() {
+export function SettingsPanel() {
   const [data, setData] = useState<SettingsData | null>(null);
   const [budget, setBudget] = useState("");
   const [saved, setSaved] = useState(false);
@@ -118,7 +118,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">Your preferences, your alerts.</p>

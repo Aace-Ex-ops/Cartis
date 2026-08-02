@@ -724,7 +724,7 @@ app.post('/api/subscription/checkout', auth, async (c) => {
     },
     body: JSON.stringify({
       product_id: body.productId,
-      success_url: new URL('/dashboard/subscription', c.req.url).toString(),
+      success_url: new URL('/dashboard', c.req.url).toString(),
       metadata: { user_id: userId },
     }),
   })

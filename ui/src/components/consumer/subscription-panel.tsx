@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -28,7 +27,7 @@ const PLANS = [
   },
 ];
 
-export default function SubscriptionPage() {
+export function SubscriptionPanel() {
   const [loading, setLoading] = useState<string | null>(null);
 
   async function checkout(productId: string) {
@@ -51,7 +50,7 @@ export default function SubscriptionPage() {
   }
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Subscription</h1>
         <p className="mt-1 text-sm text-muted-foreground">Upgrade to unlock unlimited coaching and smarter budgeting.</p>

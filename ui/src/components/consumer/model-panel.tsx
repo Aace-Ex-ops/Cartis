@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { gql } from "@/lib/gql";
 
 type ModelData = { me: { aiModel: string | null } };
@@ -25,7 +24,7 @@ const MODELS = [
   },
 ];
 
-export default function ModelPage() {
+export function ModelPanel() {
   const [current, setCurrent] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -52,7 +51,7 @@ export default function ModelPage() {
   }
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Model</h1>
         <p className="mt-1 text-sm text-muted-foreground">Choose the AI model for your coach and budget suggestions.</p>

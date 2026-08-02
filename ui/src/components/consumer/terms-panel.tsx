@@ -2,9 +2,9 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export default function TermsPage() {
+export function TermsPanel() {
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Terms & Policies</h1>
         <p className="mt-1 text-sm text-muted-foreground">Last updated: August 2, 2026</p>

@@ -3,9 +3,17 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType } from "react";
-import { Sparkles, ChevronDown } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import LineSidebar from "@/components/shared/line-sidebar";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export type NavItem = {
   id: string;
@@ -18,6 +26,8 @@ export type NavGroup = {
   heading?: string;
   items: NavItem[];
 };
+
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 function Logo() {
   return (
@@ -39,10 +49,17 @@ export function Sidebar({
 }: {
   groups: NavGroup[];
   upgrade?: { title: string; subtitle: string; href: string };
-  user?: { name: string; email: string };
+  user?: { id: string; name: string; email: string; avatar: string };
 }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const initials = (user?.name ?? "C")
+    .split(" ")
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   return (
     <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-border/50 bg-card/50 p-3">
@@ -102,25 +119,29 @@ export function Sidebar({
           </Link>
         )}
         {user && (
-          <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-elevated text-[12px] font-semibold text-foreground">
-              {user.name
-                .split(" ")
-                .map((n) => n[0])
-                .slice(0, 2)
-                .join("")
-                .toUpperCase()}
-            </div>
-            <div className="flex min-w-0 flex-col leading-tight">
-              <span className="truncate text-[13px] font-medium text-foreground">
-                {user.name}
-              </span>
-              <span className="truncate text-[11px] text-muted-foreground">
-                {user.email}
-              </span>
-            </div>
-            <ChevronDown className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/50 focus:outline-none cursor-pointer">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user.avatar || undefined} alt={user.name} />
+                  <AvatarFallback className="text-xs bg-elevated text-foreground">{initials}</AvatarFallback>
+                </Avatar>
+                <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
+                  <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">
+              <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/start?provider=google&intent=signin`; }}>
+                Switch account
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </aside>
