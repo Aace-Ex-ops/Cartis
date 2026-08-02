@@ -19,6 +19,8 @@ import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
 import { TermsPanel } from "@/components/consumer/terms-panel";
 
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+
 type User = {
   fullName: string;
   email: string;
@@ -60,16 +62,22 @@ export function UserMenu({ user }: { user: User }) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          <div className="px-2 py-1.5">
-            <p className="text-sm font-medium text-foreground truncate">{user.fullName}</p>
-            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-          </div>
+          <DropdownMenuItem onClick={() => setOpenPanel("profile")} className="cursor-pointer">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-foreground">{user.fullName}</span>
+              <span className="text-xs text-muted-foreground">{user.email}</span>
+            </div>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          {(Object.keys(PANELS) as PanelKey[]).map((key) => (
+          {(Object.keys(PANELS) as PanelKey[]).filter((k) => k !== "profile").map((key) => (
             <DropdownMenuItem key={key} onClick={() => setOpenPanel(key)}>
               {PANELS[key].label}
             </DropdownMenuItem>
           ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
+            Sign out
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
