@@ -7,6 +7,14 @@ import { Sparkles } from "lucide-react";
 import LineSidebar from "@/components/shared/line-sidebar";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 export type NavItem = {
   id: string;
@@ -110,16 +118,25 @@ export function Sidebar({
           </Link>
         )}
         {user && (
-          <div className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={user.avatar || undefined} alt={user.name} />
-              <AvatarFallback className="text-xs bg-elevated text-foreground">{initials}</AvatarFallback>
-            </Avatar>
-            <div className="flex min-w-0 flex-1 flex-col leading-tight">
-              <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
-              <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
-            </div>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/50 focus:outline-none cursor-pointer">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user.avatar || undefined} alt={user.name} />
+                  <AvatarFallback className="text-xs bg-elevated text-foreground">{initials}</AvatarFallback>
+                </Avatar>
+                <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
+                  <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-52">
+              <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/start?provider=google&intent=signin`; }}>
+                Switch account
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </aside>
