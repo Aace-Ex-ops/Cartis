@@ -1,0 +1,24 @@
+{
+  "name": "cartis-gateway",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-30",
+  "kv_namespaces": [
+    { "binding": "SESSIONS", "id": "540329106cb74e56a5a2c659ccb98b49" },
+    { "binding": "PROFILES", "id": "c37cdfa19ed6400db7f24e5806343276" }
+  ],
+  "vectorize": [
+    { "binding": "COACH_EMBEDDINGS", "index_name": "coach-embeddings" }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "assets": {
+    "directory": "../ui/out",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/auth/*", "/api/*", "/graphql", "/webhooks/*", "/health", "/login"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}
