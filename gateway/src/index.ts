@@ -11,6 +11,8 @@ type Env = {
   BACKEND_URL: string
   BACKEND_SECRET: string
   POLAR_WEBHOOK_SECRET: string
+  POLAR_ACCESS_TOKEN: string
+  POLAR_API_URL: string
 }
 
 type Session = {
@@ -527,14 +529,16 @@ app.post('/api/coach/chat', auth, async (c) => {
   try {
     const data = (await backendGql(
       c,
-      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } }`,
+      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { aiModel } }`,
       c.get('session').user_id,
     )) as {
       wallet?: { balance: number; tabLimit: number }
       monthlyTab?: { limit: number; spent: number }
       bankAccounts?: { bankName: string; balance: number | null }[]
       spending30d?: { day: string; spend: number }[]
+      me?: { aiModel: string | null }
     }
+    const aiModel = data.me?.aiModel ?? undefined
     const lines: string[] = []
     if (data?.bankAccounts?.length) {
       lines.push(
@@ -562,7 +566,7 @@ ${context}
 Give concise, actionable advice (2-4 sentences). Use ₹ amounts. If data is missing, say so and suggest how to add it. Never invent numbers.`
 
   try {
-    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+    const out = (await c.env.AI.run(aiModel || '@cf/meta/llama-4-scout-17b-16e-instruct', {
       messages: [{ role: 'system', content: system }, ...messages],
     })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
     const reply =
@@ -593,12 +597,13 @@ app.post('/api/budget/suggest', auth, async (c) => {
       dependents: number | null
       debtEmis: number | null
       monthlyTax: number | null
+      aiModel: string | null
     }
   } = {}
   try {
     data = (await backendGql(
       c,
-      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } }`,
+      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax aiModel } }`,
       userId,
     )) as typeof data
   } catch {
@@ -660,7 +665,7 @@ Rules:
 Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence explanation>" }`
 
   try {
-    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+    const out = (await c.env.AI.run(data.me?.aiModel || '@cf/meta/llama-4-scout-17b-16e-instruct', {
       messages: [{ role: 'user', content: prompt }],
     })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
     const content = typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
@@ -704,6 +709,29 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
   } catch {
     return c.json({ suggestedLimit: currentLimit, reasoning: 'AI could not compute a suggestion right now.' })
   }
+})
+
+app.post('/api/subscription/checkout', auth, async (c) => {
+  const userId = c.get('session').user_id
+  const body = (await c.req.json().catch(() => ({}))) as { productId?: string }
+  if (!body.productId) return c.json({ error: 'productId required' }, 400)
+
+  const res = await fetch(`${c.env.POLAR_API_URL}/v1/checkouts`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${c.env.POLAR_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      product_id: body.productId,
+      success_url: new URL('/dashboard/subscription', c.req.url).toString(),
+      metadata: { user_id: userId },
+    }),
+  })
+  if (!res.ok) return c.json({ error: 'checkout creation failed' }, 502)
+  const data = (await res.json()) as { url?: string }
+  if (!data.url) return c.json({ error: 'no checkout url' }, 502)
+  return c.json({ url: data.url })
 })
 
 app.post('/webhooks/polar', async (c) => {

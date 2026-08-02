@@ -72,7 +72,14 @@ export function Sidebar({
                 itemGap={6}
                 fontSize={0.8}
                 smoothing={90}
-                onItemClick={(index) => router.push(group.items[index].href)}
+                onItemClick={(index) => {
+                  const href = group.items[index].href;
+                  if (href.startsWith("http")) {
+                    window.location.href = href;
+                  } else {
+                    router.push(href);
+                  }
+                }}
               />
             </div>
           );

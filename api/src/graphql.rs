@@ -43,7 +43,8 @@ impl QueryRoot {
                         monthly_income::float8, monthly_spend::float8,
                         investment_pct::float8, housing_cost::float8,
                         dependents, debt_emis::float8,
-                        monthly_tax::float8
+                        monthly_tax::float8,
+                        ai_model
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -526,6 +527,25 @@ impl MutationRoot {
         Ok(User::from_row(row))
     }
 
+    async fn set_ai_model(&self, ctx: &Context<'_>, model: String) -> Result<User> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "UPDATE users SET ai_model = $2 WHERE user_id::text = $1
+                 RETURNING user_id::text, email, full_name, avatar_url, user_type,
+                           wallet_balance::float8, monthly_tab_limit::float8,
+                           annual_deferred_limit::float8, financial_health_score,
+                           coach_adherence_score::float8,
+                           monthly_income::float8, monthly_spend::float8,
+                           investment_pct::float8, housing_cost::float8,
+                           dependents, debt_emis::float8,
+                           monthly_tax::float8, ai_model",
+                &[&uid, &model],
+            )
+            .await?;
+        Ok(User::from_row(row))
+    }
+
     async fn add_finance_entry(&self, ctx: &Context<'_>, input: FinanceEntryInput) -> Result<FinanceEntry> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
@@ -661,6 +681,7 @@ struct User {
     dependents: Option<i32>,
     debt_emis: Option<f64>,
     monthly_tax: Option<f64>,
+    ai_model: Option<String>,
 }
 
 #[Object]
@@ -682,6 +703,7 @@ impl User {
     async fn dependents(&self) -> Option<i32> { self.dependents }
     async fn debt_emis(&self) -> Option<f64> { self.debt_emis }
     async fn monthly_tax(&self) -> Option<f64> { self.monthly_tax }
+    async fn ai_model(&self) -> Option<&str> { self.ai_model.as_deref() }
 }
 
 struct AuthUser {
@@ -728,6 +750,7 @@ impl User {
             dependents: r.get(14),
             debt_emis: r.get(15),
             monthly_tax: r.get(16),
+            ai_model: r.get(17),
         }
     }
 }

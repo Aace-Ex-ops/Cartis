@@ -24,7 +24,8 @@ CREATE TABLE users (
     housing_cost NUMERIC(12,2),
     dependents INT DEFAULT 0,
     debt_emis NUMERIC(12,2),
-    monthly_tax NUMERIC(12,2)
+    monthly_tax NUMERIC(12,2),
+    ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct'
 );
 
 CREATE TABLE sessions (
