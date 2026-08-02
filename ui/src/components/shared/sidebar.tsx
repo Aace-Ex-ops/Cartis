@@ -81,6 +81,7 @@ export function Sidebar({
                 textColor="#a1a1aa"
                 markerColor="#52525b"
                 defaultActive={activeIndex >= 0 ? activeIndex : null}
+                showIndex={false}
                 proximityRadius={80}
                 maxShift={16}
                 markerLength={40}
