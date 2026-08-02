@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   History,
@@ -11,7 +10,6 @@ import {
   Bot,
 } from "lucide-react";
 import { DashboardShell } from "@/components/shared/dashboard-shell";
-import { gql } from "@/lib/gql";
 
 const CONSUMER_NAV = [
   {
@@ -32,34 +30,9 @@ export default function ConsumerLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [bankBalance, setBankBalance] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void gql<{ bankAccounts: { balance: number | null }[] }>(
-      "{ bankAccounts { balance } }",
-    )
-      .then((d) => {
-        if (!cancelled) setBankBalance(d.bankAccounts[0]?.balance ?? null);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <DashboardShell
       groups={CONSUMER_NAV}
-      upgrade={
-        bankBalance !== null
-          ? {
-              title: "Wallet",
-              subtitle: `₹${bankBalance.toLocaleString("en-IN")} bank balance`,
-              href: "/dashboard/wallet",
-            }
-          : undefined
-      }
     >
       {children}
     </DashboardShell>

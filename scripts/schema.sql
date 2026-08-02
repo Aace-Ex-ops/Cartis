@@ -23,7 +23,8 @@ CREATE TABLE users (
     investment_pct NUMERIC(5,2),
     housing_cost NUMERIC(12,2),
     dependents INT DEFAULT 0,
-    debt_emis NUMERIC(12,2)
+    debt_emis NUMERIC(12,2),
+    monthly_tax NUMERIC(12,2)
 );
 
 CREATE TABLE sessions (

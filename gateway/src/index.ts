@@ -592,12 +592,13 @@ app.post('/api/budget/suggest', auth, async (c) => {
       housingCost: number | null
       dependents: number | null
       debtEmis: number | null
+      monthlyTax: number | null
     }
   } = {}
   try {
     data = (await backendGql(
       c,
-      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis } }`,
+      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } }`,
       userId,
     )) as typeof data
   } catch {
@@ -620,16 +621,18 @@ app.post('/api/budget/suggest', auth, async (c) => {
   let profileSection = ''
   if (profile?.monthlyIncome) {
     const investmentAmt = profile.investmentPct ? Math.round(profile.monthlyIncome * profile.investmentPct / 100) : 0
+    const taxAmt = profile.monthlyTax ?? 0
     profileSection = `
 User's financial profile (self-declared):
 - Monthly income: ₹${profile.monthlyIncome}
+- Monthly tax deducted: ₹${taxAmt}
 - Estimated monthly spend: ₹${profile.monthlySpend ?? 'unknown'}
 - Invests/saves ${profile.investmentPct ?? 0}% of income (₹${investmentAmt}/month)
 - Housing/rent cost: ₹${profile.housingCost ?? 0}/month
 - Dependents: ${profile.dependents ?? 0}
 - Total EMIs/loans: ₹${profile.debtEmis ?? 0}/month
 
-HARD RULE: The suggested budget MUST NOT exceed income minus savings minus housing minus EMIs (₹${profile.monthlyIncome} - ₹${investmentAmt} - ₹${profile.housingCost ?? 0} - ₹${profile.debtEmis ?? 0} = ₹${Math.max(500, profile.monthlyIncome - investmentAmt - (profile.housingCost ?? 0) - (profile.debtEmis ?? 0))}).`
+HARD RULE: The suggested budget MUST NOT exceed income - tax - savings - housing - EMIs (₹${profile.monthlyIncome} - ₹${taxAmt} - ₹${investmentAmt} - ₹${profile.housingCost ?? 0} - ₹${profile.debtEmis ?? 0} = ₹${Math.max(500, profile.monthlyIncome - taxAmt - investmentAmt - (profile.housingCost ?? 0) - (profile.debtEmis ?? 0))}).`
   } else {
     profileSection = '\nNo financial profile set. Advise the user to complete onboarding for a more accurate budget.'
   }
@@ -671,10 +674,11 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
     limit = Math.round(limit / 500) * 500
     limit = Math.max(500, limit)
 
-    // Hard cap: income - savings - housing - EMIs
+    // Hard cap: income - tax - savings - housing - EMIs
     if (profile?.monthlyIncome) {
       const investmentAmt = profile.investmentPct ? Math.round(profile.monthlyIncome * profile.investmentPct / 100) : 0
-      const cap = Math.max(500, profile.monthlyIncome - investmentAmt - (profile.housingCost ?? 0) - (profile.debtEmis ?? 0))
+      const taxAmt = profile.monthlyTax ?? 0
+      const cap = Math.max(500, profile.monthlyIncome - taxAmt - investmentAmt - (profile.housingCost ?? 0) - (profile.debtEmis ?? 0))
       if (limit > cap) limit = cap
     }
 

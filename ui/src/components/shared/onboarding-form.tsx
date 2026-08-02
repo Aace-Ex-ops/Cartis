@@ -67,6 +67,7 @@ export function OnboardingForm() {
     housingCost: "",
     dependents: "",
     debtEmis: "",
+    monthlyTax: "",
   });
   const router = useRouter();
 
@@ -84,6 +85,7 @@ export function OnboardingForm() {
       if (profile.housingCost) fields.push(`housingCost: ${profile.housingCost}`);
       if (profile.dependents) fields.push(`dependents: ${profile.dependents}`);
       if (profile.debtEmis) fields.push(`debtEmis: ${profile.debtEmis}`);
+      if (profile.monthlyTax) fields.push(`monthlyTax: ${profile.monthlyTax}`);
       if (fields.length > 0) {
         await gql<{ updateFinancialProfile: unknown }>(
           `mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`
@@ -190,6 +192,10 @@ export function OnboardingForm() {
           <div className="flex flex-col gap-1">
             <Label htmlFor="onb-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
             <Input id="onb-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => setProfile((p) => ({ ...p, debtEmis: e.target.value }))} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="onb-tax" className="text-xs text-muted-foreground">Monthly tax deducted (₹)</Label>
+            <Input id="onb-tax" type="number" placeholder="e.g. 12000" value={profile.monthlyTax} onChange={(e) => setProfile((p) => ({ ...p, monthlyTax: e.target.value }))} />
           </div>
         </div>
         <div className="mt-3 flex gap-2">

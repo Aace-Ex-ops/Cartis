@@ -33,6 +33,7 @@ type SettingsData = {
     housingCost: number | null;
     dependents: number | null;
     debtEmis: number | null;
+    monthlyTax: number | null;
   };
   monthlyTab: { limit: number };
 };
@@ -49,13 +50,14 @@ export default function SettingsPage() {
     housingCost: "",
     dependents: "",
     debtEmis: "",
+    monthlyTax: "",
   });
   const [profileSaved, setProfileSaved] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void gql<SettingsData>(
-      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis } monthlyTab { limit } }`
+      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } monthlyTab { limit } }`
     )
       .then((d) => {
         if (cancelled) return;
@@ -68,10 +70,11 @@ export default function SettingsPage() {
           housingCost: d.me.housingCost != null ? String(d.me.housingCost) : "",
           dependents: d.me.dependents != null ? String(d.me.dependents) : "",
           debtEmis: d.me.debtEmis != null ? String(d.me.debtEmis) : "",
+          monthlyTax: d.me.monthlyTax != null ? String(d.me.monthlyTax) : "",
         });
       })
       .catch(() => {
-        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null }, monthlyTab: { limit: 0 } });
+        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null }, monthlyTab: { limit: 0 } });
       });
     return () => {
       cancelled = true;
@@ -102,6 +105,7 @@ export default function SettingsPage() {
       if (profile.housingCost) fields.push(`housingCost: ${profile.housingCost}`);
       if (profile.dependents) fields.push(`dependents: ${profile.dependents}`);
       if (profile.debtEmis) fields.push(`debtEmis: ${profile.debtEmis}`);
+      if (profile.monthlyTax) fields.push(`monthlyTax: ${profile.monthlyTax}`);
       if (fields.length > 0) {
         await gql<{ updateFinancialProfile: unknown }>(
           `mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`,
@@ -168,27 +172,31 @@ export default function SettingsPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-income" className="text-xs text-muted-foreground">Monthly income (₹)</Label>
-              <Input id="sp-income" type="number" placeholder="e.g. 80000" value={profile.monthlyIncome} onChange={(e) => setProfile((p) => ({ ...p, monthlyIncome: e.target.value }))} />
+              <Input id="sp-income" type="number" placeholder="e.g. 80000" value={profile.monthlyIncome} onChange={(e) => { setProfile((p) => ({ ...p, monthlyIncome: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-spend" className="text-xs text-muted-foreground">Monthly spending (₹)</Label>
-              <Input id="sp-spend" type="number" placeholder="e.g. 40000" value={profile.monthlySpend} onChange={(e) => setProfile((p) => ({ ...p, monthlySpend: e.target.value }))} />
+              <Input id="sp-spend" type="number" placeholder="e.g. 40000" value={profile.monthlySpend} onChange={(e) => { setProfile((p) => ({ ...p, monthlySpend: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-invest" className="text-xs text-muted-foreground">Save/invest (%)</Label>
-              <Input id="sp-invest" type="number" placeholder="e.g. 20" value={profile.investmentPct} onChange={(e) => setProfile((p) => ({ ...p, investmentPct: e.target.value }))} />
+              <Input id="sp-invest" type="number" placeholder="e.g. 20" value={profile.investmentPct} onChange={(e) => { setProfile((p) => ({ ...p, investmentPct: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-housing" className="text-xs text-muted-foreground">Rent/EMI (₹)</Label>
-              <Input id="sp-housing" type="number" placeholder="e.g. 15000" value={profile.housingCost} onChange={(e) => setProfile((p) => ({ ...p, housingCost: e.target.value }))} />
+              <Input id="sp-housing" type="number" placeholder="e.g. 15000" value={profile.housingCost} onChange={(e) => { setProfile((p) => ({ ...p, housingCost: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-dependents" className="text-xs text-muted-foreground">Household size</Label>
-              <Input id="sp-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => setProfile((p) => ({ ...p, dependents: e.target.value }))} />
+              <Input id="sp-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => { setProfile((p) => ({ ...p, dependents: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
-              <Input id="sp-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => setProfile((p) => ({ ...p, debtEmis: e.target.value }))} />
+              <Input id="sp-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => { setProfile((p) => ({ ...p, debtEmis: e.target.value })); setProfileSaved(false); }} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="sp-tax" className="text-xs text-muted-foreground">Monthly tax deducted (₹)</Label>
+              <Input id="sp-tax" type="number" placeholder="e.g. 12000" value={profile.monthlyTax} onChange={(e) => { setProfile((p) => ({ ...p, monthlyTax: e.target.value })); setProfileSaved(false); }} />
             </div>
           </div>
           <div className="flex items-center gap-2">

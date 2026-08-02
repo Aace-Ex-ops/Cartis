@@ -42,7 +42,8 @@ impl QueryRoot {
                         coach_adherence_score::float8,
                         monthly_income::float8, monthly_spend::float8,
                         investment_pct::float8, housing_cost::float8,
-                        dependents, debt_emis::float8
+                        dependents, debt_emis::float8,
+                        monthly_tax::float8
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -488,6 +489,7 @@ impl MutationRoot {
         housing_cost: Option<f64>,
         dependents: Option<i32>,
         debt_emis: Option<f64>,
+        monthly_tax: Option<f64>,
     ) -> Result<User> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
@@ -498,7 +500,8 @@ impl MutationRoot {
                     investment_pct = COALESCE($4::text::numeric, investment_pct),
                     housing_cost = COALESCE($5::text::numeric, housing_cost),
                     dependents = COALESCE($6::int, dependents),
-                    debt_emis = COALESCE($7::text::numeric, debt_emis)
+                    debt_emis = COALESCE($7::text::numeric, debt_emis),
+                    monthly_tax = COALESCE($8::text::numeric, monthly_tax)
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
                            wallet_balance::float8, monthly_tab_limit::float8,
@@ -506,7 +509,8 @@ impl MutationRoot {
                            coach_adherence_score::float8,
                            monthly_income::float8, monthly_spend::float8,
                            investment_pct::float8, housing_cost::float8,
-                           dependents, debt_emis::float8",
+                           dependents, debt_emis::float8,
+                           monthly_tax::float8",
                 &[
                     &uid,
                     &monthly_income.map(|v| v.to_string()),
@@ -515,6 +519,7 @@ impl MutationRoot {
                     &housing_cost.map(|v| v.to_string()),
                     &dependents,
                     &debt_emis.map(|v| v.to_string()),
+                    &monthly_tax.map(|v| v.to_string()),
                 ],
             )
             .await?;
@@ -655,6 +660,7 @@ struct User {
     housing_cost: Option<f64>,
     dependents: Option<i32>,
     debt_emis: Option<f64>,
+    monthly_tax: Option<f64>,
 }
 
 #[Object]
@@ -675,6 +681,7 @@ impl User {
     async fn housing_cost(&self) -> Option<f64> { self.housing_cost }
     async fn dependents(&self) -> Option<i32> { self.dependents }
     async fn debt_emis(&self) -> Option<f64> { self.debt_emis }
+    async fn monthly_tax(&self) -> Option<f64> { self.monthly_tax }
 }
 
 struct AuthUser {
@@ -720,6 +727,7 @@ impl User {
             housing_cost: r.get(13),
             dependents: r.get(14),
             debt_emis: r.get(15),
+            monthly_tax: r.get(16),
         }
     }
 }
