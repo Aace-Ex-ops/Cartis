@@ -124,3 +124,14 @@ CREATE TABLE financial_health_scores (
     factors JSONB NOT NULL,
     calculated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE budget_suggestions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID REFERENCES users(user_id),
+    suggested_limit NUMERIC(12,2) NOT NULL,
+    reasoning TEXT NOT NULL,
+    spent NUMERIC(12,2),
+    wallet_balance NUMERIC(12,2),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX budget_suggestions_user_idx ON budget_suggestions(user_id, created_at DESC);

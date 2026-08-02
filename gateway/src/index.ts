@@ -574,6 +574,97 @@ Give concise, actionable advice (2-4 sentences). Use ₹ amounts. If data is mis
   }
 })
 
+app.post('/api/budget/suggest', auth, async (c) => {
+  const userId = c.get('session').user_id
+  const cacheKey = `budget:ai:${userId}`
+  const cached = await c.env.SESSIONS.get(cacheKey)
+  if (cached) return c.json(JSON.parse(cached))
+
+  let data: {
+    wallet?: { balance: number; tabLimit: number }
+    monthlyTab?: { limit: number; spent: number }
+    bankAccounts?: { bankName: string; balance: number | null }[]
+    spending30d?: { day: string; spend: number }[]
+  } = {}
+  try {
+    data = (await backendGql(
+      c,
+      `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } }`,
+      userId,
+    )) as typeof data
+  } catch {
+    return c.json({ suggestedLimit: data.monthlyTab?.limit ?? 600, reasoning: 'Could not fetch financial data.' })
+  }
+
+  const total30d = data.spending30d?.reduce((s, d) => s + d.spend, 0) ?? 0
+  const currentLimit = data.monthlyTab?.limit ?? data.wallet?.tabLimit ?? 600
+  const spent = data.monthlyTab?.spent ?? 0
+  const balance = data.wallet?.balance ?? 0
+
+  if (total30d === 0 && spent === 0) {
+    return c.json({ suggestedLimit: currentLimit, reasoning: 'Not enough spending data yet. Keep using Cartis and I\'ll suggest a budget once I see your patterns.' })
+  }
+
+  const bankSummary = data.bankAccounts?.map((a) => `${a.bankName}: ₹${a.balance ?? 0}`).join(', ') ?? 'none'
+
+  const prompt = `You are Cartis, an AI financial coach for Indian users (₹).
+
+User's financial snapshot:
+- Monthly budget (current): ₹${currentLimit}
+- Spent this month: ₹${spent}
+- Bank balance: ₹${balance}
+- Bank accounts: ${bankSummary}
+- Spending last 30 days: ₹${total30d}
+
+Based on this user's actual spending patterns and bank balance, recommend a realistic monthly budget limit in INR.
+
+Rules:
+- The budget should be achievable — not too aggressive, not too loose
+- Consider the wallet buffer (bank balance should cover at least 2-3 months of budget)
+- Round to nearest ₹500, minimum ₹500
+- If the user is underspending, suggest a tighter budget
+- If overspending, suggest a realistic adjustment, not a drastic cut
+
+Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence explanation>" }`
+
+  try {
+    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+      messages: [{ role: 'user', content: prompt }],
+    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
+    const content = typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
+    if (!content.trim()) throw new Error('empty model output')
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error('no JSON in model output')
+    const parsed = JSON.parse(jsonMatch[0]) as { suggestedLimit?: number; reasoning?: string }
+
+    let limit = parsed.suggestedLimit ?? currentLimit
+    limit = Math.round(limit / 500) * 500
+    limit = Math.max(500, limit)
+    const reasoning = parsed.reasoning ?? 'Budget adjusted based on your spending patterns.'
+
+    // Apply via backend
+    await backendGql(
+      c,
+      `mutation { setMonthlyTabLimit(limit: ${limit}) { limit } }`,
+      userId,
+    )
+
+    // Persist suggestion
+    await backendGql(
+      c,
+      `mutation { saveBudgetSuggestion(suggestedLimit: ${limit}, reasoning: "${reasoning.replace(/"/g, '\\"')}", spent: ${spent}, walletBalance: ${balance}) { suggestedLimit reasoning createdAt } }`,
+      userId,
+    )
+
+    const result = { suggestedLimit: limit, reasoning }
+    await c.env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 86400 })
+    return c.json(result)
+  } catch {
+    return c.json({ suggestedLimit: currentLimit, reasoning: 'AI could not compute a suggestion right now.' })
+  }
+})
+
 app.post('/webhooks/polar', async (c) => {
   const secret = c.env.POLAR_WEBHOOK_SECRET
   if (!secret) return c.json({ error: 'webhook not configured' }, 500)

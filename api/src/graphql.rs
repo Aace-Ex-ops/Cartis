@@ -297,6 +297,22 @@ impl QueryRoot {
             deferred_remaining,
         }))
     }
+
+    #[graphql(name = "budgetSuggestions")]
+    async fn budget_suggestions(&self, ctx: &Context<'_>, limit: Option<i32>) -> Result<Vec<BudgetSuggestion>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT suggested_limit::float8, reasoning, spent::float8, wallet_balance::float8, created_at::text
+                 FROM budget_suggestions
+                 WHERE user_id::text = $1
+                 ORDER BY created_at DESC
+                 LIMIT $2",
+                &[&uid, &(limit.unwrap_or(10) as i64)],
+            )
+            .await?;
+        Ok(rows.iter().map(BudgetSuggestion::from_row).collect())
+    }
 }
 
 fn chrono_since_days(unix_seconds: f64) -> f64 {
@@ -550,6 +566,32 @@ impl MutationRoot {
             account_id,
         })
     }
+
+    async fn save_budget_suggestion(
+        &self,
+        ctx: &Context<'_>,
+        suggested_limit: f64,
+        reasoning: String,
+        spent: Option<f64>,
+        wallet_balance: Option<f64>,
+    ) -> Result<BudgetSuggestion> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO budget_suggestions (user_id, suggested_limit, reasoning, spent, wallet_balance)
+                 VALUES ($1::text::uuid, $2::text::numeric, $3, $4::text::numeric, $5::text::numeric)
+                 RETURNING suggested_limit::float8, reasoning, spent::float8, wallet_balance::float8, created_at::text",
+                &[
+                    &uid,
+                    &suggested_limit.to_string(),
+                    &reasoning,
+                    &spent.map(|v| v.to_string()),
+                    &wallet_balance.map(|v| v.to_string()),
+                ],
+            )
+            .await?;
+        Ok(BudgetSuggestion::from_row(&row))
+    }
 }
 
 struct User {
@@ -727,6 +769,35 @@ impl AnalysisLog {
             explanation: r.get(5),
             user_action: r.get(6),
             created_at: r.get(7),
+        }
+    }
+}
+
+struct BudgetSuggestion {
+    suggested_limit: f64,
+    reasoning: String,
+    spent: Option<f64>,
+    wallet_balance: Option<f64>,
+    created_at: String,
+}
+
+#[Object]
+impl BudgetSuggestion {
+    async fn suggested_limit(&self) -> f64 { self.suggested_limit }
+    async fn reasoning(&self) -> &str { &self.reasoning }
+    async fn spent(&self) -> Option<f64> { self.spent }
+    async fn wallet_balance(&self) -> Option<f64> { self.wallet_balance }
+    async fn created_at(&self) -> &str { &self.created_at }
+}
+
+impl BudgetSuggestion {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            suggested_limit: r.get(0),
+            reasoning: r.get(1),
+            spent: r.get(2),
+            wallet_balance: r.get(3),
+            created_at: r.get(4),
         }
     }
 }
