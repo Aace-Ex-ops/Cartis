@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, MessageCircle, Store, User } from "lucide-react";
 import {
@@ -76,8 +76,21 @@ export function OnboardingForm() {
     monthlyExpenses: "",
   });
   const router = useRouter();
+  const [waNumbers, setWaNumbers] = useState<Record<string, string>>({});
 
-  const waLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
+  useEffect(() => {
+    gql<{ banks: { name: string; whatsappNumber: string }[] }>(
+      "{ banks { name whatsappNumber } }"
+    )
+      .then((r) => {
+        const map: Record<string, string> = {};
+        for (const b of r.banks) map[b.name] = b.whatsappNumber;
+        setWaNumbers(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  const waLink = `https://wa.me/${waNumbers[bank] ?? WHATSAPP_NUMBER}?text=${encodeURIComponent(
     `Hi Cartis, I bank with ${bank || "my bank"} and want to sync my transactions.`
   )}`;
 
@@ -284,7 +297,7 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title="Step 6 · Your money"
+          title={role === "seller" ? "Step 6 · Your money" : "Step 5 · Your money"}
           body="Help Cartis build a smarter budget. All fields optional — skip if you'd rather not say."
         />
         <div className="grid grid-cols-2 gap-3">

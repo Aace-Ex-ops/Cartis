@@ -38,6 +38,7 @@ export default function WalletPage() {
     bankAccounts: BankAccount[];
     monthlyTab: { limit: number; spent: number };
   } | null>(null);
+  const [waNumbers, setWaNumbers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -48,12 +49,25 @@ export default function WalletPage() {
       .catch(() => {
         if (!cancelled) setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 } });
       });
+    void gql<{ banks: { name: string; whatsappNumber: string }[] }>(
+      "{ banks { name whatsappNumber } }"
+    )
+      .then((r) => {
+        const map: Record<string, string> = {};
+        for (const b of r.banks) map[b.name] = b.whatsappNumber;
+        if (!cancelled) setWaNumbers(map);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
 
   const balance = data?.bankAccounts[0]?.balance ?? null;
+  const waNumber =
+    waNumbers[data?.bankAccounts[0]?.bankName ?? ""] ??
+    process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ??
+    "910000000000";
 
   return (
     <div className="flex flex-col gap-6">
@@ -117,7 +131,7 @@ export default function WalletPage() {
 
       <Button asChild variant="outline">
         <a
-          href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000"}?text=${encodeURIComponent("Hi Cartis, I want to sync my transactions.")}`}
+          href={`https://wa.me/${waNumber}?text=${encodeURIComponent("Hi Cartis, I want to sync my transactions.")}`}
           target="_blank"
           rel="noopener noreferrer"
         >

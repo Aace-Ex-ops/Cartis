@@ -1,20 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-const TONE: Record<string, { label: string; cls: string }> = {
-  warn: { label: "Watch", cls: "bg-amber-400/15 text-amber-400 hover:bg-amber-400/15" },
-  good: { label: "Grow", cls: "bg-primary/15 text-primary hover:bg-primary/15" },
-  info: { label: "Info", cls: "bg-white/10 text-muted-foreground hover:bg-white/10" },
-};
+import { InsightCards, type Insight } from "@/components/shared/insight-cards";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
-
-type Insight = { title: string; detail: string; tone: string };
 
 export default function CoachPage() {
   const [insights, setInsights] = useState<Insight[] | null>(null);
@@ -24,7 +15,10 @@ export default function CoachPage() {
     setInsights(null);
     setFailed(false);
     try {
-      const res = await fetch(`${GATEWAY}/api/seller/coach`, { credentials: "include" });
+      const res = await fetch(`${GATEWAY}/api/seller/coach`, {
+        method: "POST",
+        credentials: "include",
+      });
       const body = (await res.json()) as { insights?: Insight[]; error?: string };
       if (!res.ok || !body.insights) {
         setFailed(true);
@@ -68,24 +62,7 @@ export default function CoachPage() {
         </p>
       )}
 
-      {insights && insights.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-3">
-          {insights.map((c, i) => {
-            const t = TONE[c.tone] ?? TONE.info;
-            return (
-              <Card key={i} className="flex flex-col">
-                <CardHeader className="flex-row items-start justify-between space-y-0">
-                  <CardTitle className="text-[15px] leading-snug text-foreground">{c.title}</CardTitle>
-                  <Badge className={`shrink-0 ${t.cls}`}>{t.label}</Badge>
-                </CardHeader>
-                <CardContent>
-                  <CardDescription className="text-[13px] leading-relaxed">{c.detail}</CardDescription>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+      {insights && insights.length > 0 && <InsightCards insights={insights} />}
     </div>
   );
 }

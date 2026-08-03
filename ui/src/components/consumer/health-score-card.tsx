@@ -1,11 +1,5 @@
 "use client";
 
-import {
-  RadialBarChart,
-  RadialBar,
-  PolarAngleAxis,
-  ResponsiveContainer,
-} from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 function scoreColor(score: number) {
@@ -16,6 +10,9 @@ function scoreColor(score: number) {
 
 export function HealthScoreCard({ score, level, insight }: { score: number; level: string; insight: string }) {
   const color = scoreColor(score);
+  const frac = Math.max(0, Math.min(1, (score - 300) / 550));
+  const r = 62;
+  const c = 2 * Math.PI * r;
 
   return (
     <Card>
@@ -25,21 +22,20 @@ export function HealthScoreCard({ score, level, insight }: { score: number; leve
       </CardHeader>
       <CardContent className="flex items-center gap-6">
         <div className="relative h-36 w-36 shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <RadialBarChart
-              cx="50%"
-              cy="50%"
-              innerRadius="72%"
-              outerRadius="100%"
-              barSize={10}
-              data={[{ value: score }]}
-              startAngle={90}
-              endAngle={-270}
-            >
-              <PolarAngleAxis type="number" domain={[300, 850]} tick={false} />
-              <RadialBar dataKey="value" cornerRadius={8} fill={color} background={{ fill: "rgba(255,255,255,0.06)" }} />
-            </RadialBarChart>
-          </ResponsiveContainer>
+          <svg viewBox="0 0 144 144" className="h-full w-full -rotate-90">
+            <circle cx="72" cy="72" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+            <circle
+              cx="72"
+              cy="72"
+              r={r}
+              fill="none"
+              stroke={color}
+              strokeWidth="10"
+              strokeLinecap="round"
+              strokeDasharray={c}
+              strokeDashoffset={c * (1 - frac)}
+            />
+          </svg>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-3xl font-semibold text-foreground">{score}</span>
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">/ 850</span>

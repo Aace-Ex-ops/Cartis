@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType } from "react";
 import { Sparkles } from "lucide-react";
-import LineSidebar from "@/components/shared/line-sidebar";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
+import LineSidebar from "@/components/shared/line-sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,

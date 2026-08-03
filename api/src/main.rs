@@ -8,9 +8,11 @@ use async_graphql_axum::GraphQLResponse;
 use axum::extract::State;
 use axum::extract::Extension;
 use axum::http::HeaderMap;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
+mod chat;
 mod graphql;
+mod insights;
 
 pub struct AppState {
     pub pg: deadpool_postgres::Pool,
@@ -52,7 +54,16 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/graphql", get(graphiql).post(graphql_handler))
-        .with_state(state)
+        .route("/chat/stream", post(chat::chat_stream))
+        .route(
+            "/chat/sessions",
+            get(chat::list_sessions).post(chat::create_session),
+        )
+        .route(
+            "/chat/sessions/{session_id}/messages",
+            get(chat::session_messages),
+        )
+        .with_state(state.clone())
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(
             backend_secret.clone(),
@@ -62,6 +73,7 @@ async fn main() {
     let addr = format!("0.0.0.0:{port}");
     println!("cartis-api listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    tokio::spawn(insights::scheduler(state.clone()));
     axum::serve(listener, app).await.unwrap();
 }
 
