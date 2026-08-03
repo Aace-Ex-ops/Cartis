@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType } from "react";
 import { Sparkles } from "lucide-react";
+import { MetallicLogo } from "@/components/shared/metallic-logo";
 import LineSidebar from "@/components/shared/line-sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -29,12 +30,12 @@ export type NavGroup = {
 
 function Logo() {
   return (
-    <Link href="/" className="flex items-center gap-2.5 px-2 py-3 select-none">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+    <Link href="/" className="flex items-center gap-3 px-2 py-3 select-none">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-teal-300/40 bg-gradient-to-br from-teal-400/25 via-emerald-500/15 to-black/60 shadow-[0_0_12px_-2px_rgba(45,212,191,0.4)] text-xs font-black text-teal-100 backdrop-blur-sm">
         C
       </div>
       <span className="text-[15px] font-semibold tracking-wide text-foreground">
-        <img src="/cartis-wordmark.svg" alt="Cartis" className="h-[18px] w-[58px]" />
+        <MetallicLogo className="h-[22px] w-[72px]" />
       </span>
     </Link>
   );

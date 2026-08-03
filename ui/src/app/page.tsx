@@ -1,171 +1,160 @@
-import { ArrowRight, Sparkles, Wallet, LineChart, MousePointerClick, ShoppingCart, CheckCircle2 } from "lucide-react";
 import { LandingAuth } from "@/components/shared/landing-auth";
-import { LandingCta } from "@/components/shared/landing-cta";
-import Ferrofluid from "@/components/shared/ferrofluid";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
-import GlareHover from "@/components/shared/glare-hover";
-import DecryptedText from "@/components/shared/decrypted-text";
+import { Warp } from "@paper-design/shaders-react";
+import { FloatingCoins } from "@/components/ui/floating-coins";
+import { InteractiveAccordion, type AccordionItem } from "@/components/ui/interactive-accordion";
+import { ParallaxStack } from "@/components/ui/parallax-stack";
+import { StickyStory } from "@/components/ui/sticky-story";
+import { ThreeDCarousel, type CarouselItem } from "@/components/ui/three-d-carousel";
+import { ThreeDTiltCard } from "@/components/ui/three-d-tilt-card";
+import { FooterSection } from "@/components/ui/footer-section";
 
-const STATS = [
-  { value: "3", label: "marketplaces covered" },
-  { value: "<10s", label: "verdict, not a lecture" },
-  { value: "₹600", label: "default monthly tab limit" },
-  { value: "100%", label: "of purchases tracked" },
+const FEATURE_ITEMS: AccordionItem[] = [
+  { id: 1, title: "Honest verdicts before checkout", body: "Cartis checks price, budget, and urgency against your real money — then tells you to buy, wait, or walk away. No fluff, no affiliate bias." },
+  { id: 2, title: "Budget awareness built in", body: "Monthly tab limits, wallet balance, and overspend alerts that fire before the damage — not after the statement arrives." },
+  { id: 3, title: "Every purchase tracked", body: "Analysis history, price trends, and spending patterns you can actually act on. Your money, structured." },
+  { id: 4, title: "Price trends you can act on", body: "Watch how prices move over time and time your purchases to get the best value." },
+  { id: 5, title: "Wallet balance checks", body: "Cartis reads your real wallet before every purchase, so you never spend blind." },
+  { id: 6, title: "Overspend alerts that fire early", body: "Warnings that arrive before the damage — not after the statement lands." },
 ];
 
-const FEATURES = [
-  {
-    icon: Sparkles,
-    title: "Honest verdicts before checkout",
-    body: "Cartis checks price, budget, and urgency against your real money — then tells you to buy, wait, or walk away. No fluff, no affiliate bias.",
-  },
-  {
-    icon: Wallet,
-    title: "Budget awareness built in",
-    body: "Monthly tab limits, wallet balance, and overspend alerts that fire before the damage — not after the statement arrives.",
-  },
-  {
-    icon: LineChart,
-    title: "Every purchase tracked",
-    body: "Analysis history, price trends, and spending patterns you can actually act on. Your money, structured.",
-  },
-];
-
-const STEPS = [
-  { icon: MousePointerClick, title: "Install the extension", body: "Works on Amazon, Flipkart, and Best Buy. No accounts to configure, no data to hand over." },
-  { icon: ShoppingCart, title: "Shop like normal", body: "Browse products as you always do. Cartis watches the page quietly in the background." },
-  { icon: CheckCircle2, title: "Get an honest verdict", body: "Buy / Wait / Avoid — with a plain-English reason tied to your real budget." },
+const STEP_ITEMS: CarouselItem[] = [
+  { id: 1, title: "Install the extension", body: "Works on Amazon, Flipkart, and Best Buy. No accounts to configure, no data to hand over." },
+  { id: 2, title: "Shop like normal", body: "Browse products as you always do. Cartis watches the page quietly in the background." },
+  { id: 3, title: "Get an honest verdict", body: "Buy / Wait / Avoid — with a plain-English reason tied to your real budget." },
+  { id: 4, title: "Read the plain-English reason", body: "Every verdict comes with a short, honest explanation you can act on." },
+  { id: 5, title: "Track the trend", body: "See how prices move over time and let Cartis time your next purchase." },
+  { id: 6, title: "Stay on budget", body: "Monthly tab limits keep your spending honest, purchase after purchase." },
 ];
 
 export default function Home() {
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(60rem 30rem at 50% -10%, rgba(16,185,129,0.12), transparent 60%), radial-gradient(40rem 20rem at 85% 15%, rgba(16,185,129,0.05), transparent 60%)",
-        }}
-      />
-
-      <div aria-hidden className="absolute inset-0 z-0">
-        <Ferrofluid
-          colors={["#10b981", "#34d399", "#a7f3d0"]}
-          opacity={0.35}
-          speed={0.5}
-          flowDirection="down"
-          mouseInteraction
+    <div className="relative min-h-screen">
+      <div aria-hidden className="fixed inset-0 z-0">
+        <Warp
+          style={{ height: "100%", width: "100%" }}
+          proportion={0.45}
+          softness={1}
+          distortion={0.25}
+          swirl={0.8}
+          swirlIterations={10}
+          shape="checks"
+          shapeScale={0.1}
+          scale={1}
+          rotation={0}
+          speed={1}
+          colors={[
+            "hsl(200, 100%, 20%)",
+            "hsl(160, 100%, 75%)",
+            "hsl(180, 90%, 30%)",
+            "hsl(170, 100%, 80%)",
+          ]}
         />
       </div>
 
-      <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-            C
-          </div>
-          <span className="text-[15px] font-semibold tracking-tight">
-            <MetallicLogo className="h-[28px] w-[90px]" />
-          </span>
-        </div>
-        <LandingAuth />
-      </header>
-
-      <main className="relative z-10 mx-auto w-full max-w-5xl flex-1 px-6">
-        <section className="flex flex-col items-center pt-20 pb-16 text-center md:pt-28">
-          <span className="mb-6 inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-3 py-1 text-[12px] font-medium text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            AI financial coach
-          </span>
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight md:text-6xl">
-            <DecryptedText
-              text="Know before you spend."
-              animateOn="view"
-              sequential
-              revealDirection="start"
-              speed={50}
-              className="text-primary"
-              parentClassName="inline"
-              encryptedClassName="text-muted-foreground"
-            />
-          </h1>
-          <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
-            Cartis reads your real money — wallet, budget, spending pace — and gives
-            you an honest verdict before every purchase. No lectures. Just the truth.
-          </p>
-          <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
-            <LandingCta />
-            <a
-              href="#how"
-              className="inline-flex items-center gap-2 rounded-lg border border-border/60 px-6 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              How it works
-            </a>
-          </div>
-        </section>
-
-        <section className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/60 bg-border/60 md:grid-cols-4">
-          {STATS.map((s) => (
-            <div key={s.label} className="flex flex-col items-center gap-1 bg-card px-4 py-8 text-center">
-              <span className="text-3xl font-semibold tracking-tight text-primary md:text-4xl">{s.value}</span>
-              <span className="text-[13px] text-muted-foreground">{s.label}</span>
+      <div className="relative z-10">
+        <header className="flex h-20 items-center justify-between px-6 md:h-24 md:px-12">
+          <a
+            href="/"
+            className="group flex items-center gap-3.5 transition-transform duration-300 hover:scale-[1.02]"
+          >
+            <div className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-teal-300/40 bg-gradient-to-br from-teal-400/25 via-emerald-500/15 to-black/60 shadow-[0_0_20px_-3px_rgba(45,212,191,0.4)] backdrop-blur-md transition-all duration-300 group-hover:border-teal-200/70 group-hover:shadow-[0_0_28px_2px_rgba(45,212,191,0.6)] md:h-12 md:w-12">
+              <span className="text-xl font-black text-teal-100 drop-shadow-[0_0_10px_rgba(45,212,191,0.9)] md:text-2xl">
+                C
+              </span>
+              <div className="absolute inset-0 rounded-xl bg-teal-300/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
             </div>
-          ))}
-        </section>
-
-        <section className="grid gap-4 py-20 md:grid-cols-3">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="group flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6 transition-colors hover:border-primary/40">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-elevated text-primary transition-colors group-hover:bg-primary/10">
-                <f.icon className="h-5 w-5" />
-              </div>
-              <h3 className="text-[15px] font-semibold tracking-tight">{f.title}</h3>
-              <p className="text-sm leading-relaxed text-muted-foreground">{f.body}</p>
+            <div className="flex items-center gap-2">
+              <MetallicLogo className="h-[38px] w-[125px] md:h-[46px] md:w-[150px]" />
+              <span className="rounded-full border border-teal-300/40 bg-teal-300/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.25em] text-teal-200 shadow-[0_0_12px_rgba(45,212,191,0.3)]">
+                AI
+              </span>
             </div>
-          ))}
-        </section>
+          </a>
+          <LandingAuth />
+        </header>
 
-        <section id="how" className="pb-20">
-          <h2 className="mb-10 text-center text-2xl font-semibold tracking-tight md:text-3xl">
-            How it works
-          </h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            {STEPS.map((s, i) => (
-              <div key={s.title} className="relative flex flex-col gap-4 rounded-2xl border border-border/60 bg-card p-6">
-                <span className="absolute right-5 top-5 text-4xl font-semibold text-elevated">{i + 1}</span>
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-elevated text-primary">
-                  <s.icon className="h-5 w-5" />
-                </div>
-                <h3 className="text-[15px] font-semibold tracking-tight">{s.title}</h3>
-                <p className="text-sm leading-relaxed text-muted-foreground">{s.body}</p>
-              </div>
-            ))}
+        <section className="flex min-h-screen items-center justify-center px-8">
+          <div className="w-full max-w-4xl space-y-8 text-center">
+            <h1 className="text-balance text-5xl font-light text-white md:text-7xl">
+              Know before you spend.
+            </h1>
+            <p className="mx-auto max-w-3xl text-xl font-light leading-relaxed text-white/90 md:text-2xl">
+              Cartis reads your real money — wallet, budget, spending pace — and gives
+              you an honest verdict before every purchase. No lectures. Just the truth.
+            </p>
+            <div className="flex flex-col items-center justify-center gap-4 pt-4 sm:flex-row">
+              <a
+                href="/signup"
+                className="rounded-full border border-white/30 bg-white/20 px-8 py-4 font-medium text-white backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:bg-white/30"
+              >
+                Get started free
+              </a>
+              <a
+                href="#how"
+                className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
+              >
+                How it works
+              </a>
+            </div>
           </div>
         </section>
 
-        <section className="relative mb-20 overflow-hidden rounded-3xl border border-primary/30 bg-gradient-to-b from-primary/10 to-transparent px-6 py-14 text-center">
-          <h2 className="mx-auto max-w-xl text-2xl font-semibold tracking-tight md:text-3xl">
-            Stop buying on impulse.
-          </h2>
-          <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
-            Your future self will thank your wallet. Join Cartis and get an honest
-            answer before every purchase.
-          </p>
-          <div className="mt-8 flex justify-center">
-            <LandingCta />
+        <StickyStory />
+
+        <ThreeDTiltCard />
+
+        <section id="features" className="relative px-6 py-24 md:py-32">
+          <InteractiveAccordion
+            items={FEATURE_ITEMS}
+            heading="WHY CARTIS"
+            subheading="FEATURES"
+            description="Six reasons your wallet will love Cartis — honest verdicts, real budgets, price trends, and early warnings, all built around your money."
+            ctaHref="/signup"
+            ctaLabel="Get started free"
+          />
+        </section>
+
+        <ParallaxStack />
+
+        <section id="how" className="relative px-6 py-24 md:py-32">
+          <div className="mx-auto max-w-5xl text-center">
+            <h2 className="text-4xl font-light uppercase tracking-[0.25em] text-white mix-blend-difference md:text-6xl">
+              HOW IT WORKS
+            </h2>
+            <p className="mt-4 text-sm font-light uppercase tracking-[0.3em] text-white/60 mix-blend-difference">
+              STEPS
+            </p>
+          </div>
+          <div className="mx-auto mt-16 max-w-6xl">
+            <ThreeDCarousel items={STEP_ITEMS} />
           </div>
         </section>
-      </main>
 
-      <footer className="relative z-10 border-t border-border/50 px-6 py-8 md:px-10">
-        <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 text-[13px] text-muted-foreground sm:flex-row">
-          <span>© {new Date().getFullYear()} Cartis</span>
-          <div className="flex gap-6">
-            <a href="#" className="transition-colors hover:text-foreground">Privacy</a>
-            <a href="#" className="transition-colors hover:text-foreground">Terms</a>
-          </div>
-        </div>
-      </footer>
+        <FloatingCoins />
+
+        <main className="mx-auto w-full max-w-5xl px-6">
+          <section className="relative mb-20 overflow-hidden rounded-3xl border border-white/20 bg-white/10 px-6 py-14 text-center backdrop-blur-sm">
+            <h2 className="mx-auto max-w-xl text-2xl font-semibold tracking-tight text-white md:text-3xl">
+              Stop buying on impulse.
+            </h2>
+            <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-white/70">
+              Your future self will thank your wallet. Join Cartis and get an honest
+              answer before every purchase.
+            </p>
+            <div className="mt-8 flex justify-center">
+              <a
+                href="/signup"
+                className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
+              >
+                Get started free
+              </a>
+            </div>
+          </section>
+        </main>
+
+        <FooterSection />
+      </div>
     </div>
   );
 }
