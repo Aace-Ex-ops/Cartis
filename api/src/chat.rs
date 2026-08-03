@@ -96,10 +96,10 @@ async fn stream_reply(
         let _ = tx.send(data).await;
     };
 
-    let token = match env::var("CF_API_TOKEN") {
-        Ok(t) if !t.is_empty() => t,
-        _ => {
-            send(sse(r#"{"error":"CF_API_TOKEN not set"}"#)).await;
+    let token = match crate::insights::ai_token().await {
+        Ok(t) => t,
+        Err(e) => {
+            send(sse(&format!(r#"{{"error":"{e}"}}"#))).await;
             return;
         }
     };
