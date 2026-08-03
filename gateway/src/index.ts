@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { analyzeProduct, type ScrapedProduct } from './coach'
 
 type Env = {
@@ -190,36 +191,20 @@ type SellerGql = {
   sellerInventory?: { name: string; stock: number; reorderLevel: number; unitCost: number }[]
 }
 
-async function sellerContext(c: Context): Promise<string> {
-  const data = (await backendGql(
-    c,
-    `query { sellerDashboard { revenue expenses profitMargin cashOnHand lastMonthRevenue lastMonthExpenses }
-      sellerFinances(limit: 20) { entryType amount category description transactionDate }
-      sellerCategories(entryType: "expense") { name spent }
-      sellerInventory { name stock reorderLevel unitCost } }`,
-    c.get('session').user_id,
-  )) as SellerGql
-  const lines: string[] = []
-  const d = data.sellerDashboard
-  if (d) {
-    lines.push(
-      `Business (current month): revenue ₹${d.revenue}, expenses ₹${d.expenses}, profit margin ${d.profitMargin.toFixed(1)}%, cash on hand ₹${d.cashOnHand}.`,
-    )
-    if (d.lastMonthRevenue > 0) {
-      const g = ((d.revenue - d.lastMonthRevenue) / d.lastMonthRevenue) * 100
-      lines.push(`Revenue vs last month: ${g >= 0 ? '+' : ''}${g.toFixed(1)}%`)
-    }
+type ConsumerGql = {
+  wallet?: { balance: number; tabLimit: number }
+  monthlyTab?: { limit: number; spent: number }
+  spending30d?: { day: string; spend: number }[]
+  bankAccounts?: { bankName: string; balance: number | null }[]
+  me?: {
+    monthlyIncome: number | null
+    monthlySpend: number | null
+    investmentPct: number | null
+    housingCost: number | null
+    dependents: number | null
+    debtEmis: number | null
+    monthlyTax: number | null
   }
-  if (data.sellerCategories?.length) {
-    lines.push(`Top expense categories: ${data.sellerCategories.map((c) => `${c.name} ₹${c.spent}`).join(', ')}`)
-  }
-  if (data.sellerFinances?.length) {
-    const last = data.sellerFinances.slice(0, 5)
-    lines.push(`Recent entries: ${last.map((e) => `${e.entryType} ₹${e.amount} ${e.description ?? e.category ?? ''} (${e.transactionDate})`).join(' | ')}`)
-  }
-  const low = (data.sellerInventory ?? []).filter((i) => i.stock <= i.reorderLevel)
-  if (low.length) lines.push(`Low stock: ${low.map((i) => `${i.name} (${i.stock} left, reorder at ${i.reorderLevel})`).join(', ')}`)
-  return lines.length ? lines.join('\n') : 'No business data recorded yet.'
 }
 
 const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }> = async (c, next) => {
@@ -574,99 +559,134 @@ app.post('/api/coach/analyze', async (c) => {
 
 app.post('/api/coach/chat', auth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
-    messages?: { role: 'user' | 'assistant'; content: string }[]
-    mode?: 'consumer' | 'seller'
+    session_id?: string
+    mode?: string
+    message?: string
   }
-  const messages = (body.messages ?? []).filter((m) => m.content?.trim()).slice(-10)
-  if (!messages.length) return c.json({ error: 'messages required' }, 400)
-  const seller = body.mode === 'seller'
-
-  let context = seller ? 'No business data recorded yet.' : 'No financial data available yet.'
+  if (!body.message?.trim()) return c.json({ error: 'message required' }, 400)
   try {
-    if (seller) {
-      context = await sellerContext(c)
-    } else {
-      const data = (await backendGql(
-        c,
-        `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { aiModel } }`,
-        c.get('session').user_id,
-      )) as {
-        wallet?: { balance: number; tabLimit: number }
-        monthlyTab?: { limit: number; spent: number }
-        bankAccounts?: { bankName: string; balance: number | null }[]
-        spending30d?: { day: string; spend: number }[]
-        me?: { aiModel: string | null }
-      }
-      const aiModel = data.me?.aiModel ?? undefined
-      const lines: string[] = []
-      if (data?.bankAccounts?.length) {
-        lines.push(
-          `Bank accounts: ${data.bankAccounts
-            .map((a) => `${a.bankName} balance ${a.balance ?? 'unknown'}`)
-            .join('; ')}`,
-        )
-      }
-      if (data?.wallet) lines.push(`Cartis wallet balance: ${data.wallet.balance}`)
-      if (data?.monthlyTab) {
-        lines.push(`Monthly tab: limit ${data.monthlyTab.limit}, spent ${data.monthlyTab.spent}`)
-      }
-      if (data?.spending30d?.length) {
-        const total = data.spending30d.reduce((s, d) => s + d.spend, 0)
-        lines.push(`Spend last 30 days: ${total} across ${data.spending30d.length} days`)
-      }
-      if (lines.length) context = lines.join('\n')
-      if (aiModel) c.set('aiModel', aiModel)
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: JSON.stringify({ session_id: body.session_id, mode: body.mode, message: body.message }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      return c.json(
+        { error: text || `backend error ${res.status}` },
+        res.status as ContentfulStatusCode,
+      )
     }
-  } catch {
-    // context stays — chat still works without data
-  }
-
-  const system = seller
-    ? `You are the Cartis AI business twin — a friendly, blunt small-business finance coach for India (₹).
-Here is the user's live business data:
-${context}
-Give concise, actionable advice (2-4 sentences). Use ₹ amounts. Focus on revenue, expenses, margins, inventory and GST. If data is missing, say so and suggest how to add it. Never invent numbers.`
-    : `You are the Cartis AI financial twin — a friendly, blunt personal finance coach for India (₹).
-Here is the user's live financial data:
-${context}
-Give concise, actionable advice (2-4 sentences). Use ₹ amounts. If data is missing, say so and suggest how to add it. Never invent numbers.`
-
-  try {
-    const out = (await c.env.AI.run(c.get('aiModel') || '@cf/meta/llama-4-scout-17b-16e-instruct', {
-      messages: [{ role: 'system', content: system }, ...messages],
-    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
-    const reply =
-      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
-    if (!reply.trim()) return c.json({ error: 'empty model reply' }, 502)
-    return c.json({ reply: reply.trim() })
+    c.header('content-type', 'text/event-stream')
+    c.header('cache-control', 'no-cache')
+    return c.body(res.body as unknown as ReadableStream)
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }
 })
 
-app.post('/api/seller/coach', auth, async (c) => {
+app.get('/api/coach/sessions', auth, async (c) => {
   try {
-    const context = await sellerContext(c)
-    const prompt = `You are the Cartis business coach for a small Indian business. Based ONLY on this live data:
-${context}
-Generate exactly 3 insights. Return ONLY JSON:
-{"insights":[{"title":"short headline","detail":"2-3 plain-English sentences with ₹ amounts","tone":"warn"|"good"|"info"}]}
-warn = problem to fix, good = opportunity to grow, info = neutral update. Never invent numbers.`
-    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-      messages: [{ role: 'user', content: prompt }],
-    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
-    const content =
-      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
-    const match = content.match(/\{[\s\S]*\}/)
-    if (!match) return c.json({ error: 'no insights' }, 502)
-    const parsed = JSON.parse(match[0]) as { insights?: { title: string; detail: string; tone: string }[] }
-    const insights = (parsed.insights ?? []).slice(0, 3).map((i) => ({
-      title: i.title ?? '',
-      detail: i.detail ?? '',
-      tone: ['warn', 'good', 'info'].includes(i.tone) ? i.tone : 'info',
-    }))
-    if (!insights.length) return c.json({ error: 'no insights' }, 502)
-    return c.json({ insights })
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/sessions`, {
+      headers: {
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+    })
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/coach/sessions', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { mode?: string }
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/sessions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: JSON.stringify({ mode: body.mode }),
+    })
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.get('/api/coach/sessions/:id/messages', auth, async (c) => {
+  try {
+    const res = await fetch(
+      `${c.env.BACKEND_URL}/chat/sessions/${c.req.param('id')}/messages`,
+      {
+        headers: {
+          'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+          'x-user-id': c.get('session').user_id,
+        },
+      },
+    )
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+type CoachInsight = { title: string; detail: string; tone: string }
+
+async function coachInsightsViaBackend(
+  c: { env: { BACKEND_URL: string; BACKEND_SECRET: string }; get: (k: 'session') => { user_id: string } },
+  role: 'consumer' | 'seller',
+  refresh: boolean,
+): Promise<{ insights: CoachInsight[]; generatedAt: string } | null> {
+  const query = refresh
+    ? `mutation { refreshCoachInsights(role: "${role}") { title detail tone } }`
+    : `query { coachInsights(role: "${role}") { generatedAt insights { title detail tone } } }`
+  const res = await fetch(`${c.env.BACKEND_URL}/graphql`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+      'x-user-id': c.get('session').user_id,
+    },
+    body: JSON.stringify({ query }),
+  })
+  if (!res.ok) throw new Error(`backend error ${res.status}`)
+  const data = (await res.json()) as { data?: any; errors?: { message: string }[] }
+  if (data.errors?.length) throw new Error(data.errors[0].message)
+  const d = data.data
+  if (refresh) return { insights: d.refreshCoachInsights, generatedAt: new Date().toISOString() }
+  return d.coachInsights
+    ? { insights: d.coachInsights.insights, generatedAt: d.coachInsights.generatedAt }
+    : null
+}
+
+app.post('/api/seller/coach', auth, async (c) => {
+  const refresh = c.req.query('refresh') === '1'
+  try {
+    let out = await coachInsightsViaBackend(c, 'seller', refresh)
+    if (!out) out = await coachInsightsViaBackend(c, 'seller', true)
+    return c.json(out)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/consumer/coach', auth, async (c) => {
+  const refresh = c.req.query('refresh') === '1'
+  try {
+    let out = await coachInsightsViaBackend(c, 'consumer', refresh)
+    if (!out) out = await coachInsightsViaBackend(c, 'consumer', true)
+    return c.json(out)
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }

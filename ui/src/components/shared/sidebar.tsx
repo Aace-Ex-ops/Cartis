@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ComponentType } from "react";
 import { Sparkles } from "lucide-react";
 import LineSidebar from "@/components/shared/line-sidebar";
-import { MetallicLogo } from "@/components/shared/metallic-logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -35,7 +34,7 @@ function Logo() {
         C
       </div>
       <span className="text-[15px] font-semibold tracking-wide text-foreground">
-        <MetallicLogo className="h-[18px] w-[58px]" />
+        <img src="/cartis-wordmark.svg" alt="Cartis" className="h-[18px] w-[58px]" />
       </span>
     </Link>
   );

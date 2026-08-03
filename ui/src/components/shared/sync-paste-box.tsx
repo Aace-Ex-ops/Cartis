@@ -92,7 +92,7 @@ export function SyncPasteBox({
         placeholder={"Paste your bank SMS alerts here, e.g.\n\nHDFC Bank: Rs.1,250 debited from A/C **1234 on 12-Jun. UPI: 4012xxxxxx. Bal: Rs.24,580."}
         value={paste}
         onChange={(e) => setPaste(e.target.value)}
-        className="resize-none font-mono text-[13px]"
+        className="h-28 max-h-28 resize-none overflow-y-auto font-mono text-[13px]"
       />
       <Button
         variant="secondary"

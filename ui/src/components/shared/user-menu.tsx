@@ -20,6 +20,7 @@ import { ModelPanel } from "@/components/consumer/model-panel";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
 import { TermsPanel } from "@/components/consumer/terms-panel";
+import { SupportPanel } from "@/components/consumer/support-panel";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -30,13 +31,14 @@ type User = {
   userType: string;
 };
 
-type PanelKey = "profile" | "model" | "subscription" | "settings" | "terms";
+type PanelKey = "profile" | "model" | "subscription" | "settings" | "support" | "terms";
 
 const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = {
   profile: { label: "Profile", panel: ProfilePanel },
   model: { label: "Model", panel: ModelPanel },
   subscription: { label: "Subscription", panel: SubscriptionPanel },
   settings: { label: "Settings", panel: SettingsPanel },
+  support: { label: "Support", panel: SupportPanel },
   terms: { label: "Terms & Policies", panel: TermsPanel },
 };
 
