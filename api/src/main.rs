@@ -8,8 +8,9 @@ use async_graphql_axum::GraphQLResponse;
 use axum::extract::State;
 use axum::extract::Extension;
 use axum::http::HeaderMap;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
+mod chat;
 mod graphql;
 
 pub struct AppState {
@@ -52,6 +53,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/graphql", get(graphiql).post(graphql_handler))
+        .route("/chat/stream", post(chat::chat_stream))
         .with_state(state)
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(

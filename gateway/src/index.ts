@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { analyzeProduct, type ScrapedProduct } from './coach'
 
 type Env = {
@@ -620,71 +621,31 @@ app.post('/api/coach/analyze', async (c) => {
 
 app.post('/api/coach/chat', auth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
-    messages?: { role: 'user' | 'assistant'; content: string }[]
-    mode?: 'consumer' | 'seller'
+    messages?: { role: string; content: string }[]
+    mode?: string
   }
-  const messages = (body.messages ?? []).filter((m) => m.content?.trim()).slice(-10)
+  const messages = (body.messages ?? []).filter((m) => m.content?.trim())
   if (!messages.length) return c.json({ error: 'messages required' }, 400)
-  const seller = body.mode === 'seller'
-
-  let context = seller ? 'No business data recorded yet.' : 'No financial data available yet.'
   try {
-    if (seller) {
-      context = await sellerContext(c)
-    } else {
-      const data = (await backendGql(
-        c,
-        `query { wallet { balance tabLimit } monthlyTab { limit spent } bankAccounts { bankName balance } spending30d { day spend } me { aiModel } }`,
-        c.get('session').user_id,
-      )) as {
-        wallet?: { balance: number; tabLimit: number }
-        monthlyTab?: { limit: number; spent: number }
-        bankAccounts?: { bankName: string; balance: number | null }[]
-        spending30d?: { day: string; spend: number }[]
-        me?: { aiModel: string | null }
-      }
-      const aiModel = data.me?.aiModel ?? undefined
-      const lines: string[] = []
-      if (data?.bankAccounts?.length) {
-        lines.push(
-          `Bank accounts: ${data.bankAccounts
-            .map((a) => `${a.bankName} balance ${a.balance ?? 'unknown'}`)
-            .join('; ')}`,
-        )
-      }
-      if (data?.wallet) lines.push(`Cartis wallet balance: ${data.wallet.balance}`)
-      if (data?.monthlyTab) {
-        lines.push(`Monthly tab: limit ${data.monthlyTab.limit}, spent ${data.monthlyTab.spent}`)
-      }
-      if (data?.spending30d?.length) {
-        const total = data.spending30d.reduce((s, d) => s + d.spend, 0)
-        lines.push(`Spend last 30 days: ${total} across ${data.spending30d.length} days`)
-      }
-      if (lines.length) context = lines.join('\n')
-      if (aiModel) c.set('aiModel', aiModel)
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: JSON.stringify({ messages, mode: body.mode }),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      return c.json(
+        { error: text || `backend error ${res.status}` },
+        res.status as ContentfulStatusCode,
+      )
     }
-  } catch {
-    // context stays — chat still works without data
-  }
-
-  const system = seller
-    ? `You are the Cartis AI business twin — a friendly, blunt small-business finance coach for India (₹).
-Here is the user's live business data:
-${context}
-Give concise, actionable advice (2-4 sentences). Use ₹ amounts. Focus on revenue, expenses, margins, inventory and GST. If data is missing, say so and suggest how to add it. Never invent numbers.`
-    : `You are the Cartis AI financial twin — a friendly, blunt personal finance coach for India (₹).
-Here is the user's live financial data:
-${context}
-Give concise, actionable advice (2-4 sentences). Use ₹ amounts. If data is missing, say so and suggest how to add it. Never invent numbers.`
-
-  try {
-    const out = (await c.env.AI.run(c.get('aiModel') || '@cf/meta/llama-4-scout-17b-16e-instruct', {
-      messages: [{ role: 'system', content: system }, ...messages],
-    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
-    const reply =
-      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
-    if (!reply.trim()) return c.json({ error: 'empty model reply' }, 502)
-    return c.json({ reply: reply.trim() })
+    c.header('content-type', 'text/event-stream')
+    c.header('cache-control', 'no-cache')
+    return c.body(res.body as unknown as ReadableStream)
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }

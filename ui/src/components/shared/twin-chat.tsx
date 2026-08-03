@@ -30,10 +30,15 @@ export function TwinChat({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
+
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   const send = async () => {
     const content = input.trim();
@@ -43,19 +48,67 @@ export function TwinChat({
     setInput("");
     setBusy(true);
     setError("");
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const res = await fetch(`${GATEWAY}/api/coach/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        signal: controller.signal,
         body: JSON.stringify({ messages: next, mode }),
       });
-      const body = (await res.json()) as { reply?: string; error?: string };
-      if (!res.ok || !body.reply) {
-        setError(body.error ?? "Chat failed — try again.");
+      if (!res.ok || !res.body) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "Chat failed — try again.");
         return;
       }
-      setMessages((m) => [...m, { role: "assistant", content: body.reply! }]);
+      setMessages((m) => [...m, { role: "assistant", content: "" }]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let done = false;
+      while (!done) {
+        const { value, done: d } = await reader.read();
+        done = d;
+        buf += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        let idx: number;
+        while ((idx = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data) continue;
+          if (data === "[DONE]") {
+            done = true;
+            break;
+          }
+          try {
+            const ev = JSON.parse(data) as { token?: string; error?: string };
+            if (ev.error) {
+              setError(ev.error);
+              done = true;
+              break;
+            }
+            if (ev.token) {
+              setMessages((m) => {
+                const copy = [...m];
+                const last = copy[copy.length - 1];
+                if (!last || last.role !== "assistant") return m;
+                copy[copy.length - 1] = { ...last, content: last.content + ev.token! };
+                return copy;
+              });
+            }
+          } catch {
+            // partial frame — skip
+          }
+        }
+      }
+      setMessages((m) =>
+        m[m.length - 1]?.role === "assistant" && !m[m.length - 1].content
+          ? m.slice(0, -1)
+          : m,
+      );
     } catch {
       setError("Chat failed — try again.");
     } finally {
