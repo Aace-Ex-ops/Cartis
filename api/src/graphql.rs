@@ -122,6 +122,12 @@ impl QueryRoot {
         Ok(rows.iter().map(Bank::from_row).collect())
     }
 
+    async fn coach_insights(&self, ctx: &Context<'_>, role: String) -> Result<Option<crate::insights::CoachInsights>> {
+        let Some(uid) = user_id(ctx) else { return Ok(None) };
+        let state = ctx.data_unchecked::<Arc<AppState>>();
+        crate::insights::query(state, &uid, &role).await
+    }
+
     async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>) -> Result<Vec<AnalysisLog>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
@@ -612,6 +618,12 @@ impl MutationRoot {
             )
             .await?;
         Ok(User::from_row(row))
+    }
+
+    async fn refresh_coach_insights(&self, ctx: &Context<'_>, role: String) -> Result<Vec<crate::insights::Insight>> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let state = ctx.data_unchecked::<Arc<AppState>>();
+        crate::insights::refresh(state, &uid, &role).await
     }
 
     async fn update_user_type(

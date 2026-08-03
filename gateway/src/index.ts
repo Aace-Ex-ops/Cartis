@@ -191,38 +191,6 @@ type SellerGql = {
   sellerInventory?: { name: string; stock: number; reorderLevel: number; unitCost: number }[]
 }
 
-async function sellerContext(c: Context): Promise<string> {
-  const data = (await backendGql(
-    c,
-    `query { sellerDashboard { revenue expenses profitMargin cashOnHand lastMonthRevenue lastMonthExpenses }
-      sellerFinances(limit: 20) { entryType amount category description transactionDate }
-      sellerCategories(entryType: "expense") { name spent }
-      sellerInventory { name stock reorderLevel unitCost } }`,
-    c.get('session').user_id,
-  )) as SellerGql
-  const lines: string[] = []
-  const d = data.sellerDashboard
-  if (d) {
-    lines.push(
-      `Business (current month): revenue ₹${d.revenue}, expenses ₹${d.expenses}, profit margin ${d.profitMargin.toFixed(1)}%, cash on hand ₹${d.cashOnHand}.`,
-    )
-    if (d.lastMonthRevenue > 0) {
-      const g = ((d.revenue - d.lastMonthRevenue) / d.lastMonthRevenue) * 100
-      lines.push(`Revenue vs last month: ${g >= 0 ? '+' : ''}${g.toFixed(1)}%`)
-    }
-  }
-  if (data.sellerCategories?.length) {
-    lines.push(`Top expense categories: ${data.sellerCategories.map((c) => `${c.name} ₹${c.spent}`).join(', ')}`)
-  }
-  if (data.sellerFinances?.length) {
-    const last = data.sellerFinances.slice(0, 5)
-    lines.push(`Recent entries: ${last.map((e) => `${e.entryType} ₹${e.amount} ${e.description ?? e.category ?? ''} (${e.transactionDate})`).join(' | ')}`)
-  }
-  const low = (data.sellerInventory ?? []).filter((i) => i.stock <= i.reorderLevel)
-  if (low.length) lines.push(`Low stock: ${low.map((i) => `${i.name} (${i.stock} left, reorder at ${i.reorderLevel})`).join(', ')}`)
-  return lines.length ? lines.join('\n') : 'No business data recorded yet.'
-}
-
 type ConsumerGql = {
   wallet?: { balance: number; tabLimit: number }
   monthlyTab?: { limit: number; spent: number }
@@ -237,36 +205,6 @@ type ConsumerGql = {
     debtEmis: number | null
     monthlyTax: number | null
   }
-}
-
-async function consumerContext(c: Context): Promise<string> {
-  const data = (await backendGql(
-    c,
-    `query { wallet { balance tabLimit } monthlyTab { limit spent } spending30d { day spend }
-      bankAccounts { bankName balance } me { monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } }`,
-    c.get('session').user_id,
-  )) as ConsumerGql
-  const lines: string[] = []
-  const w = data.wallet
-  if (w) lines.push(`Wallet: balance ₹${w.balance}, monthly tab limit ₹${w.tabLimit}.`)
-  const t = data.monthlyTab
-  if (t) lines.push(`Spent this month: ₹${t.spent} of ₹${t.limit} (${t.limit ? Math.round((t.spent / t.limit) * 100) : 0}%).`)
-  if (data.spending30d?.length) {
-    const total = data.spending30d.reduce((s, d) => s + d.spend, 0)
-    lines.push(`Spent last 30 days: ₹${total}.`)
-  }
-  if (data.bankAccounts?.length) {
-    lines.push(`Accounts: ${data.bankAccounts.map((a) => `${a.bankName} ₹${a.balance ?? 0}`).join(', ')}`)
-  }
-  const p = data.me
-  if (p?.monthlyIncome) {
-    const tax = p.monthlyTax ?? 0
-    const invest = p.investmentPct ? Math.round((p.monthlyIncome * p.investmentPct) / 100) : 0
-    lines.push(
-      `Profile: income ₹${p.monthlyIncome}/mo, TDS ₹${tax}/mo, spend ₹${p.monthlySpend ?? '?'}/mo, invests ${p.investmentPct ?? 0}% (₹${invest}/mo), housing ₹${p.housingCost ?? 0}/mo, dependents ${p.dependents ?? 0}, EMIs ₹${p.debtEmis ?? 0}/mo.`,
-    )
-  }
-  return lines.length ? lines.join('\n') : 'No financial data recorded yet. Complete onboarding for personalized help.'
 }
 
 const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; sessionToken: string } }> = async (c, next) => {
@@ -651,62 +589,54 @@ app.post('/api/coach/chat', auth, async (c) => {
   }
 })
 
+type CoachInsight = { title: string; detail: string; tone: string }
+
+async function coachInsightsViaBackend(
+  c: { env: { BACKEND_URL: string; BACKEND_SECRET: string }; get: (k: 'session') => { user_id: string } },
+  role: 'consumer' | 'seller',
+  refresh: boolean,
+): Promise<{ insights: CoachInsight[]; generatedAt: string } | null> {
+  const query = refresh
+    ? `mutation { refreshCoachInsights(role: "${role}") { title detail tone } }`
+    : `query { coachInsights(role: "${role}") { generatedAt insights { title detail tone } } }`
+  const res = await fetch(`${c.env.BACKEND_URL}/graphql`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+      'x-user-id': c.get('session').user_id,
+    },
+    body: JSON.stringify({ query }),
+  })
+  if (!res.ok) throw new Error(`backend error ${res.status}`)
+  const data = (await res.json()) as { data?: any; errors?: { message: string }[] }
+  if (data.errors?.length) throw new Error(data.errors[0].message)
+  const d = data.data
+  if (refresh) return { insights: d.refreshCoachInsights, generatedAt: new Date().toISOString() }
+  return d.coachInsights
+    ? { insights: d.coachInsights.insights, generatedAt: d.coachInsights.generatedAt }
+    : null
+}
+
 app.post('/api/seller/coach', auth, async (c) => {
+  const refresh = c.req.query('refresh') === '1'
   try {
-    const context = await sellerContext(c)
-    const prompt = `You are the Cartis business coach for a small Indian business. Based ONLY on this live data:
-${context}
-Generate exactly 3 insights. Return ONLY JSON:
-{"insights":[{"title":"short headline","detail":"2-3 plain-English sentences with ₹ amounts","tone":"warn"|"good"|"info"}]}
-warn = problem to fix, good = opportunity to grow, info = neutral update. Never invent numbers.`
-    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-      messages: [{ role: 'user', content: prompt }],
-    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
-    const content =
-      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
-    const match = content.match(/\{[\s\S]*\}/)
-    if (!match) return c.json({ error: 'no insights' }, 502)
-    const parsed = JSON.parse(match[0]) as { insights?: { title: string; detail: string; tone: string }[] }
-    const insights = (parsed.insights ?? []).slice(0, 3).map((i) => ({
-      title: i.title ?? '',
-      detail: i.detail ?? '',
-      tone: ['warn', 'good', 'info'].includes(i.tone) ? i.tone : 'info',
-    }))
-    if (!insights.length) return c.json({ error: 'no insights' }, 502)
-    return c.json({ insights })
+    let out = await coachInsightsViaBackend(c, 'seller', refresh)
+    if (!out) out = await coachInsightsViaBackend(c, 'seller', true)
+    return c.json(out)
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }
 })
 
 app.post('/api/consumer/coach', auth, async (c) => {
-  let content = ''
+  const refresh = c.req.query('refresh') === '1'
   try {
-    const context = await consumerContext(c)
-    const prompt = `You are the Cartis personal finance coach for an Indian salaried user. Based ONLY on this live data:
-${context}
-Generate exactly 3 insights. Return ONLY JSON:
-{"insights":[{"title":"short headline","detail":"2-3 plain-English sentences with ₹ amounts","tone":"warn"|"good"|"info"}]}
-warn = problem to fix, good = opportunity to grow, info = neutral update.
-One insight MUST cover income tax: estimate yearly income tax under the new regime (slabs: 0-4L nil, 4-8L 5%, 8-12L 10%, 12-16L 15%, 16-20L 20%, 20-24L 25%, above 24L 30%; standard deduction ₹75,000), compare with TDS already deducted, and flag the ITR deadline of 31 July (or 31 Dec for business) with a filing reminder. Never invent numbers.`
-    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2048,
-    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
-    content =
-      typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
-    const match = content.match(/\{[\s\S]*\}/)
-    if (!match) return c.json({ error: 'no insights', raw: content.slice(0, 400) }, 502)
-    const parsed = JSON.parse(match[0]) as { insights?: { title: string; detail: string; tone: string }[] }
-    const insights = (parsed.insights ?? []).slice(0, 3).map((i) => ({
-      title: i.title ?? '',
-      detail: i.detail ?? '',
-      tone: ['warn', 'good', 'info'].includes(i.tone) ? i.tone : 'info',
-    }))
-    if (!insights.length) return c.json({ error: 'no insights', raw: content.slice(0, 400) }, 502)
-    return c.json({ insights })
+    let out = await coachInsightsViaBackend(c, 'consumer', refresh)
+    if (!out) out = await coachInsightsViaBackend(c, 'consumer', true)
+    return c.json(out)
   } catch (e) {
-    return c.json({ error: String(e), raw: content.slice(0, 400) }, 502)
+    return c.json({ error: String(e) }, 502)
   }
 })
 

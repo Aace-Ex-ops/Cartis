@@ -155,3 +155,11 @@ CREATE TABLE budget_suggestions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX budget_suggestions_user_idx ON budget_suggestions(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS coach_insights (
+    user_id UUID REFERENCES users(user_id),
+    role TEXT NOT NULL CHECK (role IN ('consumer', 'seller')),
+    insights JSONB NOT NULL,
+    generated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, role)
+);

@@ -8,7 +8,6 @@ import { TabGauge } from "@/components/consumer/tab-gauge";
 import { AlertList } from "@/components/consumer/alert-list";
 import { TaxCard } from "@/components/consumer/tax-card";
 import { InsightCards, type Insight } from "@/components/shared/insight-cards";
-import SpecularButton from "@/components/shared/specular-button";
 import { gql } from "@/lib/gql";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -96,9 +95,12 @@ export default function OverviewPage() {
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
-    void loadInsights();
+    const t = setTimeout(() => {
+      void loadInsights();
+    }, 300);
     return () => {
       cancelled = true;
+      clearTimeout(t);
     };
   }, []);
 
@@ -202,21 +204,9 @@ export default function OverviewPage() {
 
       {!hasBank && (
         <div className="mt-8 flex justify-center">
-          <SpecularButton
-            size="lg"
-            tint="#ffffff"
-            lineColor="#ffffff"
-            baseColor="#525252"
-            intensity={1}
-            thickness={1}
-            speed={0.35}
-            proximity={250}
-            autoAnimate={false}
-            onClick={() => router.push("/onboarding")}
-            className="text-center mx-auto"
-          >
+          <Button size="lg" onClick={() => router.push("/onboarding")} className="mx-auto">
             Connect your first account
-          </SpecularButton>
+          </Button>
         </div>
       )}
     </div>
