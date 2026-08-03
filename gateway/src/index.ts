@@ -559,11 +559,11 @@ app.post('/api/coach/analyze', async (c) => {
 
 app.post('/api/coach/chat', auth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
-    messages?: { role: string; content: string }[]
+    session_id?: string
     mode?: string
+    message?: string
   }
-  const messages = (body.messages ?? []).filter((m) => m.content?.trim())
-  if (!messages.length) return c.json({ error: 'messages required' }, 400)
+  if (!body.message?.trim()) return c.json({ error: 'message required' }, 400)
   try {
     const res = await fetch(`${c.env.BACKEND_URL}/chat/stream`, {
       method: 'POST',
@@ -572,7 +572,7 @@ app.post('/api/coach/chat', auth, async (c) => {
         'x-cartis-backend-secret': c.env.BACKEND_SECRET,
         'x-user-id': c.get('session').user_id,
       },
-      body: JSON.stringify({ messages, mode: body.mode }),
+      body: JSON.stringify({ session_id: body.session_id, mode: body.mode, message: body.message }),
     })
     if (!res.ok) {
       const text = await res.text()
@@ -584,6 +584,58 @@ app.post('/api/coach/chat', auth, async (c) => {
     c.header('content-type', 'text/event-stream')
     c.header('cache-control', 'no-cache')
     return c.body(res.body as unknown as ReadableStream)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.get('/api/coach/sessions', auth, async (c) => {
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/sessions`, {
+      headers: {
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+    })
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/coach/sessions', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { mode?: string }
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/sessions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: JSON.stringify({ mode: body.mode }),
+    })
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.get('/api/coach/sessions/:id/messages', auth, async (c) => {
+  try {
+    const res = await fetch(
+      `${c.env.BACKEND_URL}/chat/sessions/${c.req.param('id')}/messages`,
+      {
+        headers: {
+          'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+          'x-user-id': c.get('session').user_id,
+        },
+      },
+    )
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }

@@ -1,12 +1,14 @@
 use std::env;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -14,15 +16,49 @@ use crate::AppState;
 
 #[derive(Deserialize)]
 struct ChatRequest {
-    messages: Vec<Msg>,
+    #[serde(default)]
+    session_id: Option<String>,
     #[serde(default)]
     mode: Option<String>,
+    message: String,
 }
 
 #[derive(Deserialize)]
+pub struct CreateSessionRequest {
+    mode: String,
+}
+
+#[derive(Serialize)]
+struct SessionOut {
+    session_id: String,
+    mode: String,
+    title: String,
+    updated_at: String,
+}
+
+#[derive(Serialize)]
+struct MessageOut {
+    role: String,
+    content: String,
+    created_at: String,
+}
+
+#[derive(Clone)]
 struct Msg {
     role: String,
     content: String,
+}
+
+fn uid_from(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn json_err(status: StatusCode, msg: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": msg }))).into_response()
 }
 
 pub async fn chat_stream(
@@ -30,33 +66,80 @@ pub async fn chat_stream(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    let Some(uid) = headers
-        .get("x-user-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-    else {
-        return (StatusCode::UNAUTHORIZED, "missing x-user-id").into_response();
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
     };
 
     let req: ChatRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
-        Err(_) => return (StatusCode::BAD_REQUEST, "invalid json").into_response(),
+        Err(_) => return json_err(StatusCode::BAD_REQUEST, "invalid json"),
     };
-    let messages: Vec<Msg> = req
-        .messages
-        .into_iter()
-        .filter(|m| !m.content.trim().is_empty())
-        .rev()
-        .take(10)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    if messages.is_empty() {
-        return (StatusCode::BAD_REQUEST, "messages required").into_response();
+    let message = req.message.trim().to_string();
+    if message.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "message required");
     }
 
-    let seller = req.mode.as_deref() == Some("seller");
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+
+    // Resolve session: verify ownership if given, else create one.
+    let sid = req
+        .session_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let (session_id, mode) = match sid {
+        Some(sid) => {
+            match conn
+                .query_opt(
+                    "SELECT mode FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
+                    &[&sid, &uid],
+                )
+                .await
+            {
+                Ok(Some(r)) => (sid, r.get::<_, String>(0)),
+                Ok(None) => return json_err(StatusCode::NOT_FOUND, "session not found"),
+                Err(e) => {
+                    eprintln!("chat session lookup error: {e}");
+                    return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+                }
+            }
+        }
+        None => {
+            let mode = req
+                .mode
+                .as_deref()
+                .filter(|m| *m == "seller")
+                .map(|_| "seller")
+                .unwrap_or("consumer");
+            let title: String = message
+                .chars()
+                .take(60)
+                .collect::<String>()
+                .trim()
+                .to_string();
+            match conn
+                .query_one(
+                    "INSERT INTO chat_sessions (user_id, mode, title) VALUES ($1::text::uuid, $2, $3) RETURNING session_id::text",
+                    &[&uid, &mode, &title],
+                )
+                .await
+            {
+                Ok(r) => (r.get::<_, String>(0), mode.to_string()),
+                Err(e) => {
+                    eprintln!("chat session create error: {e}");
+                    return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+                }
+            }
+        }
+    };
+    drop(conn);
+
+    let seller = mode == "seller";
     let context = match build_context(&state, &uid, seller).await {
         Ok(c) => c,
         Err(e) => {
@@ -70,8 +153,31 @@ pub async fn chat_stream(
     };
     let system = system_prompt(seller, &context);
 
+    let history = match load_history(&state, &session_id).await {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("chat history error: {e}");
+            vec![]
+        }
+    };
+    let mut llm_history = history;
+    llm_history.push(Msg {
+        role: "user".to_string(),
+        content: message.clone(),
+    });
+
     let (tx, rx) = mpsc::channel::<String>(64);
-    tokio::spawn(stream_reply(system, messages, model, tx));
+    tokio::spawn(persist_and_stream(
+        system,
+        llm_history,
+        model,
+        tx,
+        state,
+        session_id.clone(),
+        uid,
+        message,
+        mode,
+    ));
 
     let stream = ReceiverStream::new(rx).map(Ok::<String, std::io::Error>);
     Response::builder()
@@ -82,19 +188,164 @@ pub async fn chat_stream(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
+async fn load_history(
+    state: &Arc<AppState>,
+    session_id: &str,
+) -> Result<Vec<Msg>, Box<dyn std::error::Error>> {
+    let rows = state
+        .pg
+        .get()
+        .await?
+        .query(
+            "SELECT role, content FROM chat_messages WHERE session_id::text = $1 ORDER BY id DESC LIMIT 20",
+            &[&session_id],
+        )
+        .await?;
+    Ok(rows
+        .iter()
+        .rev()
+        .map(|r| Msg {
+            role: r.get(0),
+            content: r.get(1),
+        })
+        .collect())
+}
+
+pub async fn create_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<CreateSessionRequest>,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let mode = if req.mode == "seller" { "seller" } else { "consumer" };
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .query_one(
+            "INSERT INTO chat_sessions (user_id, mode, title) VALUES ($1::text::uuid, $2, 'New chat') RETURNING session_id::text, mode, title, updated_at::text",
+            &[&uid, &mode],
+        )
+        .await
+    {
+        Ok(r) => Json(SessionOut {
+            session_id: r.get(0),
+            mode: r.get(1),
+            title: r.get(2),
+            updated_at: r.get(3),
+        })
+        .into_response(),
+        Err(e) => {
+            eprintln!("chat session create error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
+pub async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .query(
+            "SELECT session_id::text, mode, title, updated_at::text FROM chat_sessions WHERE user_id::text = $1 ORDER BY updated_at DESC LIMIT 50",
+            &[&uid],
+        )
+        .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(|r| SessionOut {
+                    session_id: r.get(0),
+                    mode: r.get(1),
+                    title: r.get(2),
+                    updated_at: r.get(3),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            eprintln!("chat sessions error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
+pub async fn session_messages(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .query(
+            "SELECT m.role, m.content, m.created_at::text FROM chat_messages m JOIN chat_sessions s ON s.session_id = m.session_id WHERE m.session_id::text = $1 AND s.user_id::text = $2 ORDER BY m.id",
+            &[&session_id, &uid],
+        )
+        .await
+    {
+        Ok(rs) => Json(
+            rs.iter()
+                .map(|r| MessageOut {
+                    role: r.get(0),
+                    content: r.get(1),
+                    created_at: r.get(2),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            eprintln!("chat messages error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
 fn sse(data: &str) -> String {
     format!("data: {data}\n\n")
 }
 
-async fn stream_reply(
+async fn persist_and_stream(
     system: String,
     messages: Vec<Msg>,
     model: String,
     tx: mpsc::Sender<String>,
+    state: Arc<AppState>,
+    session_id: String,
+    uid: String,
+    user_message: String,
+    mode: String,
 ) {
     let send = |data: String| async {
         let _ = tx.send(data).await;
     };
+
+    send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
 
     let token = match crate::insights::ai_token().await {
         Ok(t) => t,
@@ -130,7 +381,7 @@ async fn stream_reply(
     });
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(90))
+        .timeout(Duration::from_secs(90))
         .build();
     let client = match client {
         Ok(c) => c,
@@ -159,6 +410,7 @@ async fn stream_reply(
         return;
     }
 
+    let mut full = String::new();
     let mut stream = res.bytes_stream();
     let mut buf = String::new();
     while let Some(chunk) = stream.next().await {
@@ -174,6 +426,7 @@ async fn stream_reply(
                 continue;
             }
             if data == "[DONE]" {
+                persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
                 send(sse("[DONE]")).await;
                 return;
             }
@@ -183,6 +436,7 @@ async fn stream_reply(
                     .and_then(|c| c.as_str())
                 {
                     if !content.is_empty() {
+                        full.push_str(content);
                         let ev = serde_json::json!({ "token": content });
                         send(sse(&ev.to_string())).await;
                     }
@@ -191,7 +445,87 @@ async fn stream_reply(
         }
         buf.clear();
     }
+    persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
     send(sse("[DONE]")).await;
+}
+
+async fn persist_turn(
+    state: &Arc<AppState>,
+    uid: &str,
+    session_id: &str,
+    user_message: &str,
+    assistant: &str,
+    mode: &str,
+) {
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat persist db error: {e}");
+            return;
+        }
+    };
+    let _ = conn
+        .execute(
+            "INSERT INTO chat_messages (session_id, role, content) VALUES ($1::text::uuid, 'user', $2)",
+            &[&session_id, &user_message],
+        )
+        .await;
+    if !assistant.trim().is_empty() {
+        let _ = conn
+            .execute(
+                "INSERT INTO chat_messages (session_id, role, content) VALUES ($1::text::uuid, 'assistant', $2)",
+                &[&session_id, &assistant],
+            )
+            .await;
+    }
+    let _ = conn
+        .execute(
+            "UPDATE chat_sessions SET updated_at = now() WHERE session_id::text = $1",
+            &[&session_id],
+        )
+        .await;
+    if !assistant.trim().is_empty() {
+        tokio::spawn(push_supermemory(
+            uid.to_string(),
+            session_id.to_string(),
+            user_message.to_string(),
+            assistant.to_string(),
+            mode.to_string(),
+        ));
+    }
+}
+
+async fn push_supermemory(
+    uid: String,
+    session_id: String,
+    user: String,
+    assistant: String,
+    mode: String,
+) {
+    let key = match env::var("SM_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => return,
+    };
+    let body = serde_json::json!({
+        "content": format!("user: {user}\nassistant: {assistant}"),
+        "containerTag": format!("user_{uid}"),
+        "customId": format!("cartis_{session_id}"),
+        "metadata": { "type": "chat", "mode": mode, "source": "cartis" },
+    });
+    match reqwest::Client::new()
+        .post("https://api.supermemory.ai/v3/documents")
+        .bearer_auth(&key)
+        .timeout(Duration::from_secs(30))
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) if !r.status().is_success() => {
+            eprintln!("supermemory push status {}", r.status().as_u16());
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("supermemory push error: {e}"),
+    }
 }
 
 fn system_prompt(seller: bool, context: &str) -> String {

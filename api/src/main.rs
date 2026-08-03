@@ -55,6 +55,14 @@ async fn main() {
         .route("/health", get(|| async { "ok" }))
         .route("/graphql", get(graphiql).post(graphql_handler))
         .route("/chat/stream", post(chat::chat_stream))
+        .route(
+            "/chat/sessions",
+            get(chat::list_sessions).post(chat::create_session),
+        )
+        .route(
+            "/chat/sessions/{session_id}/messages",
+            get(chat::session_messages),
+        )
         .with_state(state.clone())
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(
