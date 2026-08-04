@@ -406,7 +406,16 @@ async fn persist_and_stream(
     };
     if !res.status().is_success() {
         let status = res.status().as_u16();
-        send(sse(&format!(r#"{{"error":"ai status {status}"}}"#))).await;
+        let snippet = res
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(300)
+            .collect::<String>()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        send(sse(&format!(r#"{{"error":"ai status {status}: {snippet}"}}"#))).await;
         return;
     }
 

@@ -800,12 +800,24 @@ impl MutationRoot {
             inserted += res;
         }
         let synced_balance = if let Some(bal) = balance {
-            tx.execute(
-                "UPDATE bank_accounts SET balance = $2::text::numeric, last_sync_at = now()
-                 WHERE account_id = (SELECT account_id FROM bank_accounts WHERE user_id::text = $1 ORDER BY created_at DESC LIMIT 1)",
-                &[&uid, &bal.to_string()],
-            )
-            .await?;
+            match &account_id {
+                Some(aid) => {
+                    tx.execute(
+                        "UPDATE bank_accounts SET balance = $2::text::numeric, last_sync_at = now()
+                         WHERE account_id = $1::text::uuid",
+                        &[aid, &bal.to_string()],
+                    )
+                    .await?;
+                }
+                None => {
+                    tx.execute(
+                        "UPDATE bank_accounts SET balance = $2::text::numeric, last_sync_at = now()
+                         WHERE account_id = (SELECT account_id FROM bank_accounts WHERE user_id::text = $1 ORDER BY created_at DESC LIMIT 1)",
+                        &[&uid, &bal.to_string()],
+                    )
+                    .await?;
+                }
+            }
             Some(bal)
         } else {
             None
@@ -816,6 +828,83 @@ impl MutationRoot {
             balance: synced_balance,
             account_id,
         })
+    }
+
+    async fn set_primary_bank_account(
+        &self,
+        ctx: &Context<'_>,
+        bank_name: String,
+    ) -> Result<BankAccount> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let mut conn = pg(ctx).get().await?;
+        let tx = conn.transaction().await?;
+        tx.execute(
+            "INSERT INTO banks (name, whatsapp_number) VALUES ($1, '') ON CONFLICT (name) DO NOTHING",
+            &[&bank_name],
+        )
+        .await?;
+        let bank_id: String = tx
+            .query_one("SELECT bank_id::text FROM banks WHERE name = $1", &[&bank_name])
+            .await?
+            .get(0);
+        let existing: Option<String> = tx
+            .query_opt(
+                "SELECT account_id::text FROM bank_accounts WHERE user_id::text = $1 AND bank_id::text = $2 ORDER BY created_at DESC LIMIT 1",
+                &[&uid, &bank_id],
+            )
+            .await?
+            .map(|r| r.get(0));
+        let account_id = if let Some(aid) = existing {
+            aid
+        } else {
+            tx.query_one(
+                "INSERT INTO bank_accounts (account_id, user_id, bank_id)
+                 VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid) RETURNING account_id::text",
+                &[&uid, &bank_id],
+            )
+            .await?
+            .get(0)
+        };
+        let row = tx
+            .query_one(
+                "SELECT ba.account_id::text, b.name, ba.mobile_number, ba.account_type, ba.balance::float8, ba.last_sync_at::text
+                 FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id
+                 WHERE ba.account_id = $1::text::uuid",
+                &[&account_id],
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(BankAccount::from_row(&row))
+    }
+
+    async fn delete_user(&self, ctx: &Context<'_>) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let mut conn = pg(ctx).get().await?;
+        let tx = conn.transaction().await?;
+        for table in [
+            "chat_sessions",
+            "sessions",
+            "bank_accounts",
+            "ledger_entries",
+            "analysis_log",
+            "transactions",
+            "budget_alerts",
+            "seller_finances",
+            "seller_inventory",
+            "financial_health_scores",
+            "budget_suggestions",
+            "coach_insights",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE user_id = $1::text::uuid"),
+                &[&uid],
+            )
+            .await?;
+        }
+        tx.execute("DELETE FROM users WHERE user_id = $1::text::uuid", &[&uid])
+            .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     async fn save_budget_suggestion(

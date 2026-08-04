@@ -131,7 +131,7 @@ export default function WalletPage() {
 
       <Button asChild variant="outline">
         <a
-          href={`https://wa.me/${waNumber}?text=${encodeURIComponent("Hi Cartis, I want to sync my transactions.")}`}
+          href={`https://wa.me/${waNumber}?text=${encodeURIComponent("Hi Cartis, I want to sync my bank transactions to my Cartis account.")}`}
           target="_blank"
           rel="noopener noreferrer"
         >

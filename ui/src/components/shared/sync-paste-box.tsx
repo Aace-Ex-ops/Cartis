@@ -8,19 +8,11 @@ import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
-type ParsedTx = {
-  type: "debit" | "credit";
-  amount: number;
-  balance?: number;
-};
-
 export function SyncPasteBox({
   bank,
-  mobile,
   onSynced,
 }: {
   bank?: string;
-  mobile?: string;
   onSynced?: () => void;
 }) {
   const [paste, setPaste] = useState("");
@@ -38,45 +30,33 @@ export function SyncPasteBox({
         body: JSON.stringify({ bank, text: paste }),
       });
       const body = (await res.json()) as {
-        transactions?: ParsedTx[];
         balance?: number | null;
         bank_name?: string | null;
         error?: string;
+        note?: string;
       };
       if (!res.ok) {
         setMessage({ ok: false, text: `Sync failed: ${body.error ?? "unknown error"}` });
         return;
       }
-      const balance =
-        body.balance ??
-        body.transactions?.[body.transactions.length - 1]?.balance ??
-        null;
-      if (!body.transactions?.length && balance == null) {
+      if (body.balance == null) {
         setMessage({
           ok: false,
-          text: "Nothing recognized — paste a bank alert like: Rs.1,250 debited from A/C **1234. Bal: Rs.24,580.",
+          text:
+            body.note ??
+            "No balance recognized — paste a bank alert like: Bal: Rs.24,580.",
         });
         return;
       }
-      const entries = (body.transactions ?? []).map((t) => ({
-        transactionType: t.type,
-        amount: t.type === "credit" ? -t.amount : t.amount,
-      }));
-      const r = await gql<{ addLedgerEntries: { inserted: number; balance: number | null } }>(
-        `mutation ($entries: [LedgerEntryInput!]!, $balance: Float, $bankName: String, $mobileNumber: String) {
-          addLedgerEntries(entries: $entries, balance: $balance, bankName: $bankName, mobileNumber: $mobileNumber) { inserted balance }
+      await gql<{ addLedgerEntries: { inserted: number; balance: number | null } }>(
+        `mutation ($entries: [LedgerEntryInput!]!, $balance: Float, $bankName: String) {
+          addLedgerEntries(entries: $entries, balance: $balance, bankName: $bankName) { inserted balance }
         }`,
-        { entries, balance, bankName: body.bank_name ?? (bank || null), mobileNumber: mobile || null },
+        { entries: [], balance: body.balance, bankName: body.bank_name ?? (bank || null) },
       );
-      const inserted = r.addLedgerEntries.inserted;
       setMessage({
         ok: true,
-        text:
-          inserted === 0 && balance != null
-            ? `Balance updated to ₹${balance.toLocaleString("en-IN")}.`
-            : inserted === 0
-              ? "0 new — already synced."
-              : `${inserted} transaction${inserted > 1 ? "s" : ""} synced${r.addLedgerEntries.balance != null ? ` · balance ₹${r.addLedgerEntries.balance.toLocaleString("en-IN")}` : ""}.`,
+        text: `Balance updated to ₹${body.balance.toLocaleString("en-IN")}.`,
       });
       onSynced?.();
     } catch {
@@ -100,7 +80,7 @@ export function SyncPasteBox({
         disabled={!paste.trim() || syncing}
       >
         <ClipboardPaste className="mr-2 h-4 w-4" />
-        {syncing ? "Syncing…" : "Sync transactions"}
+        {syncing ? "Syncing…" : "Sync balance"}
       </Button>
       {message && (
         <p

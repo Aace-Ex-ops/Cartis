@@ -1,5 +1,7 @@
 import { LandingAuth } from "@/components/shared/landing-auth";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
+import { AuthAwareCta } from "@/components/shared/auth-aware-cta";
+import Link from "next/link";
 import { Warp } from "@paper-design/shaders-react";
 import { FloatingCoins } from "@/components/ui/floating-coins";
 import { InteractiveAccordion, type AccordionItem } from "@/components/ui/interactive-accordion";
@@ -54,7 +56,7 @@ export default function Home() {
 
       <div className="relative z-10">
         <header className="flex h-20 items-center justify-between px-6 md:h-24 md:px-12">
-          <a
+          <Link
             href="/"
             className="group flex items-center gap-3.5 transition-transform duration-300 hover:scale-[1.02]"
           >
@@ -70,7 +72,7 @@ export default function Home() {
                 AI
               </span>
             </div>
-          </a>
+          </Link>
           <LandingAuth />
         </header>
 
@@ -84,12 +86,9 @@ export default function Home() {
               you an honest verdict before every purchase. No lectures. Just the truth.
             </p>
             <div className="flex flex-col items-center justify-center gap-4 pt-4 sm:flex-row">
-              <a
-                href="/signup"
+              <AuthAwareCta
                 className="rounded-full border border-white/30 bg-white/20 px-8 py-4 font-medium text-white backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:bg-white/30"
-              >
-                Get started free
-              </a>
+              />
               <a
                 href="#how"
                 className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
@@ -110,7 +109,7 @@ export default function Home() {
             heading="WHY CARTIS"
             subheading="FEATURES"
             description="Six reasons your wallet will love Cartis — honest verdicts, real budgets, price trends, and early warnings, all built around your money."
-            ctaHref="/signup"
+            ctaHref={null}
             ctaLabel="Get started free"
           />
         </section>
@@ -143,12 +142,7 @@ export default function Home() {
               answer before every purchase.
             </p>
             <div className="mt-8 flex justify-center">
-              <a
-                href="/signup"
-                className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
-              >
-                Get started free
-              </a>
+              <AuthAwareCta className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105" />
             </div>
           </section>
         </main>

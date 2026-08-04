@@ -58,7 +58,6 @@ function StepHeading({ title, body }: { title: string; body: string }) {
 export function OnboardingForm() {
   const [role, setRole] = useState<"consumer" | "seller">("consumer");
   const [bank, setBank] = useState("");
-  const [mobile, setMobile] = useState("");
   const [synced, setSynced] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profile, setProfile] = useState({
@@ -90,9 +89,10 @@ export function OnboardingForm() {
       .catch(() => {});
   }, []);
 
-  const waLink = `https://wa.me/${waNumbers[bank] ?? WHATSAPP_NUMBER}?text=${encodeURIComponent(
-    `Hi Cartis, I bank with ${bank || "my bank"} and want to sync my transactions.`
-  )}`;
+  const waLinkFor = (bankName: string) =>
+    `https://wa.me/${waNumbers[bankName] ?? WHATSAPP_NUMBER}?text=${encodeURIComponent(
+      `Hi Cartis, I bank with ${bankName || "my bank"} and want to sync my transactions to my Cartis account.`
+    )}`;
 
   async function saveProfile() {
     const fields: string[] = [];
@@ -136,6 +136,11 @@ export function OnboardingForm() {
     try {
       await saveProfile();
       await saveSeller();
+      if (role === "consumer" && bank) {
+        await gql<{ setPrimaryBankAccount: { accountId: string; bankName: string } }>(
+          `mutation { setPrimaryBankAccount(bankName: ${JSON.stringify(bank)}) { accountId bankName } }`
+        );
+      }
     } catch {
       // non-critical — proceed anyway
     }
@@ -197,9 +202,15 @@ export function OnboardingForm() {
       <Step>
         <StepHeading
           title="Step 2 · Your bank"
-          body="Cartis reads your bank alerts over WhatsApp. We never get your passwords."
+          body="Pick your bank and we'll open WhatsApp to connect. We never get your passwords."
         />
-        <Select value={bank} onValueChange={setBank}>
+        <Select
+          value={bank}
+          onValueChange={(value) => {
+            setBank(value);
+            window.open(waLinkFor(value), "_blank", "noopener,noreferrer");
+          }}
+        >
           <SelectTrigger className="w-full">
             <SelectValue placeholder="Select your bank" />
           </SelectTrigger>
@@ -211,43 +222,28 @@ export function OnboardingForm() {
             ))}
           </SelectContent>
         </Select>
-      </Step>
-
-      <Step>
-        <StepHeading
-          title="Step 3 · Your number"
-          body="The number where your bank sends transaction alerts."
-        />
-        <div className="flex gap-2">
-          <div className="flex items-center rounded-md border border-border/50 bg-background/50 px-3 text-sm text-muted-foreground">
-            +91
+        {bank && (
+          <div className="mt-3 flex flex-col gap-2">
+            <p className="text-[13px] text-muted-foreground">
+              WhatsApp should have opened in a new tab. If not, tap below.
+            </p>
+            <Button asChild className="w-full">
+              <a href={waLinkFor(bank)} target="_blank" rel="noopener noreferrer">
+                <MessageCircle className="mr-2 h-4 w-4" />
+                Continue on WhatsApp
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </a>
+            </Button>
           </div>
-          <Input
-            type="tel"
-            inputMode="numeric"
-            pattern="[0-9]{10}"
-            maxLength={10}
-            placeholder="10-digit mobile number"
-            value={mobile}
-            onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-          />
-        </div>
-
-        <Button asChild className="mt-4 w-full" disabled={!bank || mobile.length !== 10}>
-          <a href={waLink} target="_blank" rel="noopener noreferrer">
-            <MessageCircle className="mr-2 h-4 w-4" />
-            Continue on WhatsApp
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </a>
-        </Button>
+        )}
       </Step>
 
       <Step>
         <StepHeading
-          title="Step 4 · Connect your account"
+          title="Step 3 · Connect your account"
           body="Paste a bank SMS to connect your account."
         />
-        <SyncPasteBox bank={bank} mobile={mobile} onSynced={() => setSynced(true)} />
+        <SyncPasteBox bank={bank} onSynced={() => setSynced(true)} />
         {synced && (
           <p className="mt-2 text-center text-sm text-green-600">Account connected!</p>
         )}
@@ -256,7 +252,7 @@ export function OnboardingForm() {
       {role === "seller" ? (
         <Step>
           <StepHeading
-            title="Step 5 · Your business"
+            title="Step 4 · Your business"
             body="Starting numbers for your business dashboard. All optional — you can add entries anytime."
           />
           <div className="flex flex-col gap-3">
@@ -297,7 +293,7 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title={role === "seller" ? "Step 6 · Your money" : "Step 5 · Your money"}
+          title={role === "seller" ? "Step 5 · Your money" : "Step 4 · Your money"}
           body="Help Cartis build a smarter budget. All fields optional — skip if you'd rather not say."
         />
         <div className="grid grid-cols-2 gap-3">

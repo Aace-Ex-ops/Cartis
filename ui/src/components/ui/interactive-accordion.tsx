@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { AuthAwareCta } from "@/components/shared/auth-aware-cta"
 
 export interface AccordionItem {
   id: number
@@ -89,7 +90,7 @@ export function InteractiveAccordion({
   heading?: string
   subheading?: string
   description?: string
-  ctaHref?: string
+  ctaHref?: string | null
   ctaLabel?: string
 }) {
   const [activeIndex, setActiveIndex] = useState(0)
@@ -109,12 +110,16 @@ export function InteractiveAccordion({
           </p>
         )}
         <div className="mt-8 flex justify-center lg:justify-start">
-          <a
-            href={ctaHref}
-            className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
-          >
-            {ctaLabel}
-          </a>
+          {ctaHref ? (
+            <a
+              href={ctaHref}
+              className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
+            >
+              {ctaLabel}
+            </a>
+          ) : (
+            <AuthAwareCta className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105" />
+          )}
         </div>
         <p className="mt-6 text-xs uppercase tracking-[0.3em] text-white/40">
           hover a panel to expand
