@@ -676,10 +676,10 @@ app.post('/api/budget/suggest', auth, async (c) => {
   const total30d = data.spending30d?.reduce((s, d) => s + d.spend, 0) ?? 0
   const currentLimit = data.monthlyTab?.limit ?? data.wallet?.tabLimit ?? 600
   const spent = data.monthlyTab?.spent ?? 0
-  const balance = data.wallet?.balance ?? 0
+  const balance = data.bankAccounts?.[0]?.balance ?? 0
   const profile = data.me
 
-  if (total30d === 0 && spent === 0 && !profile?.monthlyIncome) {
+  if (total30d === 0 && spent === 0 && !profile?.monthlyIncome && balance <= 0) {
     return c.json({ suggestedLimit: currentLimit, reasoning: 'Not enough spending data yet. Keep using Cartis and I\'ll suggest a budget once I see your patterns. Complete onboarding for a personalized budget.' })
   }
 
