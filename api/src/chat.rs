@@ -530,6 +530,68 @@ async fn push_supermemory(
     }
 }
 
+pub async fn purge_supermemory(uid: String) {
+    let key = match env::var("SM_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => return,
+    };
+    let client = reqwest::Client::new();
+    let list = client
+        .post("https://api.supermemory.ai/v3/documents/list")
+        .bearer_auth(&key)
+        .timeout(Duration::from_secs(30))
+        .json(&serde_json::json!({ "limit": 100, "containerTags": [format!("user_{uid}")] }))
+        .send()
+        .await;
+    let ids: Vec<String> = match list {
+        Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+            Ok(v) => {
+                let ids: Vec<String> = v["memories"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|d| d["id"].as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                eprintln!("supermemory purge: {} memories for user_{}", ids.len(), uid);
+                ids
+            }
+            Err(_) => return,
+        },
+        Ok(r) => {
+            eprintln!("supermemory list status {}", r.status().as_u16());
+            return;
+        }
+        Err(e) => {
+            eprintln!("supermemory list error: {e}");
+            return;
+        }
+    };
+    for id in ids {
+        for attempt in 0..5 {
+            match client
+                .delete(format!("https://api.supermemory.ai/v3/documents/{id}"))
+                .bearer_auth(&key)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+            {
+                Ok(r) if r.status().as_u16() == 204 => break,
+                Ok(r) => {
+                    eprintln!(
+                        "supermemory delete {id}: {} (attempt {})",
+                        r.status().as_u16(),
+                        attempt + 1
+                    )
+                }
+                Err(e) => eprintln!("supermemory delete error: {e}"),
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+}
+
 fn system_prompt(seller: bool, context: &str) -> String {
     if seller {
         format!(

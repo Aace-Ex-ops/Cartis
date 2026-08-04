@@ -4,6 +4,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString, rand_core:
 use argon2::{Argon2, PasswordVerifier};
 use async_graphql::{Context, Object, Result};
 
+use crate::chat::purge_supermemory;
 use crate::AppState;
 
 fn user_id(ctx: &Context<'_>) -> Option<String> {
@@ -19,6 +20,21 @@ pub struct QueryRoot;
 
 #[derive(Default)]
 pub struct MutationRoot;
+
+const USER_CHILD_TABLES: [&str; 12] = [
+    "sessions",
+    "bank_accounts",
+    "analysis_log",
+    "ledger_entries",
+    "transactions",
+    "budget_alerts",
+    "seller_finances",
+    "seller_inventory",
+    "financial_health_scores",
+    "budget_suggestions",
+    "coach_insights",
+    "chat_sessions",
+];
 
 #[Object]
 impl QueryRoot {
@@ -498,6 +514,24 @@ impl MutationRoot {
             )
             .await?;
         Ok(row.map(|r| UpsertedUser { user_id: r.get(0), created: r.get(1) }))
+    }
+
+    async fn delete_user(&self, ctx: &Context<'_>) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let mut conn = pg(ctx).get().await?;
+        let mut tx = conn.transaction().await?;
+        for t in USER_CHILD_TABLES {
+            tx.execute(
+                &format!("DELETE FROM {t} WHERE user_id::text = $1"),
+                &[&uid],
+            )
+            .await?;
+        }
+        tx.execute("DELETE FROM users WHERE user_id::text = $1", &[&uid])
+            .await?;
+        tx.commit().await?;
+        tokio::spawn(purge_supermemory(uid));
+        Ok(true)
     }
 
     async fn signup(&self, ctx: &Context<'_>, email: String, full_name: String, password: String) -> Result<Option<String>> {
