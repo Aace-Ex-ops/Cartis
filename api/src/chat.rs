@@ -466,28 +466,22 @@ async fn persist_turn(
             return;
         }
     };
-    let _ = conn
-        .execute(
-            "INSERT INTO chat_messages (session_id, role, content) VALUES ($1::text::uuid, 'user', $2)",
-            &[&session_id, &user_message],
-        )
-        .await;
+    let sid = session_id.replace('\'', "''");
+    let user_esc = user_message.replace('\'', "''");
+    let mut sql = format!(
+        "BEGIN; INSERT INTO chat_messages (session_id, role, content) VALUES ('{sid}'::uuid, 'user', '{user_esc}'); UPDATE chat_sessions SET updated_at = now() WHERE session_id::text = '{sid}';"
+    );
     if !assistant.trim().is_empty() {
-        let _ = conn
-            .execute(
-                "INSERT INTO chat_messages (session_id, role, content) VALUES ($1::text::uuid, 'assistant', $2)",
-                &[&session_id, &assistant],
-            )
-            .await;
+        let a = assistant.replace('\'', "''");
+        sql += &format!(
+            " INSERT INTO chat_messages (session_id, role, content) VALUES ('{sid}'::uuid, 'assistant', '{a}');"
+        );
     }
-    let _ = conn
-        .execute(
-            "UPDATE chat_sessions SET updated_at = now() WHERE session_id::text = $1",
-            &[&session_id],
-        )
-        .await;
+    sql += " COMMIT;";
+    let _ = (&*conn).batch_execute(&sql).await;
     if !assistant.trim().is_empty() {
         tokio::spawn(push_supermemory(
+            state.clone(),
             uid.to_string(),
             session_id.to_string(),
             user_message.to_string(),
@@ -498,6 +492,7 @@ async fn persist_turn(
 }
 
 async fn push_supermemory(
+    state: Arc<AppState>,
     uid: String,
     session_id: String,
     user: String,
@@ -508,25 +503,78 @@ async fn push_supermemory(
         Ok(k) if !k.is_empty() => k,
         _ => return,
     };
+    let entity_context = match state.pg.get().await {
+        Ok(conn) => {
+            let name: Option<String> = conn
+                .query_opt(
+                    "SELECT full_name FROM users WHERE user_id::text = $1",
+                    &[&uid],
+                )
+                .await
+                .ok()
+                .flatten()
+                .and_then(|r| r.try_get(0).ok());
+            match name {
+                Some(n) if !n.trim().is_empty() => {
+                    let bank: Option<String> = conn
+                        .query_opt(
+                            "SELECT b.name FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id WHERE ba.user_id::text = $1 AND ba.is_primary ORDER BY ba.created_at DESC LIMIT 1",
+                            &[&uid],
+                        )
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|r| r.try_get(0).ok());
+                    match bank {
+                        Some(b) if !b.trim().is_empty() => format!(
+                            "User {n} is a Cartis user who banks with {b}. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                        ),
+                        _ => format!(
+                            "User {n} is a Cartis user. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                        ),
+                    }
+                }
+                _ => "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                    .to_string(),
+            }
+        }
+        Err(e) => {
+            eprintln!("entity context db error: {e}");
+            "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                .to_string()
+        }
+    };
     let body = serde_json::json!({
         "content": format!("user: {user}\nassistant: {assistant}"),
         "containerTag": format!("user_{uid}"),
         "customId": format!("cartis_{session_id}"),
         "metadata": { "type": "chat", "mode": mode, "source": "cartis" },
+        "entityContext": entity_context,
     });
-    match reqwest::Client::new()
-        .post("https://api.supermemory.ai/v3/documents")
-        .bearer_auth(&key)
-        .timeout(Duration::from_secs(30))
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(r) if !r.status().is_success() => {
-            eprintln!("supermemory push status {}", r.status().as_u16());
+    let client = reqwest::Client::new();
+    for attempt in 0..3 {
+        match client
+            .post("https://api.supermemory.ai/v3/documents")
+            .bearer_auth(&key)
+            .timeout(Duration::from_secs(30))
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().as_u16() == 429 => {
+                eprintln!("supermemory push rate limited (attempt {})", attempt + 1);
+                if attempt < 2 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("supermemory push status {}", r.status().as_u16());
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("supermemory push error: {e}"),
         }
-        Ok(_) => {}
-        Err(e) => eprintln!("supermemory push error: {e}"),
+        break;
     }
 }
 
@@ -535,60 +583,23 @@ pub async fn purge_supermemory(uid: String) {
         Ok(k) if !k.is_empty() => k,
         _ => return,
     };
-    let client = reqwest::Client::new();
-    let list = client
-        .post("https://api.supermemory.ai/v3/documents/list")
+    match reqwest::Client::new()
+        .delete("https://api.supermemory.ai/v3/documents/bulk")
         .bearer_auth(&key)
         .timeout(Duration::from_secs(30))
-        .json(&serde_json::json!({ "limit": 100, "containerTags": [format!("user_{uid}")] }))
+        .json(&serde_json::json!({ "containerTags": [format!("user_{uid}")] }))
         .send()
-        .await;
-    let ids: Vec<String> = match list {
-        Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
-            Ok(v) => {
-                let ids: Vec<String> = v["memories"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|d| d["id"].as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                eprintln!("supermemory purge: {} memories for user_{}", ids.len(), uid);
-                ids
-            }
-            Err(_) => return,
-        },
-        Ok(r) => {
-            eprintln!("supermemory list status {}", r.status().as_u16());
-            return;
+        .await
+    {
+        Ok(r) if r.status().is_success() => {
+            let v: serde_json::Value = r.json().await.unwrap_or_default();
+            eprintln!(
+                "supermemory purge user_{uid}: deleted {} docs",
+                v["deletedCount"].as_u64().unwrap_or(0)
+            );
         }
-        Err(e) => {
-            eprintln!("supermemory list error: {e}");
-            return;
-        }
-    };
-    for id in ids {
-        for attempt in 0..5 {
-            match client
-                .delete(format!("https://api.supermemory.ai/v3/documents/{id}"))
-                .bearer_auth(&key)
-                .timeout(Duration::from_secs(30))
-                .send()
-                .await
-            {
-                Ok(r) if r.status().as_u16() == 204 => break,
-                Ok(r) => {
-                    eprintln!(
-                        "supermemory delete {id}: {} (attempt {})",
-                        r.status().as_u16(),
-                        attempt + 1
-                    )
-                }
-                Err(e) => eprintln!("supermemory delete error: {e}"),
-            }
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
+        Ok(r) => eprintln!("supermemory purge status {}", r.status().as_u16()),
+        Err(e) => eprintln!("supermemory purge error: {e}"),
     }
 }
 
