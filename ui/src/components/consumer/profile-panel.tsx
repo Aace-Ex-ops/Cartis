@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { gql } from "@/lib/gql";
 
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+
 type ProfileData = {
   me: {
     fullName: string;
@@ -34,8 +36,14 @@ export function ProfilePanel() {
     try {
       await gql(`mutation { deleteUser }`);
     } catch {
-      // session already gone — proceed to redirect
+      // user may already be gone — proceed with logout anyway
     }
+    try {
+      await fetch(`${GATEWAY}/auth/logout`, { redirect: "manual" });
+    } catch {
+      // fall through — clear the cookie below regardless
+    }
+    document.cookie = "session=; Max-Age=0; Path=/; Secure; SameSite=Strict";
     window.location.href = "/";
   }
 

@@ -112,6 +112,7 @@ export function InteractiveAccordion({
         <div className="mt-8 flex justify-center lg:justify-start">
           <AuthAwareLink
             href={ctaHref}
+            signedInLabel="Go to dashboard"
             className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
           >
             {ctaLabel}

@@ -8,10 +8,12 @@ export function AuthAwareLink({
   href,
   className,
   children,
+  signedInLabel,
 }: {
   href: string;
   className?: string;
   children: React.ReactNode;
+  signedInLabel?: string;
 }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const router = useRouter();
@@ -31,7 +33,7 @@ export function AuthAwareLink({
         router.push(target);
       }}
     >
-      {children}
+      {user && signedInLabel ? signedInLabel : children}
     </a>
   );
 }

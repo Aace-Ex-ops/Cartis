@@ -451,98 +451,47 @@ type ParsedTx = {
   raw: string
 }
 
-function num(s?: string): number | undefined {
-  if (!s) return undefined
-  const n = parseFloat(s.replace(/[,\s]/g, ''))
-  return Number.isFinite(n) ? n : undefined
-}
-
-function parseWithRegex(text: string): ParsedTx[] {
-  const txs: ParsedTx[] = []
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-  const joined = lines.join('\n')
-  const re = /(?:UPI[:\s-]*|NEFT|IMPS|RTGS)?\s*(?:Rs\.?\s*)?([\d,]+(?:\.\d{1,2})?)\s*(debited from|credited to|sent to|received from|debited by|credit to)\s*(?:A\/C|account|from)?\s*\*{0,2}(\d{4})?/gi
-  let m: RegExpExecArray | null
-  while ((m = re.exec(joined))) {
-    const amount = num(m[1])
-    if (amount === undefined) continue
-    const type = /debited|sent/i.test(m[2]) ? 'debit' : 'credit'
-    const lineStart = m.index
-    let lineEnd = joined.indexOf('\n', lineStart)
-    if (lineEnd < 0) lineEnd = joined.length
-    const line = joined.slice(lineStart, lineEnd)
-    const balLine = line + ' ' + joined.slice(lineEnd + 1, joined.indexOf('\n', lineEnd + 1) >= 0 ? joined.indexOf('\n', lineEnd + 1) : joined.length)
-    const balMatch = balLine.match(/Bal(?:ance)?:?\s*Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i)
-    const dateMatch = line.match(/\b(\d{1,2}-[A-Za-z]{3}-\d{2,4}|\d{1,2}-[A-Za-z]{3}|\d{2}[/-]\d{2}[/-]\d{2,4})\b/)
-    const payeeMatch = line.match(/(?:to|from|by)[:\s]+([A-Z0-9][A-Za-z0-9 .&-]{2,})/gi)
-    let payee: string | undefined
-    for (const pm of payeeMatch ?? []) {
-      let p = pm.split(/\s+(?:on|at|via|by|Bal)\b/)[0].replace(/^(?:to|from|by)[:\s]+/i, '')
-      if (/^(A\/C|account|a\/c)\b/i.test(p) || /^Bal/.test(p)) continue
-      p = p.replace(/[.\s]+$/, '')
-      payee = p
-      break
-    }
-    txs.push({
-      type,
-      amount,
-      account_last4: m[3] ?? undefined,
-      balance: balMatch ? num(balMatch[1]) : undefined,
-      date: dateMatch?.[1],
-      payee,
-      raw: line,
-    })
-  }
-  return txs
-}
-
 app.post('/api/sync/parse', auth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { text?: string }
   const text = (body.text ?? '').trim()
   if (!text) return c.json({ error: 'text is required' }, 400)
 
-  let transactions = parseWithRegex(text)
-  let source: 'regex' | 'ai' | 'none' = 'regex'
-  let balance: number | undefined = transactions[transactions.length - 1]?.balance
-  const bankName =
-    text.match(/^\s*([A-Za-z][A-Za-z .&'-]*(?:Bank|SBI|Union))\s*(?::|[-–]|\()/i)?.[1] ?? null
-
-  if (transactions.length === 0) {
-    const balOnly = text.match(/bal(?:ance)?[:\s]+(?:is\s+)?rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i)
-    if (balOnly) {
-      balance = num(balOnly[1])
-    } else if (/rs\.?|₹|inr/i.test(text)) {
-      try {
-        const prompt = `Extract bank SMS transactions into a JSON array. Each item: {"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}. Only include entries explicitly described as debited/credited/sent/received. If the message states a balance but no transaction, return an empty array. Output ONLY the JSON array, no markdown.\n\nSMS:\n${text}`
-        const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
-          response?: string
-          choices?: Array<{ message?: { content?: string } }>
-        }
-        const content =
-          typeof out.response === 'string'
-            ? out.response
-            : (out.choices?.[0]?.message?.content ?? '')
-        const match = content.match(/\[[\s\S]*\]/)
-        if (match) {
-          try {
-            const parsed = JSON.parse(match[0]) as ParsedTx[]
-            transactions = parsed.filter((t) => typeof t.amount === 'number')
-            source = 'ai'
-            balance = transactions[transactions.length - 1]?.balance ?? balance
-          } catch {
-            transactions = []
-          }
-        }
-      } catch (e) {
-        return c.json({ transactions: [], source: 'none', count: 0, error: String(e) }, 502)
-      }
-    } else {
-      source = 'none'
+  try {
+    const prompt = `You are a bank SMS parser. Parse the bank alert SMS below and return ONLY a JSON object, no markdown, no commentary:
+{"transactions":[{"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}],"balance":<number|null>}
+Rules:
+- "transactions": one entry per debited/credited/sent/received/deposited/withdrawn amount. Empty array if the message only states a balance.
+- "balance": the account balance stated in the message (e.g. "bal:1000" -> 1000, "Bal Rs. 24,580.00" -> 24580). Null if none.
+- amounts as plain numbers, no currency symbols, no commas.
+SMS:
+${text}`
+    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
+      response?: string
+      choices?: Array<{ message?: { content?: string } }>
     }
+    const content =
+      typeof out.response === 'string'
+        ? out.response
+        : (out.choices?.[0]?.message?.content ?? '')
+    const match = content.match(/\{[\s\S]*\}/)
+    if (!match) {
+      return c.json({ transactions: [], balance: null, source: 'ai', count: 0, error: 'AI returned no parseable output' }, 422)
+    }
+    const parsed = JSON.parse(match[0]) as { transactions?: ParsedTx[]; balance?: number | null }
+    const transactions = (parsed.transactions ?? []).filter(
+      (t) => typeof t.amount === 'number' && Number.isFinite(t.amount),
+    )
+    const balance =
+      typeof parsed.balance === 'number' && Number.isFinite(parsed.balance)
+        ? parsed.balance
+        : transactions[transactions.length - 1]?.balance ?? undefined
+    if (transactions.length === 0 && balance === undefined) {
+      return c.json({ transactions: [], balance: null, source: 'ai', count: 0, error: 'No transactions or balance recognized in this message' }, 422)
+    }
+    return c.json({ transactions, balance: balance ?? null, bank_name: null, source: 'ai', count: transactions.length, version: 'ai-only' })
+  } catch (e) {
+    return c.json({ transactions: [], balance: null, source: 'ai', count: 0, error: String(e) }, 502)
   }
-
-  if (transactions.length === 0 && balance === undefined) return c.json({ transactions: [], source, count: 0, note: 'nothing recognized — check the message format', version: 'payee-v2' })
-  return c.json({ transactions, balance: balance ?? null, bank_name: bankName, source, count: transactions.length, version: 'payee-v2' })
 })
 
 app.post('/api/coach/analyze', async (c) => {

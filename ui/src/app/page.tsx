@@ -87,6 +87,7 @@ export default function Home() {
             <div className="flex flex-col items-center justify-center gap-4 pt-4 sm:flex-row">
               <AuthAwareLink
                 href="/signup"
+                signedInLabel="Go to dashboard"
                 className="rounded-full border border-white/30 bg-white/20 px-8 py-4 font-medium text-white backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:bg-white/30"
               >
                 Get started free
@@ -146,6 +147,7 @@ export default function Home() {
             <div className="mt-8 flex justify-center">
               <AuthAwareLink
                 href="/signup"
+                signedInLabel="Go to dashboard"
                 className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
               >
                 Get started free

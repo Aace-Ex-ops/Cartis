@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, MessageCircle, Store, User } from "lucide-react";
+import { Store, User } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -100,6 +100,24 @@ export function OnboardingForm() {
       window.open(waLink, "_blank", "noopener");
     }
   }, [bank, waNumbers, waLink]);
+
+  async function saveBank(bankName: string) {
+    try {
+      await gql(
+        `mutation ($entries: [LedgerEntryInput!]!, $bankName: String, $primary: Boolean) {
+          addLedgerEntries(entries: $entries, bankName: $bankName, primary: $primary) { inserted }
+        }`,
+        { entries: [], bankName, primary: true },
+      );
+    } catch {
+      // non-critical — saved on the paste step if skipped here
+    }
+  }
+
+  function onBankSelect(value: string) {
+    setBank(value);
+    void saveBank(value);
+  }
 
   async function saveProfile() {
     const fields: string[] = [];
@@ -206,7 +224,7 @@ export function OnboardingForm() {
           title="Step 2 · Your bank"
           body="Cartis reads your bank alerts over WhatsApp. We never get your passwords."
         />
-        <Select value={bank} onValueChange={setBank}>
+        <Select value={bank} onValueChange={onBankSelect}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="Select your bank" />
           </SelectTrigger>
@@ -221,13 +239,6 @@ export function OnboardingForm() {
         <p className="mt-3 text-center text-xs text-muted-foreground">
           WhatsApp opens with a message to your bank — send it to start receiving alerts.
         </p>
-        <Button asChild className="mt-4 w-full" disabled={!bank}>
-          <a href={waLink} target="_blank" rel="noopener noreferrer">
-            <MessageCircle className="mr-2 h-4 w-4" />
-            Continue on WhatsApp
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </a>
-        </Button>
       </Step>
 
       <Step>
