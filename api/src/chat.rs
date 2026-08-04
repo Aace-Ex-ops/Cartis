@@ -740,14 +740,24 @@ async fn build_context(
         let mut l = vec![];
         if let Some(r) = conn
             .query_opt(
-                "SELECT wallet_balance::float8, monthly_tab_limit::float8 FROM users WHERE user_id::text = $1",
+                "SELECT COALESCE(b.name, ''), COALESCE(ba.balance, u.wallet_balance)::float8, u.monthly_tab_limit::float8
+                 FROM users u
+                 LEFT JOIN bank_accounts ba ON ba.user_id = u.user_id
+                 LEFT JOIN banks b ON b.bank_id = ba.bank_id
+                 WHERE u.user_id::text = $1
+                 ORDER BY ba.is_primary DESC, ba.created_at DESC LIMIT 1",
                 &[&uid],
             )
             .await?
         {
-            let bal: f64 = r.get(0);
-            let limit: f64 = r.get(1);
-            l.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+            let bank: String = r.get(0);
+            let bal: f64 = r.get(1);
+            let limit: f64 = r.get(2);
+            if bank.is_empty() {
+                l.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+            } else {
+                l.push(format!("Wallet: balance ₹{bal:.0} ({bank}), monthly tab limit ₹{limit:.0}."));
+            }
         }
         if let Some(r) = conn
             .query_opt(

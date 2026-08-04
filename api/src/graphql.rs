@@ -257,7 +257,10 @@ impl QueryRoot {
         let Some(uid) = user_id(ctx) else { return Ok(None) };
         let row = pg(ctx).get().await?
             .query_opt(
-                "SELECT u.monthly_tab_limit::float8, u.wallet_balance::float8,
+                "SELECT u.monthly_tab_limit::float8,
+                        (SELECT COALESCE(ba.balance, u.wallet_balance) FROM bank_accounts ba
+                         WHERE ba.user_id = u.user_id
+                         ORDER BY ba.is_primary DESC, ba.created_at DESC LIMIT 1)::float8 AS wallet,
                         u.coach_adherence_score::float8,
                         COALESCE(SUM(l.amount), 0)::float8 AS spent,
                         (SELECT EXTRACT(EPOCH FROM MAX(ba.last_sync_at)) FROM bank_accounts ba WHERE ba.user_id = u.user_id)::float8 AS last_sync
