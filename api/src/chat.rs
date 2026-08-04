@@ -406,7 +406,9 @@ async fn persist_and_stream(
     };
     if !res.status().is_success() {
         let status = res.status().as_u16();
-        send(sse(&format!(r#"{{"error":"ai status {status}"}}"#))).await;
+        let body = res.text().await.unwrap_or_default();
+        let detail = body.chars().take(300).collect::<String>();
+        send(sse(&format!(r#"{{"error":"ai status {status}: {detail}"}}"#))).await;
         return;
     }
 

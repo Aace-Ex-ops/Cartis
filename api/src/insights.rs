@@ -1,65 +1,16 @@
 use std::env;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_graphql::{Error, Object, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 
 use crate::AppState;
 
-static CF_TOKEN: Mutex<Option<(String, Instant)>> = Mutex::const_new(None);
-
 pub async fn ai_token() -> Result<String, String> {
-    if let Some((tok, at)) = CF_TOKEN.lock().await.as_ref() {
-        if at.elapsed() < Duration::from_secs(50 * 60) {
-            return Ok(tok.clone());
-        }
-    }
-    let refresh_res = (async {
-        let client_id = env::var("CF_CLIENT_ID").map_err(|_| "CF_CLIENT_ID not set".to_string())?;
-        let refresh = env::var("CF_REFRESH_TOKEN").map_err(|_| "CF_REFRESH_TOKEN not set".to_string())?;
-        let res = reqwest::Client::new()
-            .post("https://dash.cloudflare.com/oauth2/token")
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh.as_str()),
-                ("client_id", client_id.as_str()),
-            ])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !res.status().is_success() {
-            return Err(format!("token refresh status {}", res.status().as_u16()));
-        }
-        let v: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-        let tok = v["access_token"].as_str().ok_or("no access_token in refresh")?.to_string();
-        let new_refresh = v["refresh_token"].as_str().unwrap_or(&refresh).to_string();
-        if let Some(path) = env::var("CF_ENV_FILE").ok() {
-            let content = std::fs::read_to_string(&path).unwrap_or_default();
-            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-            for (key, val) in [("CF_API_TOKEN", &tok), ("CF_REFRESH_TOKEN", &new_refresh)] {
-                let prefix = format!("{key}=");
-                if let Some(idx) = lines.iter().position(|l| l.starts_with(&prefix)) {
-                    lines[idx] = format!("{prefix}{val}");
-                } else {
-                    lines.push(format!("{prefix}{val}"));
-                }
-            }
-            let _ = std::fs::write(&path, lines.join("\n") + "\n");
-        }
-        Ok((tok, new_refresh))
-    })
-    .await;
-    match refresh_res {
-        Ok((tok, _)) => {
-            *CF_TOKEN.lock().await = Some((tok.clone(), Instant::now()));
-            Ok(tok)
-        }
-        Err(e) => match env::var("CF_API_TOKEN") {
-            Ok(t) if !t.is_empty() => Ok(t),
-            _ => Err(e),
-        },
+    match env::var("CF_AI_TOKEN") {
+        Ok(t) if !t.is_empty() => Ok(t),
+        _ => Err("CF_AI_TOKEN not set".to_string()),
     }
 }
 
@@ -215,7 +166,12 @@ async fn generate(
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("ai status {}", res.status().as_u16()));
+        let status = res.status().as_u16();
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!(
+            "ai status {status}: {}",
+            body.chars().take(300).collect::<String>()
+        ));
     }
     let value: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
     let content = value
