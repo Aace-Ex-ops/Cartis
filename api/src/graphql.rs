@@ -106,9 +106,9 @@ impl QueryRoot {
         let rows = pg(ctx).get().await?
             .query(
                 "SELECT account_id::text, b.name, mobile_number, account_type,
-                        balance::float8, last_sync_at::text
+                        balance::float8, last_sync_at::text, is_primary
                  FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id
-                 WHERE ba.user_id::text = $1 ORDER BY ba.created_at",
+                 WHERE ba.user_id::text = $1 ORDER BY ba.is_primary DESC, ba.created_at",
                 &[&uid],
             )
             .await?;
@@ -748,6 +748,7 @@ impl MutationRoot {
         balance: Option<f64>,
         bank_name: Option<String>,
         mobile_number: Option<String>,
+        primary: Option<bool>,
     ) -> Result<SyncResult> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let mut conn = pg(ctx).get().await?;
@@ -765,7 +766,7 @@ impl MutationRoot {
                 .get(0);
             account_id = tx
                 .query_opt(
-                    "SELECT account_id::text FROM bank_accounts WHERE user_id::text = $1 AND bank_id::text = $2 ORDER BY created_at DESC LIMIT 1",
+                    "SELECT account_id::text FROM bank_accounts WHERE user_id::text = $1 AND bank_id::text = $2 ORDER BY is_primary DESC, created_at DESC LIMIT 1",
                     &[&uid, &bank_id],
                 )
                 .await?
@@ -780,6 +781,15 @@ impl MutationRoot {
                     .await
                     .map(|r| r.get(0))
                     .ok();
+            }
+        }
+        if primary == Some(true) {
+            if let Some(acc) = &account_id {
+                tx.execute(
+                    "UPDATE bank_accounts SET is_primary = (account_id::text = $2) WHERE user_id::text = $1",
+                    &[&uid, acc],
+                )
+                .await?;
             }
         }
         let mut inserted = 0u64;
@@ -802,7 +812,7 @@ impl MutationRoot {
         let synced_balance = if let Some(bal) = balance {
             tx.execute(
                 "UPDATE bank_accounts SET balance = $2::text::numeric, last_sync_at = now()
-                 WHERE account_id = (SELECT account_id FROM bank_accounts WHERE user_id::text = $1 ORDER BY created_at DESC LIMIT 1)",
+                 WHERE account_id = (SELECT account_id FROM bank_accounts WHERE user_id::text = $1 ORDER BY is_primary DESC, created_at DESC LIMIT 1)",
                 &[&uid, &bal.to_string()],
             )
             .await?;
@@ -988,6 +998,7 @@ struct BankAccount {
     account_type: Option<String>,
     balance: Option<f64>,
     last_sync_at: Option<String>,
+    is_primary: bool,
 }
 
 #[Object]
@@ -998,6 +1009,7 @@ impl BankAccount {
     async fn account_type(&self) -> Option<&str> { self.account_type.as_deref() }
     async fn balance(&self) -> Option<f64> { self.balance }
     async fn last_sync_at(&self) -> Option<&str> { self.last_sync_at.as_deref() }
+    async fn is_primary(&self) -> bool { self.is_primary }
 }
 
 impl BankAccount {
@@ -1009,6 +1021,7 @@ impl BankAccount {
             account_type: r.get(3),
             balance: r.get(4),
             last_sync_at: r.get(5),
+            is_primary: r.get(6),
         }
     }
 }

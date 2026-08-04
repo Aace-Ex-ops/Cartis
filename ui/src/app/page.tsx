@@ -1,4 +1,5 @@
 import { LandingAuth } from "@/components/shared/landing-auth";
+import { AuthAwareLink } from "@/components/shared/auth-aware-link";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
 import { Warp } from "@paper-design/shaders-react";
 import { FloatingCoins } from "@/components/ui/floating-coins";
@@ -84,12 +85,12 @@ export default function Home() {
               you an honest verdict before every purchase. No lectures. Just the truth.
             </p>
             <div className="flex flex-col items-center justify-center gap-4 pt-4 sm:flex-row">
-              <a
+              <AuthAwareLink
                 href="/signup"
                 className="rounded-full border border-white/30 bg-white/20 px-8 py-4 font-medium text-white backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:bg-white/30"
               >
                 Get started free
-              </a>
+              </AuthAwareLink>
               <a
                 href="#how"
                 className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
@@ -143,12 +144,12 @@ export default function Home() {
               answer before every purchase.
             </p>
             <div className="mt-8 flex justify-center">
-              <a
+              <AuthAwareLink
                 href="/signup"
                 className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
               >
                 Get started free
-              </a>
+              </AuthAwareLink>
             </div>
           </section>
         </main>

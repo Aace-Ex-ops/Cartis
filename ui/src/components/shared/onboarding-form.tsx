@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, MessageCircle, Store, User } from "lucide-react";
 import {
@@ -58,7 +58,6 @@ function StepHeading({ title, body }: { title: string; body: string }) {
 export function OnboardingForm() {
   const [role, setRole] = useState<"consumer" | "seller">("consumer");
   const [bank, setBank] = useState("");
-  const [mobile, setMobile] = useState("");
   const [synced, setSynced] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profile, setProfile] = useState({
@@ -91,8 +90,16 @@ export function OnboardingForm() {
   }, []);
 
   const waLink = `https://wa.me/${waNumbers[bank] ?? WHATSAPP_NUMBER}?text=${encodeURIComponent(
-    `Hi Cartis, I bank with ${bank || "my bank"} and want to sync my transactions.`
+    `Hi Cartis, I bank with ${bank || "my bank"} and want to sync my transactions to my Cartis account.`
   )}`;
+
+  const waOpened = useRef<string | null>(null);
+  useEffect(() => {
+    if (bank && waNumbers[bank] !== undefined && waOpened.current !== bank) {
+      waOpened.current = bank;
+      window.open(waLink, "_blank", "noopener");
+    }
+  }, [bank, waNumbers, waLink]);
 
   async function saveProfile() {
     const fields: string[] = [];
@@ -211,29 +218,10 @@ export function OnboardingForm() {
             ))}
           </SelectContent>
         </Select>
-      </Step>
-
-      <Step>
-        <StepHeading
-          title="Step 3 · Your number"
-          body="The number where your bank sends transaction alerts."
-        />
-        <div className="flex gap-2">
-          <div className="flex items-center rounded-md border border-border/50 bg-background/50 px-3 text-sm text-muted-foreground">
-            +91
-          </div>
-          <Input
-            type="tel"
-            inputMode="numeric"
-            pattern="[0-9]{10}"
-            maxLength={10}
-            placeholder="10-digit mobile number"
-            value={mobile}
-            onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-          />
-        </div>
-
-        <Button asChild className="mt-4 w-full" disabled={!bank || mobile.length !== 10}>
+        <p className="mt-3 text-center text-xs text-muted-foreground">
+          WhatsApp opens with a message to your bank — send it to start receiving alerts.
+        </p>
+        <Button asChild className="mt-4 w-full" disabled={!bank}>
           <a href={waLink} target="_blank" rel="noopener noreferrer">
             <MessageCircle className="mr-2 h-4 w-4" />
             Continue on WhatsApp
@@ -244,10 +232,10 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title="Step 4 · Connect your account"
+          title="Step 3 · Connect your account"
           body="Paste a bank SMS to connect your account."
         />
-        <SyncPasteBox bank={bank} mobile={mobile} onSynced={() => setSynced(true)} />
+        <SyncPasteBox bank={bank} mode="onboarding" onSynced={() => setSynced(true)} />
         {synced && (
           <p className="mt-2 text-center text-sm text-green-600">Account connected!</p>
         )}
@@ -256,7 +244,7 @@ export function OnboardingForm() {
       {role === "seller" ? (
         <Step>
           <StepHeading
-            title="Step 5 · Your business"
+            title="Step 4 · Your business"
             body="Starting numbers for your business dashboard. All optional — you can add entries anytime."
           />
           <div className="flex flex-col gap-3">
@@ -297,7 +285,7 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title={role === "seller" ? "Step 6 · Your money" : "Step 5 · Your money"}
+          title={role === "seller" ? "Step 5 · Your money" : "Step 4 · Your money"}
           body="Help Cartis build a smarter budget. All fields optional — skip if you'd rather not say."
         />
         <div className="grid grid-cols-2 gap-3">

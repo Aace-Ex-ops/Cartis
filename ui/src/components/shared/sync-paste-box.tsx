@@ -18,10 +18,12 @@ export function SyncPasteBox({
   bank,
   mobile,
   onSynced,
+  mode = "wallet",
 }: {
   bank?: string;
   mobile?: string;
   onSynced?: () => void;
+  mode?: "onboarding" | "wallet";
 }) {
   const [paste, setPaste] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -63,20 +65,28 @@ export function SyncPasteBox({
         amount: t.type === "credit" ? -t.amount : t.amount,
       }));
       const r = await gql<{ addLedgerEntries: { inserted: number; balance: number | null } }>(
-        `mutation ($entries: [LedgerEntryInput!]!, $balance: Float, $bankName: String, $mobileNumber: String) {
-          addLedgerEntries(entries: $entries, balance: $balance, bankName: $bankName, mobileNumber: $mobileNumber) { inserted balance }
+        `mutation ($entries: [LedgerEntryInput!]!, $balance: Float, $bankName: String, $mobileNumber: String, $primary: Boolean) {
+          addLedgerEntries(entries: $entries, balance: $balance, bankName: $bankName, mobileNumber: $mobileNumber, primary: $primary) { inserted balance }
         }`,
-        { entries, balance, bankName: body.bank_name ?? (bank || null), mobileNumber: mobile || null },
+        {
+          entries: mode === "onboarding" ? [] : entries,
+          balance,
+          bankName: body.bank_name ?? (bank || null),
+          mobileNumber: mobile || null,
+          primary: mode === "onboarding",
+        },
       );
       const inserted = r.addLedgerEntries.inserted;
       setMessage({
         ok: true,
         text:
-          inserted === 0 && balance != null
-            ? `Balance updated to ₹${balance.toLocaleString("en-IN")}.`
-            : inserted === 0
-              ? "0 new — already synced."
-              : `${inserted} transaction${inserted > 1 ? "s" : ""} synced${r.addLedgerEntries.balance != null ? ` · balance ₹${r.addLedgerEntries.balance.toLocaleString("en-IN")}` : ""}.`,
+          mode === "onboarding" && balance != null
+            ? `Connected — balance ₹${balance.toLocaleString("en-IN")}.`
+            : inserted === 0 && balance != null
+              ? `Balance updated to ₹${balance.toLocaleString("en-IN")}.`
+              : inserted === 0
+                ? "0 new — already synced."
+                : `${inserted} transaction${inserted > 1 ? "s" : ""} synced${r.addLedgerEntries.balance != null ? ` · balance ₹${r.addLedgerEntries.balance.toLocaleString("en-IN")}` : ""}.`,
       });
       onSynced?.();
     } catch {
@@ -100,7 +110,7 @@ export function SyncPasteBox({
         disabled={!paste.trim() || syncing}
       >
         <ClipboardPaste className="mr-2 h-4 w-4" />
-        {syncing ? "Syncing…" : "Sync transactions"}
+        {syncing ? "Syncing…" : mode === "onboarding" ? "Connect account" : "Sync transactions"}
       </Button>
       {message && (
         <p

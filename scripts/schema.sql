@@ -45,6 +45,7 @@ CREATE TABLE bank_accounts (
     balance NUMERIC(12,2),
     data_as_of TIMESTAMPTZ,
     last_sync_at TIMESTAMPTZ,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
