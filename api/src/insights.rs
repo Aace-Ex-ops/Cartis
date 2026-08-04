@@ -64,17 +64,25 @@ impl CoachInsights {
 const DEFAULT_MODEL: &str = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Option<CoachInsights>> {
-    let row = state
-        .pg
-        .get()
-        .await?
+    let conn = state.pg.get().await?;
+    let row = conn
         .query_opt(
-            "SELECT insights::text, generated_at::text FROM coach_insights
-             WHERE user_id::text = $1 AND role = $2",
+            "SELECT ci.insights::text, ci.generated_at::text,
+                    (SELECT GREATEST(
+                        (SELECT MAX(ba.last_sync_at) FROM bank_accounts ba WHERE ba.user_id::text = $1),
+                        (SELECT MAX(l.created_at) FROM ledger_entries l WHERE l.user_id::text = $1),
+                        (SELECT MAX(sf.created_at) FROM seller_finances sf WHERE sf.user_id::text = $1)
+                    )) > ci.generated_at AS stale
+             FROM coach_insights ci
+             WHERE ci.user_id::text = $1 AND ci.role = $2",
             &[&uid, &role],
         )
         .await?;
     let Some(row) = row else { return Ok(None) };
+    let stale: bool = row.try_get(2).unwrap_or(false);
+    if stale {
+        return Ok(None);
+    }
     let raw: String = row.get(0);
     let insights: Vec<RawInsight> = serde_json::from_str(&raw).unwrap_or_default();
     Ok(Some(CoachInsights {
@@ -209,14 +217,24 @@ async fn consumer_context(
     let mut lines: Vec<String> = vec![];
     if let Some(r) = conn
         .query_opt(
-            "SELECT wallet_balance::float8, monthly_tab_limit::float8 FROM users WHERE user_id::text = $1",
+            "SELECT COALESCE(b.name, ''), COALESCE(ba.balance, u.wallet_balance)::float8, u.monthly_tab_limit::float8
+             FROM users u
+             LEFT JOIN bank_accounts ba ON ba.user_id = u.user_id
+             LEFT JOIN banks b ON b.bank_id = ba.bank_id
+             WHERE u.user_id::text = $1
+             ORDER BY ba.is_primary DESC, ba.created_at DESC LIMIT 1",
             &[&uid],
         )
         .await?
     {
-        let bal: f64 = r.get(0);
-        let limit: f64 = r.get(1);
-        lines.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+        let bank: String = r.get(0);
+        let bal: f64 = r.get(1);
+        let limit: f64 = r.get(2);
+        if bank.is_empty() {
+            lines.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+        } else {
+            lines.push(format!("Wallet: balance ₹{bal:.0} ({bank}), monthly tab limit ₹{limit:.0}."));
+        }
     }
     if let Some(r) = conn
         .query_opt(
