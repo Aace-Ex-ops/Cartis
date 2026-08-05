@@ -7,6 +7,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 
+fn new_regime_tax(annual: f64) -> f64 {
+    let taxable = annual.max(0.0) - 75_000.0;
+    if taxable <= 1_200_000.0 {
+        return 0.0;
+    }
+    let mut tax = 0.0;
+    let mut income = taxable;
+    let bands: &[(f64, f64)] = &[
+        (400_000.0, 0.0),
+        (400_000.0, 0.05),
+        (400_000.0, 0.10),
+        (400_000.0, 0.15),
+        (400_000.0, 0.20),
+        (400_000.0, 0.25),
+        (f64::INFINITY, 0.30),
+    ];
+    for &(width, rate) in bands {
+        let take = income.min(width);
+        tax += take * rate;
+        income -= take;
+        if income <= 0.0 {
+            break;
+        }
+    }
+    tax * 1.04
+}
+
 pub async fn ai_token() -> Result<String, String> {
     match env::var("CF_AI_TOKEN") {
         Ok(t) if !t.is_empty() => Ok(t),
@@ -158,7 +185,7 @@ async fn generate(
         )
     } else {
         format!(
-            "You are the Cartis personal finance coach for an Indian salaried user. Based ONLY on this live data:\n{context}\nGenerate exactly 3 insights. Return ONLY JSON:\n{{\"insights\":[{{\"title\":\"short headline\",\"detail\":\"2-3 plain-English sentences with ₹ amounts\",\"tone\":\"warn\"|\"good\"|\"info\"}}]}}\nwarn = problem to fix, good = opportunity to grow, info = neutral update.\nOne insight MUST cover income tax: estimate yearly income tax under the new regime (slabs: 0-4L nil, 4-8L 5%, 8-12L 10%, 12-16L 15%, 16-20L 20%, 20-24L 25%, above 24L 30%; standard deduction ₹75,000), compare with TDS already deducted, and flag the ITR deadline of 31 July (or 31 Dec for business) with a filing reminder. Never invent numbers."
+            "You are the Cartis personal finance coach for an Indian salaried user. Based ONLY on this live data:\n{context}\nGenerate exactly 3 insights. Return ONLY JSON:\n{{\"insights\":[{{\"title\":\"short headline\",\"detail\":\"2-3 plain-English sentences with ₹ amounts\",\"tone\":\"warn\"|\"good\"|\"info\"}}]}}\nwarn = problem to fix, good = opportunity to grow, info = neutral update.\nOne insight MUST cover income tax: use the computed tax liability provided in the context (already accounts for standard deduction, rebate u/s 87A, and cess). If computed tax is 0, note the user has no tax liability. Compare with TDS if available. Flag the ITR deadline of 31 July (or 31 Dec for business) with a filing reminder. Never invent numbers."
         )
     };
 
@@ -303,7 +330,7 @@ async fn consumer_context(
     if let Some(r) = conn
         .query_opt(
             "SELECT monthly_income::float8, monthly_spend::float8, investment_pct::float8,
-                    housing_cost::float8, dependents, debt_emis::float8, monthly_tax::float8
+                    housing_cost::float8, dependents, debt_emis::float8
              FROM users WHERE user_id::text = $1",
             &[&uid],
         )
@@ -311,7 +338,9 @@ async fn consumer_context(
     {
         let income: Option<f64> = r.get(0);
         if let Some(inc) = income {
-            let tax: f64 = r.get::<_, Option<f64>>(6).unwrap_or(0.0);
+            let annual = inc * 12.0;
+            let computed_tax = new_regime_tax(annual);
+            let monthly_tax = (computed_tax / 12.0).round();
             let invest: f64 = r.get::<_, Option<f64>>(2).unwrap_or(0.0);
             let invest_amt = (inc * invest / 100.0).round();
             let spend: Option<f64> = r.get(1);
@@ -319,7 +348,7 @@ async fn consumer_context(
             let dependents: Option<i32> = r.get(4);
             let emis: f64 = r.get::<_, Option<f64>>(5).unwrap_or(0.0);
             lines.push(format!(
-                "Profile: income ₹{inc:.0}/mo, TDS ₹{tax:.0}/mo, spend ₹{}/mo, invests {invest:.0}% (₹{invest_amt:.0}/mo), housing ₹{housing:.0}/mo, dependents {}, EMIs ₹{emis:.0}/mo.",
+                "Profile: income ₹{inc:.0}/mo, computed monthly tax ₹{monthly_tax:.0}/mo (annual ₹{computed_tax:.0}, new regime with rebate u/s 87A + 4% cess), spend ₹{}/mo, invests {invest:.0}% (₹{invest_amt:.0}/mo), housing ₹{housing:.0}/mo, dependents {}, EMIs ₹{emis:.0}/mo.",
                 spend.map(|s| format!("{s:.0}")).unwrap_or_else(|| "?".to_string()),
                 dependents.map(|d| d.to_string()).unwrap_or_else(|| "0".to_string()),
             ));

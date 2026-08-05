@@ -451,46 +451,66 @@ type ParsedTx = {
   raw: string
 }
 
-app.post('/api/sync/parse', auth, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { text?: string }
-  const text = (body.text ?? '').trim()
-  if (!text) return c.json({ error: 'text is required' }, 400)
+app.post('/api/sync/parse', async (c) => {
+  return c.json({ error: 'SMS paste removed — use bank sync instead' }, 410)
+})
 
+// ── Setu AA proxy routes ────────────────────────────────────────────
+
+app.post('/api/setu/consent', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { mobile?: string; fip_id?: string }
+  if (!body.mobile?.trim()) return c.json({ error: 'mobile is required' }, 400)
   try {
-    const prompt = `You are a bank SMS parser. Parse the bank alert SMS below and return ONLY a JSON object, no markdown, no commentary:
-{"transactions":[{"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}],"balance":<number|null>}
-Rules:
-- "transactions": one entry per debited/credited/sent/received/deposited/withdrawn amount. Empty array if the message only states a balance.
-- "balance": the account balance stated in the message (e.g. "bal:1000" -> 1000, "Bal Rs. 24,580.00" -> 24580). Null if none.
-- amounts as plain numbers, no currency symbols, no commas.
-SMS:
-${text}`
-    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
-      response?: string
-      choices?: Array<{ message?: { content?: string } }>
-    }
-    const content =
-      typeof out.response === 'string'
-        ? out.response
-        : (out.choices?.[0]?.message?.content ?? '')
-    const match = content.match(/\{[\s\S]*\}/)
-    if (!match) {
-      return c.json({ transactions: [], balance: null, source: 'ai', count: 0, error: 'AI returned no parseable output' }, 422)
-    }
-    const parsed = JSON.parse(match[0]) as { transactions?: ParsedTx[]; balance?: number | null }
-    const transactions = (parsed.transactions ?? []).filter(
-      (t) => typeof t.amount === 'number' && Number.isFinite(t.amount),
-    )
-    const balance =
-      typeof parsed.balance === 'number' && Number.isFinite(parsed.balance)
-        ? parsed.balance
-        : transactions[transactions.length - 1]?.balance ?? undefined
-    if (transactions.length === 0 && balance === undefined) {
-      return c.json({ transactions: [], balance: null, source: 'ai', count: 0, error: 'No transactions or balance recognized in this message' }, 422)
-    }
-    return c.json({ transactions, balance: balance ?? null, bank_name: null, source: 'ai', count: transactions.length, version: 'ai-only' })
+    const res = await fetch(`${c.env.BACKEND_URL}/setu/consent`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: JSON.stringify({ mobile: body.mobile, fip_id: body.fip_id }),
+    })
+    const text = await res.text()
+    if (!res.ok) return c.json({ error: text }, res.status as ContentfulStatusCode)
+    return c.json(JSON.parse(text))
   } catch (e) {
-    return c.json({ transactions: [], balance: null, source: 'ai', count: 0, error: String(e) }, 502)
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.get('/api/setu/consent/:id', auth, async (c) => {
+  const id = c.req.param('id')
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/setu/consent/${id}`, {
+      headers: {
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+    })
+    const text = await res.text()
+    if (!res.ok) return c.json({ error: text }, res.status as ContentfulStatusCode)
+    return c.json(JSON.parse(text))
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/setu/webhook', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/setu/webhook`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+      },
+      body: JSON.stringify(body),
+    })
+    const text = await res.text()
+    if (!res.ok) return c.json({ error: text }, res.status as ContentfulStatusCode)
+    return c.json(JSON.parse(text))
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
   }
 })
 
