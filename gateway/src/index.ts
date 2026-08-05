@@ -645,8 +645,6 @@ app.post('/api/consumer/coach', auth, async (c) => {
 app.post('/api/budget/suggest', auth, async (c) => {
   const userId = c.get('session').user_id
   const cacheKey = `budget:ai:${userId}`
-  const cached = await c.env.SESSIONS.get(cacheKey)
-  if (cached) return c.json(JSON.parse(cached))
 
   let data: {
     wallet?: { balance: number; tabLimit: number }
@@ -674,8 +672,14 @@ app.post('/api/budget/suggest', auth, async (c) => {
     return c.json({ suggestedLimit: data.monthlyTab?.limit ?? 0, reasoning: 'Could not fetch financial data.' })
   }
 
-  const total30d = data.spending30d?.reduce((s, d) => s + d.spend, 0) ?? 0
   const currentLimit = data.monthlyTab?.limit ?? data.wallet?.tabLimit ?? 0
+
+  // Only use cache if budget already exists
+  if (currentLimit > 0) {
+    const cached = await c.env.SESSIONS.get(cacheKey)
+    if (cached) return c.json(JSON.parse(cached))
+  }
+  const total30d = data.spending30d?.reduce((s, d) => s + d.spend, 0) ?? 0
   const spent = data.monthlyTab?.spent ?? 0
   const balance = data.bankAccounts?.[0]?.balance ?? 0
   const profile = data.me
