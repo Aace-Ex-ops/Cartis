@@ -72,7 +72,8 @@ pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Optio
                         (SELECT MAX(ba.last_sync_at) FROM bank_accounts ba WHERE ba.user_id::text = $1),
                         (SELECT MAX(l.created_at) FROM ledger_entries l WHERE l.user_id::text = $1),
                         (SELECT MAX(sf.created_at) FROM seller_finances sf WHERE sf.user_id::text = $1),
-                        (SELECT MAX(bs.created_at) FROM budget_suggestions bs WHERE bs.user_id::text = $1)
+                        (SELECT MAX(bs.created_at) FROM budget_suggestions bs WHERE bs.user_id::text = $1),
+                        (SELECT u.updated_at FROM users u WHERE u.user_id::text = $1)
                     )) > ci.generated_at AS stale
              FROM coach_insights ci
              WHERE ci.user_id::text = $1 AND ci.role = $2",

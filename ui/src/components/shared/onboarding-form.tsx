@@ -321,7 +321,7 @@ export function OnboardingForm() {
             <Input id="onb-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => setProfile((p) => ({ ...p, dependents: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="onb-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
+            <Label htmlFor="onb-debt" className="text-xs text-muted-foreground">Total loans (₹)</Label>
             <Input id="onb-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => setProfile((p) => ({ ...p, debtEmis: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">

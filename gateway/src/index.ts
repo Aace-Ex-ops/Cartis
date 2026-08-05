@@ -642,6 +642,12 @@ app.post('/api/consumer/coach', auth, async (c) => {
   }
 })
 
+app.post('/api/budget/cache/clear', auth, async (c) => {
+  const userId = c.get('session').user_id
+  await c.env.SESSIONS.delete(`budget:ai:${userId}`)
+  return c.json({ ok: true })
+})
+
 app.post('/api/budget/suggest', auth, async (c) => {
   const userId = c.get('session').user_id
   const cacheKey = `budget:ai:${userId}`

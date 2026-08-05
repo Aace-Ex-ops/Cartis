@@ -111,6 +111,7 @@ export function SettingsPanel() {
           `mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`,
         );
       }
+      fetch(`${GATEWAY}/api/budget/cache/clear`, { method: "POST", credentials: "include" }).catch(() => {});
       setProfileSaved(true);
     } catch {
       setProfileSaved(false);
@@ -129,14 +130,11 @@ export function SettingsPanel() {
           <CardTitle>Account</CardTitle>
           <CardDescription>Signed in with Google</CardDescription>
         </CardHeader>
-        <CardContent className="flex items-center justify-between">
+        <CardContent>
           <div className="flex flex-col">
             <span className="text-[14px] font-medium text-foreground">{data?.me.fullName ?? "…"}</span>
             <span className="text-[12px] text-muted-foreground">{data?.me.email ?? ""}</span>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <a href={`${GATEWAY}/auth/start?provider=google`}>Re-connect</a>
-          </Button>
         </CardContent>
       </Card>
 
@@ -191,7 +189,7 @@ export function SettingsPanel() {
               <Input id="sp-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => { setProfile((p) => ({ ...p, dependents: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
+              <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total loans (₹)</Label>
               <Input id="sp-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => { setProfile((p) => ({ ...p, debtEmis: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">

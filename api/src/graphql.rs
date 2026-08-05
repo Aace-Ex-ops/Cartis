@@ -613,7 +613,8 @@ impl MutationRoot {
                     housing_cost = COALESCE($5::text::numeric, housing_cost),
                     dependents = COALESCE($6::int, dependents),
                     debt_emis = COALESCE($7::text::numeric, debt_emis),
-                    monthly_tax = COALESCE($8::text::numeric, monthly_tax)
+                    monthly_tax = COALESCE($8::text::numeric, monthly_tax),
+                    updated_at = NOW()
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
                            wallet_balance::float8, monthly_tab_limit::float8,
