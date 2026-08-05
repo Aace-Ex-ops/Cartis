@@ -239,8 +239,8 @@ async fn consumer_context(
         .await?
     {
         let bank: String = r.get(0);
-        let bal: f64 = r.get(1);
-        let limit: f64 = r.get(2);
+        let bal: f64 = r.get::<_, Option<f64>>(1).unwrap_or(0.0);
+        let limit: f64 = r.get::<_, Option<f64>>(2).unwrap_or(600.0);
         if bank.is_empty() {
             lines.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
         } else {
@@ -261,8 +261,8 @@ async fn consumer_context(
         )
         .await?
     {
-        let limit: f64 = r.get(0);
-        let spent: f64 = r.get(1);
+        let limit: f64 = r.get::<_, Option<f64>>(0).unwrap_or(600.0);
+        let spent: f64 = r.get::<_, Option<f64>>(1).unwrap_or(0.0);
         let pct = if limit > 0.0 { (spent / limit * 100.0).round() } else { 0.0 };
         lines.push(format!("Spent this month: ₹{spent:.0} of ₹{limit:.0} ({pct}%)."));
     }
@@ -276,7 +276,7 @@ async fn consumer_context(
         )
         .await?;
     if !days.is_empty() {
-        let total: f64 = days[0].get(0);
+        let total: f64 = days[0].get::<_, Option<f64>>(0).unwrap_or(0.0);
         lines.push(format!("Spent last 30 days: ₹{total:.0}."));
     }
     let accs = conn
@@ -291,7 +291,7 @@ async fn consumer_context(
         let parts: Vec<String> = accs
             .iter()
             .map(|r| {
-                let bal: f64 = r.get(1);
+                let bal: f64 = r.get::<_, Option<f64>>(1).unwrap_or(0.0);
                 format!("{} ₹{bal:.0}", r.get::<_, String>(0))
             })
             .collect();
@@ -373,7 +373,7 @@ async fn seller_context(
     if !cats.is_empty() {
         let parts: Vec<String> = cats
             .iter()
-            .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, f64>(1)))
+            .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, Option<f64>>(1).unwrap_or(0.0)))
             .collect();
         lines.push(format!("Top expense categories: {}", parts.join(", ")));
     }
@@ -394,7 +394,7 @@ async fn seller_context(
                 format!(
                     "{} ₹{:.0} {} ({})",
                     r.get::<_, String>(0),
-                    r.get::<_, f64>(1),
+                    r.get::<_, Option<f64>>(1).unwrap_or(0.0),
                     if desc.is_empty() { cat } else { desc },
                     r.get::<_, String>(4),
                 )

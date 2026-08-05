@@ -681,7 +681,7 @@ async fn build_context(
         if !cats.is_empty() {
             let parts: Vec<String> = cats
                 .iter()
-                .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, f64>(1)))
+                .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, Option<f64>>(1).unwrap_or(0.0)))
                 .collect();
             l.push(format!("Top expense categories: {}", parts.join(", ")));
         }
@@ -704,7 +704,7 @@ async fn build_context(
                     format!(
                         "{} ₹{:.0} {} ({})",
                         r.get::<_, String>(0),
-                        r.get::<_, f64>(1),
+                        r.get::<_, Option<f64>>(1).unwrap_or(0.0),
                         if desc.is_empty() { cat } else { desc },
                         r.get::<_, String>(4),
                     )

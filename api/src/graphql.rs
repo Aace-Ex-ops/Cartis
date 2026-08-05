@@ -274,10 +274,10 @@ impl QueryRoot {
             )
             .await?;
         let Some(row) = row else { return Ok(None) };
-        let limit: f64 = row.get(0);
-        let wallet: f64 = row.get(1);
-        let adherence: f64 = row.get(2);
-        let spent: f64 = row.get(3);
+        let limit: f64 = row.get::<_, Option<f64>>(0).unwrap_or(600.0);
+        let wallet: f64 = row.get::<_, Option<f64>>(1).unwrap_or(0.0);
+        let adherence: f64 = row.get::<_, Option<f64>>(2).unwrap_or(0.0);
+        let spent: f64 = row.get::<_, Option<f64>>(3).unwrap_or(0.0);
         let last_sync: Option<f64> = row.get(4);
 
         let mut factors: Vec<HealthFactor> = vec![];
@@ -378,8 +378,8 @@ impl QueryRoot {
             }
         };
         let Some(row) = row else { return Ok(None) };
-        let tab_remaining = (row.get::<_, f64>(0) - row.get::<_, f64>(2)).max(0.0);
-        let deferred_remaining: f64 = row.get(1);
+        let tab_remaining = (row.get::<_, Option<f64>>(0).unwrap_or(0.0) - row.get::<_, Option<f64>>(2).unwrap_or(0.0)).max(0.0);
+        let deferred_remaining: f64 = row.get::<_, Option<f64>>(1).unwrap_or(0.0);
         let total_remaining = tab_remaining + deferred_remaining;
         let (verdict, reason) = if product_price <= tab_remaining {
             ("buy".to_string(), format!("Price fits within your monthly tab remaining of ₹{tab_remaining:.0}"))
