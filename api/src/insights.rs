@@ -199,10 +199,12 @@ async fn generate(
         .or_else(|| value.pointer("/choices/0/message/content").and_then(|v| v.as_str()))
         .or_else(|| value.get("response").and_then(|v| v.as_str()))
         .unwrap_or("");
+    eprintln!("insights ai response content (len={}): {}", content.len(), content.chars().take(500).collect::<String>());
 
     let start = content.find('{');
     let end = content.rfind('}');
     let Some((s, e)) = start.zip(end) else {
+        eprintln!("insights ai response has no JSON braces. full value: {}", serde_json::to_string(&value).unwrap_or_default().chars().take(500).collect::<String>());
         return Err("no insights".to_string());
     };
     let parsed: RawPayload = serde_json::from_str(&content[s..=e]).map_err(|_| "bad json".to_string())?;
