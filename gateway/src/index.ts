@@ -14,6 +14,9 @@ type Env = {
   POLAR_WEBHOOK_SECRET: string
   POLAR_ACCESS_TOKEN: string
   POLAR_API_URL: string
+  SETU_CLIENT_ID: string
+  SETU_CLIENT_SECRET: string
+  SETU_PRODUCT_INSTANCE_ID: string
 }
 
 type Session = {
@@ -96,6 +99,100 @@ async function verifyPolarWebhook(secret: string, webhookId: string, timestamp: 
   return false
 }
 
+const FIP_NAMES: Record<string, string> = {
+  'setu-fip': 'Setu FIP (Sandbox)',
+  'setu-fip-2': 'Setu FIP-2 (Sandbox)',
+  'HDFC-FIP': 'HDFC Bank',
+  'SBI-FIP': 'State Bank of India',
+  'ICICI-FIP': 'ICICI Bank',
+  'CAMS-FIP': 'CAMS (MF)',
+  'LIC-FIP': 'LIC',
+  'ICICI-INS-FIP': 'ICICI Insurance',
+  'MULTIPLE': 'Multiple FIPs',
+}
+
+function fipIdToBankName(fipId: string): string {
+  return FIP_NAMES[fipId] ?? fipId
+}
+
+// ── Setu AA helpers ────────────────────────────────────────────────────────
+
+const SETU_AUTH_URL = 'https://uat.setu.co/api/v2/auth/token'
+const SETU_BASE_URL = 'https://fiu-sandbox.setu.co'
+
+async function getSetuToken(c: { env: { SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SESSIONS: KVNamespace } }): Promise<string> {
+  const cached = await c.env.SESSIONS.get('setu:token')
+  if (cached) return cached
+
+  const res = await fetch(SETU_AUTH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientID: c.env.SETU_CLIENT_ID, secret: c.env.SETU_CLIENT_SECRET }),
+  })
+  if (!res.ok) throw new Error(`Setu auth error ${res.status}: ${await res.text()}`)
+  const data = (await res.json()) as { data?: { token?: string; expiresIn?: number } }
+  const token = data?.data?.token
+  if (!token) throw new Error('No token in Setu auth response')
+  // Cache for 25 minutes (token lives 30 min)
+  await c.env.SESSIONS.put('setu:token', token, { expirationTtl: 1500 })
+  return token
+}
+
+async function setuFetch(c: { env: { SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SETU_PRODUCT_INSTANCE_ID: string; SESSIONS: KVNamespace } }, path: string, method = 'GET', body?: unknown) {
+  const token = await getSetuToken(c)
+  const res = await fetch(`${SETU_BASE_URL}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'x-product-instance-id': c.env.SETU_PRODUCT_INSTANCE_ID,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const json = await res.json() as Record<string, unknown>
+  if (!res.ok || json.errorCode) {
+    throw new Error(`Setu API error ${res.status}: ${JSON.stringify(json)}`)
+  }
+  return json
+}
+
+function parseSetuFetch(sessionData: Record<string, unknown>): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] } {
+  const fips = (sessionData.fips ?? []) as { fipID?: string; accounts?: { linkRefNumber?: string; maskedAccNumber?: string; data?: Record<string, unknown> }[] }[]
+  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[] = []
+  const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
+
+  for (const fip of fips) {
+    const fipId = fip.fipID ?? ''
+    for (const acct of fip.accounts ?? []) {
+      const acctData = acct.data?.account as Record<string, unknown> | undefined
+      if (!acctData) continue
+      const summary = acctData.summary as Record<string, unknown> | undefined
+      const balance = summary?.currentBalance ? parseFloat(summary.currentBalance as string) : 0
+
+      accounts.push({
+        maskedAccNumber: acct.maskedAccNumber ?? '',
+        bankName: fipIdToBankName(fipId),
+        balance: Number.isFinite(balance) ? balance : 0,
+        fipId,
+      })
+
+      const txContainer = acctData.transactions as { transaction?: Record<string, unknown>[] } | undefined
+      const txns = txContainer?.transaction ?? []
+      for (const tx of txns) {
+        transactions.push({
+          txnId: (tx.txnId as string) ?? `${tx.narration}-${tx.amount}-${tx.transactionTimestamp}`,
+          txnType: tx.type === 'CREDIT' ? 'credit' : 'debit',
+          amount: parseFloat(tx.amount as string) || 0,
+          narration: (tx.narration as string) ?? '',
+          timestamp: (tx.transactionTimestamp as string) ?? '',
+        })
+      }
+    }
+  }
+
+  return { accounts, transactions }
+}
+
 function cookieToken(c: { req: { header: (n: string) => string | undefined } }) {
   return c.req.header('cookie')?.match(/session=([^;]+)/)?.[1]
 }
@@ -157,7 +254,10 @@ async function backendGql(
   c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } },
   query: string,
   userId?: string,
+  variables?: Record<string, unknown>,
 ): Promise<unknown> {
+  const body: { query: string; variables?: Record<string, unknown> } = { query }
+  if (variables) body.variables = variables
   const res = await fetch(`${c.env.BACKEND_URL}/graphql`, {
     method: 'POST',
     headers: {
@@ -165,7 +265,7 @@ async function backendGql(
       'x-cartis-backend-secret': c.env.BACKEND_SECRET,
       ...(userId ? { 'x-user-id': userId } : {}),
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`backend error ${res.status}`)
   return ((await res.json()) as { data?: unknown }).data
@@ -441,109 +541,7 @@ app.all('/graphql', auth, async (c) => {
   })
 })
 
-type ParsedTx = {
-  type: 'debit' | 'credit'
-  amount: number
-  account_last4?: string
-  balance?: number
-  date?: string
-  payee?: string
-  raw: string
-}
 
-function num(s?: string): number | undefined {
-  if (!s) return undefined
-  const n = parseFloat(s.replace(/[,\s]/g, ''))
-  return Number.isFinite(n) ? n : undefined
-}
-
-function parseWithRegex(text: string): ParsedTx[] {
-  const txs: ParsedTx[] = []
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-  const joined = lines.join('\n')
-  const re = /(?:UPI[:\s-]*|NEFT|IMPS|RTGS)?\s*(?:Rs\.?\s*)?([\d,]+(?:\.\d{1,2})?)\s*(debited from|credited to|sent to|received from|debited by|credit to)\s*(?:A\/C|account|from)?\s*\*{0,2}(\d{4})?/gi
-  let m: RegExpExecArray | null
-  while ((m = re.exec(joined))) {
-    const amount = num(m[1])
-    if (amount === undefined) continue
-    const type = /debited|sent/i.test(m[2]) ? 'debit' : 'credit'
-    const lineStart = m.index
-    let lineEnd = joined.indexOf('\n', lineStart)
-    if (lineEnd < 0) lineEnd = joined.length
-    const line = joined.slice(lineStart, lineEnd)
-    const balLine = line + ' ' + joined.slice(lineEnd + 1, joined.indexOf('\n', lineEnd + 1) >= 0 ? joined.indexOf('\n', lineEnd + 1) : joined.length)
-    const balMatch = balLine.match(/Bal(?:ance)?:?\s*Rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i)
-    const dateMatch = line.match(/\b(\d{1,2}-[A-Za-z]{3}-\d{2,4}|\d{1,2}-[A-Za-z]{3}|\d{2}[/-]\d{2}[/-]\d{2,4})\b/)
-    const payeeMatch = line.match(/(?:to|from|by)[:\s]+([A-Z0-9][A-Za-z0-9 .&-]{2,})/gi)
-    let payee: string | undefined
-    for (const pm of payeeMatch ?? []) {
-      let p = pm.split(/\s+(?:on|at|via|by|Bal)\b/)[0].replace(/^(?:to|from|by)[:\s]+/i, '')
-      if (/^(A\/C|account|a\/c)\b/i.test(p) || /^Bal/.test(p)) continue
-      p = p.replace(/[.\s]+$/, '')
-      payee = p
-      break
-    }
-    txs.push({
-      type,
-      amount,
-      account_last4: m[3] ?? undefined,
-      balance: balMatch ? num(balMatch[1]) : undefined,
-      date: dateMatch?.[1],
-      payee,
-      raw: line,
-    })
-  }
-  return txs
-}
-
-app.post('/api/sync/parse', auth, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { text?: string }
-  const text = (body.text ?? '').trim()
-  if (!text) return c.json({ error: 'text is required' }, 400)
-
-  let transactions = parseWithRegex(text)
-  let source: 'regex' | 'ai' | 'none' = 'regex'
-  let balance: number | undefined = transactions[transactions.length - 1]?.balance
-  const bankName =
-    text.match(/^\s*([A-Za-z][A-Za-z .&'-]*(?:Bank|SBI|Union))\s*(?::|[-–]|\()/i)?.[1] ?? null
-
-  if (transactions.length === 0) {
-    const balOnly = text.match(/bal(?:ance)?[:\s]+(?:is\s+)?rs\.?\s*([\d,]+(?:\.\d{1,2})?)/i)
-    if (balOnly) {
-      balance = num(balOnly[1])
-    } else if (/rs\.?|₹|inr/i.test(text)) {
-      try {
-        const prompt = `Extract bank SMS transactions into a JSON array. Each item: {"type":"debit"|"credit","amount":<number>,"account_last4":<string|null>,"balance":<number|null>,"date":<string|null>,"payee":<string|null>}. Only include entries explicitly described as debited/credited/sent/received. If the message states a balance but no transaction, return an empty array. Output ONLY the JSON array, no markdown.\n\nSMS:\n${text}`
-        const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', { messages: [{ role: 'user', content: prompt }] })) as {
-          response?: string
-          choices?: Array<{ message?: { content?: string } }>
-        }
-        const content =
-          typeof out.response === 'string'
-            ? out.response
-            : (out.choices?.[0]?.message?.content ?? '')
-        const match = content.match(/\[[\s\S]*\]/)
-        if (match) {
-          try {
-            const parsed = JSON.parse(match[0]) as ParsedTx[]
-            transactions = parsed.filter((t) => typeof t.amount === 'number')
-            source = 'ai'
-            balance = transactions[transactions.length - 1]?.balance ?? balance
-          } catch {
-            transactions = []
-          }
-        }
-      } catch (e) {
-        return c.json({ transactions: [], source: 'none', count: 0, error: String(e) }, 502)
-      }
-    } else {
-      source = 'none'
-    }
-  }
-
-  if (transactions.length === 0 && balance === undefined) return c.json({ transactions: [], source, count: 0, note: 'nothing recognized — check the message format', version: 'payee-v2' })
-  return c.json({ transactions, balance: balance ?? null, bank_name: bankName, source, count: transactions.length, version: 'payee-v2' })
-})
 
 app.post('/api/coach/analyze', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { product?: ScrapedProduct }
@@ -868,6 +866,207 @@ app.post('/webhooks/polar', async (c) => {
   console.log('[polar]', event.type ?? 'unknown', event.data?.id ?? '')
   return c.json({ ok: true })
 })
+
+// ── Account Aggregator (Setu AA) routes ────────────────────────────────────
+
+app.post('/api/aa/consent', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { mobileNumber?: string; fiTypes?: string[] }
+  const mobile = body.mobileNumber?.trim()
+  if (!mobile || !/^\d{10}$/.test(mobile)) return c.json({ error: 'valid 10-digit mobileNumber required' }, 400)
+  const fiTypes = body.fiTypes ?? ['DEPOSIT', 'MUTUAL_FUNDS', 'INSURANCE_POLICIES']
+
+  try {
+    const from = new Date(Date.now() - 180 * 86400_000).toISOString()
+    const to = new Date().toISOString()
+
+    const consentRes = await setuFetch(c, '/v2/consents', 'POST', {
+      consentDuration: { unit: 'MONTH', value: '4' },
+      vua: mobile,
+      consentMode: 'STORE',
+      fetchType: 'ONETIME',
+      consentTypes: ['TRANSACTIONS', 'PROFILE', 'SUMMARY'],
+      fiTypes,
+      purpose: {
+        code: '102',
+        refUri: 'https://api.rebit.org.in/aa/purpose/102.xml',
+        text: 'Personal finance management',
+        category: { type: 'string' },
+      },
+      dataRange: { from, to },
+      dataLife: { unit: 'MONTH', value: '1' },
+      frequency: { unit: 'MONTH', value: '1' },
+      redirectUrl: new URL('/onboarding', c.req.url).toString(),
+    })
+
+    const consentId = consentRes.id as string
+    const consentUrl = consentRes.url as string
+
+    await backendGql(
+      c,
+      `mutation { upsertAaConnection(aaHandle: ${JSON.stringify(mobile)}, consentHandle: ${JSON.stringify(consentId)}) { aaHandle consentStatus } }`,
+      c.get('session').user_id,
+    )
+
+    return c.json({ consentId, consentUrl, status: 'PENDING' })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.get('/api/aa/status/:consentId', auth, async (c) => {
+  const consentId = c.req.param('consentId')
+  if (!consentId) return c.json({ error: 'consentId required' }, 400)
+
+  try {
+    const res = await setuFetch(c, `/v2/consents/${consentId}`)
+    const status = res.status as string
+    const detail = res.detail as Record<string, unknown> | undefined
+    const accountsLinked = (res.accountsLinked ?? []) as { maskedAccNumber?: string; fipId?: string; accType?: string; linkRefNumber?: string }[]
+
+    return c.json({
+      consentStatus: status,
+      consentId,
+      accounts: accountsLinked.map((a) => ({
+        maskedAccNumber: a.maskedAccNumber ?? '',
+        fipId: a.fipId ?? '',
+        accType: a.accType ?? '',
+        linkRefNumber: a.linkRefNumber ?? '',
+      })),
+    })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/aa/fetch', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { consentId?: string }
+  const { consentId } = body
+  if (!consentId) return c.json({ error: 'consentId required' }, 400)
+
+  try {
+    const userId = c.get('session').user_id
+
+    // Step 1: Create data session
+    const from = new Date(Date.now() - 180 * 86400_000).toISOString()
+    const to = new Date().toISOString()
+
+    const sessionRes = await setuFetch(c, '/v2/sessions', 'POST', {
+      consentId,
+      dataRange: { from, to },
+      format: 'json',
+    })
+    const dataSessionId = sessionRes.id as string
+    if (!dataSessionId) return c.json({ error: 'no data session id from Setu' }, 502)
+
+    // Step 2: Poll for data readiness (max 30s)
+    let sessionData: Record<string, unknown> | null = null
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const pollRes = await setuFetch(c, `/v2/sessions/${dataSessionId}`)
+      const pollStatus = pollRes.status as string
+      if (pollStatus === 'COMPLETED' || pollStatus === 'PARTIAL') {
+        sessionData = pollRes
+        break
+      }
+      if (pollStatus === 'FAILED' || pollStatus === 'EXPIRED') {
+        return c.json({ error: `Data session ${pollStatus.toLowerCase()}` }, 502)
+      }
+    }
+
+    if (!sessionData) return c.json({ error: 'Data session timed out (30s)' }, 502)
+
+    // Step 3: Parse FI data
+    const { accounts, transactions } = parseSetuFetch(sessionData)
+
+    // Step 4: Sync to backend
+    const syncRes = await backendGql(
+      c,
+      `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
+        syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
+          inserted balance accountId
+        }
+      }`,
+      userId,
+      { aaHandle: consentId, consentId, accounts, transactions },
+    ) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
+
+    return c.json({
+      ok: true,
+      accounts,
+      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
+      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+    })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/aa/reconnect', auth, async (c) => {
+  const userId = c.get('session').user_id
+  try {
+    const connData = (await backendGql(
+      c,
+      `query { aaConnections { aaHandle consentId consentStatus } }`,
+      userId,
+    )) as { aaConnections?: { aaHandle: string; consentId: string; consentStatus: string }[] }
+
+    const conn = connData?.aaConnections?.[0]
+    if (!conn || !conn.consentId) return c.json({ error: 'no active AA connection' }, 400)
+
+    // Create new data session against existing consent
+    const from = new Date(Date.now() - 180 * 86400_000).toISOString()
+    const to = new Date().toISOString()
+
+    const sessionRes = await setuFetch(c, '/v2/sessions', 'POST', {
+      consentId: conn.consentId,
+      dataRange: { from, to },
+      format: 'json',
+    })
+    const dataSessionId = sessionRes.id as string
+    if (!dataSessionId) return c.json({ error: 'no data session id' }, 502)
+
+    // Poll for data readiness
+    let sessionData: Record<string, unknown> | null = null
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const pollRes = await setuFetch(c, `/v2/sessions/${dataSessionId}`)
+      const pollStatus = pollRes.status as string
+      if (pollStatus === 'COMPLETED' || pollStatus === 'PARTIAL') {
+        sessionData = pollRes
+        break
+      }
+      if (pollStatus === 'FAILED' || pollStatus === 'EXPIRED') {
+        return c.json({ error: `Data session ${pollStatus.toLowerCase()}` }, 502)
+      }
+    }
+
+    if (!sessionData) return c.json({ error: 'Data session timed out (30s)' }, 502)
+
+    const { accounts, transactions } = parseSetuFetch(sessionData)
+
+    const syncRes = await backendGql(
+      c,
+      `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
+        syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
+          inserted balance accountId
+        }
+      }`,
+      userId,
+      { aaHandle: conn.aaHandle, consentId: conn.consentId, accounts, transactions },
+    ) as { syncAaData?: { inserted: number; balance: number | null } }
+
+    return c.json({
+      ok: true,
+      accounts,
+      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
+      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+    })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+// ── Catch-all asset handler ─────────────────────────────────────────────────
 
 app.all('*', async (c) => {
   const res = await c.env.ASSETS.fetch(c.req.raw)

@@ -25,10 +25,10 @@ export default function OnboardingPage() {
         </div>
 
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          Connect your bank in 2 minutes
+          Connect your bank in 1 minute
         </h1>
         <p className="mb-8 mt-1.5 text-sm text-muted-foreground">
-          Pick your bank, tap a link, and your transactions start flowing in.
+          Enter your Account Aggregator handle and approve consent — no passwords, no SMS.
         </p>
 
         <OnboardingForm />

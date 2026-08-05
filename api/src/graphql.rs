@@ -117,7 +117,7 @@ impl QueryRoot {
 
     async fn banks(&self, ctx: &Context<'_>) -> Result<Vec<Bank>> {
         let rows = pg(ctx).get().await?
-            .query("SELECT name, whatsapp_number FROM banks ORDER BY name", &[])
+            .query("SELECT name, fip_id FROM banks ORDER BY name", &[])
             .await?;
         Ok(rows.iter().map(Bank::from_row).collect())
     }
@@ -391,6 +391,23 @@ impl QueryRoot {
             )
             .await?;
         Ok(rows.iter().map(BudgetSuggestion::from_row).collect())
+    }
+
+    async fn aa_connections(&self, ctx: &Context<'_>) -> Result<Vec<AaConnection>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT ac.aa_handle, ac.consent_status, ac.masked_acc_number,
+                        ac.fip_id, ac.last_fetched_at::text, b.name
+                 FROM aa_connections ac
+                 LEFT JOIN bank_accounts ba ON ba.user_id = ac.user_id AND ba.fip_id = ac.fip_id
+                 LEFT JOIN banks b ON b.bank_id = ba.bank_id
+                 WHERE ac.user_id::text = $1
+                 ORDER BY ac.created_at DESC",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(AaConnection::from_row).collect())
     }
 }
 
@@ -755,7 +772,7 @@ impl MutationRoot {
         let mut account_id: Option<String> = None;
         if let Some(name) = &bank_name {
             tx.execute(
-                "INSERT INTO banks (name, whatsapp_number) VALUES ($1, '') ON CONFLICT (name) DO NOTHING",
+                "INSERT INTO banks (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
                 &[name],
             )
             .await?;
@@ -773,9 +790,9 @@ impl MutationRoot {
             if account_id.is_none() {
                 account_id = tx
                     .query_one(
-                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number)
-                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, $3) RETURNING account_id::text",
-                        &[&uid, &bank_id, &mobile_number],
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid) RETURNING account_id::text",
+                        &[&uid, &bank_id],
                     )
                     .await
                     .map(|r| r.get(0))
@@ -842,6 +859,127 @@ impl MutationRoot {
             )
             .await?;
         Ok(BudgetSuggestion::from_row(&row))
+    }
+
+    async fn upsert_aa_connection(
+        &self,
+        ctx: &Context<'_>,
+        aa_handle: String,
+        consent_handle: String,
+    ) -> Result<AaConnection> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO aa_connections (user_id, aa_handle, consent_handle, consent_status)
+                 VALUES ($1::text::uuid, $2, $3, 'PENDING')
+                 ON CONFLICT (user_id, aa_handle) DO UPDATE SET
+                    consent_handle = EXCLUDED.consent_handle,
+                    consent_status = 'PENDING'
+                 RETURNING aa_handle, consent_status, masked_acc_number, fip_id, last_fetched_at::text, ''",
+                &[&uid, &aa_handle, &consent_handle],
+            )
+            .await?;
+        Ok(AaConnection::from_row(&row))
+    }
+
+    async fn sync_aa_data(
+        &self,
+        ctx: &Context<'_>,
+        aa_handle: String,
+        consent_id: String,
+        accounts: Vec<AaAccountInput>,
+        transactions: Vec<AaTxInput>,
+    ) -> Result<SyncResult> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let mut conn = pg(ctx).get().await?;
+        let tx = conn.transaction().await?;
+
+        // Upsert aa_connections
+        tx.execute(
+            "INSERT INTO aa_connections (user_id, aa_handle, consent_id, consent_status, last_fetched_at)
+             VALUES ($1::text::uuid, $2, $3, 'ACCEPTED', now())
+             ON CONFLICT (user_id, aa_handle) DO UPDATE SET
+                consent_id = EXCLUDED.consent_id,
+                consent_status = 'ACCEPTED',
+                last_fetched_at = now()",
+            &[&uid, &aa_handle, &consent_id],
+        ).await?;
+
+        let mut inserted = 0u64;
+        let mut last_balance: Option<f64> = None;
+        let mut account_id: Option<String> = None;
+
+        for acct in &accounts {
+            // Ensure bank exists
+            let fip_prefix = acct.fip_id.as_deref().unwrap_or("").get(..4).unwrap_or("");
+            let bank_name = acct.bank_name.as_deref().unwrap_or(fip_prefix);
+            tx.execute(
+                "INSERT INTO banks (name, fip_id) VALUES ($1, $2)
+                 ON CONFLICT (name) DO UPDATE SET fip_id = COALESCE(EXCLUDED.fip_id, banks.fip_id)",
+                &[&bank_name, &acct.fip_id],
+            ).await?;
+
+            let bank_id: String = tx
+                .query_one("SELECT bank_id::text FROM banks WHERE name = $1", &[&bank_name])
+                .await?
+                .get(0);
+
+            // Upsert bank_account
+            let existing: Option<String> = tx
+                .query_opt(
+                    "SELECT account_id::text FROM bank_accounts
+                     WHERE user_id::text = $1 AND bank_id::text = $2
+                     ORDER BY created_at DESC LIMIT 1",
+                    &[&uid, &bank_id],
+                )
+                .await?
+                .map(|r| r.get(0));
+
+            if let Some(ref aid) = existing {
+                tx.execute(
+                    "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now()
+                     WHERE account_id = $1",
+                    &[aid, &acct.balance.to_string(), &acct.fip_id],
+                ).await?;
+                account_id = Some(aid.clone());
+            } else {
+                let new_id: String = tx
+                    .query_one(
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, last_sync_at)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, now())
+                         RETURNING account_id::text",
+                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string()],
+                    )
+                    .await?
+                    .get(0);
+                account_id = Some(new_id);
+            }
+            last_balance = Some(acct.balance);
+        }
+
+        // Insert transactions
+        for txn in &transactions {
+            let key = uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_OID,
+                format!("{}|{}|{}", uid, txn.txn_id, txn.amount).as_bytes(),
+            ).to_string();
+            let res = tx
+                .execute(
+                    "INSERT INTO ledger_entries (user_id, account_type, transaction_type, amount, idempotency_key)
+                     VALUES ($1::text::uuid, 'budget', $2, $3::text::numeric, $4)
+                     ON CONFLICT (idempotency_key) DO NOTHING",
+                    &[&uid, &txn.txn_type, &txn.amount.to_string(), &key],
+                )
+                .await?;
+            inserted += res;
+        }
+
+        tx.commit().await?;
+        Ok(SyncResult {
+            inserted: inserted as i32,
+            balance: last_balance,
+            account_id,
+        })
     }
 }
 
@@ -1015,20 +1153,20 @@ impl BankAccount {
 
 struct Bank {
     name: String,
-    whatsapp_number: String,
+    fip_id: Option<String>,
 }
 
 #[Object]
 impl Bank {
     async fn name(&self) -> &str { &self.name }
-    async fn whatsapp_number(&self) -> &str { &self.whatsapp_number }
+    async fn fip_id(&self) -> Option<&str> { self.fip_id.as_deref() }
 }
 
 impl Bank {
     fn from_row(r: &tokio_postgres::Row) -> Self {
         Self {
             name: r.get(0),
-            whatsapp_number: r.get(1),
+            fip_id: r.get(1),
         }
     }
 }
@@ -1218,6 +1356,55 @@ struct FinanceEntryInput {
 struct LedgerEntryInput {
     transaction_type: String,
     amount: f64,
+}
+
+#[derive(async_graphql::InputObject)]
+struct AaAccountInput {
+    masked_acc_number: Option<String>,
+    bank_name: Option<String>,
+    balance: f64,
+    fip_id: Option<String>,
+}
+
+#[derive(async_graphql::InputObject)]
+struct AaTxInput {
+    txn_id: String,
+    txn_type: String,
+    amount: f64,
+    narration: Option<String>,
+    timestamp: Option<String>,
+}
+
+struct AaConnection {
+    aa_handle: String,
+    consent_status: String,
+    masked_acc_number: Option<String>,
+    fip_id: Option<String>,
+    last_fetched_at: Option<String>,
+    bank_name: Option<String>,
+}
+
+#[Object]
+impl AaConnection {
+    async fn aa_handle(&self) -> &str { &self.aa_handle }
+    async fn consent_status(&self) -> &str { &self.consent_status }
+    async fn masked_acc_number(&self) -> Option<&str> { self.masked_acc_number.as_deref() }
+    async fn fip_id(&self) -> Option<&str> { self.fip_id.as_deref() }
+    async fn last_fetched_at(&self) -> Option<&str> { self.last_fetched_at.as_deref() }
+    async fn bank_name(&self) -> Option<&str> { self.bank_name.as_deref() }
+}
+
+impl AaConnection {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            aa_handle: r.get(0),
+            consent_status: r.get(1),
+            masked_acc_number: r.get(2),
+            fip_id: r.get(3),
+            last_fetched_at: r.get(4),
+            bank_name: r.get(5),
+        }
+    }
 }
 
 struct SyncResult {
