@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Landmark } from "lucide-react";
+import { Landmark, MessageCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { WalletCard } from "@/components/consumer/wallet-card";
-import { SetuConnect } from "@/components/shared/setu-connect";
+import { SyncPasteBox } from "@/components/shared/sync-paste-box";
 import { gql } from "@/lib/gql";
 
 type BankAccount = {
@@ -38,6 +39,7 @@ export default function WalletPage() {
     bankAccounts: BankAccount[];
     monthlyTab: { limit: number; spent: number };
   } | null>(null);
+  const [waNumbers, setWaNumbers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -48,12 +50,25 @@ export default function WalletPage() {
       .catch(() => {
         if (!cancelled) setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 } });
       });
+    void gql<{ banks: { name: string; whatsappNumber: string }[] }>(
+      "{ banks { name whatsappNumber } }"
+    )
+      .then((r) => {
+        const map: Record<string, string> = {};
+        for (const b of r.banks) map[b.name] = b.whatsappNumber;
+        if (!cancelled) setWaNumbers(map);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
 
   const balance = data?.bankAccounts[0]?.balance ?? null;
+  const waNumber =
+    waNumbers[data?.bankAccounts[0]?.bankName ?? ""] ??
+    process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ??
+    "910000000000";
 
   return (
     <div className="flex flex-col gap-6">
@@ -72,38 +87,66 @@ export default function WalletPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium">Connected accounts</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Landmark className="h-4 w-4" /> Connected accounts
+          </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
+          {data === null && <div className="h-20 rounded-lg border border-border/50" />}
+          {data !== null && data.bankAccounts.length === 0 && (
+            <p className="rounded-lg border border-border/50 bg-background/50 px-4 py-6 text-center text-[13px] text-muted-foreground">
+              No bank connected yet — sync one to see your balance here.
+            </p>
+          )}
           {data?.bankAccounts.map((a) => (
-            <div key={a.accountId} className="flex items-center gap-3 rounded-lg border p-3">
-              <Landmark className="h-4 w-4 text-muted-foreground" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{a.bankName}</p>
-                <p className="text-xs text-muted-foreground">
-                  {a.balance != null ? fmt(a.balance) : "—"} · {formatSync(a.lastSyncAt)}
-                </p>
+            <div
+              key={a.accountId}
+              className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-3"
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-medium text-foreground">{a.bankName}</span>
+                  {a.isPrimary && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      Primary
+                    </span>
+                  )}
+                </div>
+                <div className="text-[12px] text-muted-foreground">
+                  {a.mobileNumber ? `+91 ${a.mobileNumber} · ` : ""}synced {formatSync(a.lastSyncAt)}
+                </div>
               </div>
-              {a.isPrimary && (
-                <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Primary</span>
-              )}
+              <div className="text-right">
+                <div className="text-[16px] font-semibold text-foreground">
+                  {a.balance != null ? fmt(a.balance) : "—"}
+                </div>
+                <div className="text-[11px] text-muted-foreground">Balance</div>
+              </div>
             </div>
           ))}
-          {!data?.bankAccounts.length && (
-            <p className="text-sm text-muted-foreground">No accounts connected yet.</p>
-          )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium text-muted-foreground">Sync transactions</CardTitle>
-          <CardDescription>Connect your bank via Account Aggregator — no passwords needed.</CardDescription>
+          <CardDescription>Paste a bank alert or continue on WhatsApp.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <SetuConnect />
+          <SyncPasteBox bank={data?.bankAccounts[0]?.bankName ?? ""} />
         </CardContent>
       </Card>
+
+      <Button asChild variant="outline">
+        <a
+          href={`https://wa.me/${waNumber}?text=${encodeURIComponent("Hi Cartis, I want to sync my transactions.")}`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <MessageCircle className="mr-2 h-4 w-4" />
+          Continue on WhatsApp
+        </a>
+      </Button>
     </div>
   );
 }
