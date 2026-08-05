@@ -637,6 +637,7 @@ app.post('/api/consumer/coach', auth, async (c) => {
     if (!out) out = await coachInsightsViaBackend(c, 'consumer', true)
     return c.json(out)
   } catch (e) {
+    console.error('consumer coach error:', e)
     return c.json({ error: String(e) }, 502)
   }
 })

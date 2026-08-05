@@ -79,9 +79,13 @@ pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Optio
             &[&uid, &role],
         )
         .await?;
-    let Some(row) = row else { return Ok(None) };
+    let Some(row) = row else {
+        eprintln!("insights query: no cached insights for uid={uid} role={role}");
+        return Ok(None);
+    };
     let stale: bool = row.try_get(2).unwrap_or(false);
     if stale {
+        eprintln!("insights query: stale for uid={uid} role={role}, will refresh");
         return Ok(None);
     }
     let raw: String = row.get(0);
@@ -93,7 +97,12 @@ pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Optio
 }
 
 pub async fn refresh(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Vec<Insight>> {
-    let insights = generate(state, uid, role).await.map_err(|e| Error::new(format!("generate: {e}")))?;
+    eprintln!("insights refresh: generating for uid={uid} role={role}");
+    let insights = generate(state, uid, role).await.map_err(|e| {
+        eprintln!("insights generate FAILED for uid={uid} role={role}: {e}");
+        Error::new(format!("generate: {e}"))
+    })?;
+    eprintln!("insights refresh: got {} insights for uid={uid}", insights.len());
     save(state, uid, role, &insights).await?;
     Ok(insights)
 }
@@ -155,6 +164,7 @@ async fn generate(
     let token = ai_token().await?;
     let account = env::var("CF_ACCOUNT_ID").map_err(|_| "CF_ACCOUNT_ID not set".to_string())?;
     let model = env::var("CF_AI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    eprintln!("insights generate: model={model}, account={account}, token_len={}", token.len());
     let url = format!(
         "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
     );
