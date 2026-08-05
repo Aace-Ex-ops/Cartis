@@ -14,7 +14,7 @@ CREATE TABLE users (
     user_type VARCHAR(20) DEFAULT 'consumer' CHECK (user_type IN ('consumer', 'seller')),
     business_name TEXT,
     wallet_balance NUMERIC(12,2) DEFAULT 0.00,
-    monthly_tab_limit NUMERIC(12,2) DEFAULT 600.00,
+    monthly_tab_limit NUMERIC(12,2) DEFAULT 0,
     annual_deferred_limit NUMERIC(12,2) DEFAULT 2500.00,
     financial_health_score INT DEFAULT 750,
     coach_adherence_score NUMERIC(5,2) DEFAULT 0.00,

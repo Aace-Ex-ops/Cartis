@@ -26,16 +26,22 @@ export function WalletCard({ balance, monthlySpend, monthlyBudget }: {
             <TrendingDown className="h-3.5 w-3.5" />
             This month
           </span>
-          <span className="text-foreground">
-            {fmt(monthlySpend)} <span className="text-muted-foreground">/ {fmt(monthlyBudget)}</span>
-          </span>
+          {monthlyBudget > 0 ? (
+            <span className="text-foreground">
+              {fmt(monthlySpend)} <span className="text-muted-foreground">/ {fmt(monthlyBudget)}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">No budget set</span>
+          )}
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-          <div
-            className={`h-full rounded-full ${usedPct > 90 ? "bg-destructive" : "bg-primary"}`}
-            style={{ width: `${Math.min(usedPct, 100)}%` }}
-          />
-        </div>
+        {monthlyBudget > 0 && (
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+            <div
+              className={`h-full rounded-full ${usedPct > 90 ? "bg-destructive" : "bg-primary"}`}
+              style={{ width: `${Math.min(usedPct, 100)}%` }}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

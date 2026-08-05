@@ -671,11 +671,11 @@ app.post('/api/budget/suggest', auth, async (c) => {
       userId,
     )) as typeof data
   } catch {
-    return c.json({ suggestedLimit: data.monthlyTab?.limit ?? 600, reasoning: 'Could not fetch financial data.' })
+    return c.json({ suggestedLimit: data.monthlyTab?.limit ?? 0, reasoning: 'Could not fetch financial data.' })
   }
 
   const total30d = data.spending30d?.reduce((s, d) => s + d.spend, 0) ?? 0
-  const currentLimit = data.monthlyTab?.limit ?? data.wallet?.tabLimit ?? 600
+  const currentLimit = data.monthlyTab?.limit ?? data.wallet?.tabLimit ?? 0
   const spent = data.monthlyTab?.spent ?? 0
   const balance = data.bankAccounts?.[0]?.balance ?? 0
   const profile = data.me
