@@ -478,7 +478,9 @@ async fn persist_turn(
         );
     }
     sql += " COMMIT;";
-    let _ = (&*conn).batch_execute(&sql).await;
+    if let Err(e) = (&*conn).batch_execute(&sql).await {
+        eprintln!("chat persist error: {e}");
+    }
     if !assistant.trim().is_empty() {
         tokio::spawn(push_supermemory(
             state.clone(),
