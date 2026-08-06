@@ -34,17 +34,3 @@ export async function analyzeProduct(product: ScrapedProduct): Promise<Verdict> 
   if (!res.ok) throw new Error(`coach ${res.status}`);
   return (await res.json()) as Verdict;
 }
-
-export async function logAction(action: {
-  product: ScrapedProduct;
-  verdict: string;
-  user_action: "bought" | "skipped" | "clicked_alternative";
-  suggested_site?: string;
-  suggested_price?: number;
-}): Promise<void> {
-  await fetch(`${GATEWAY}/api/actions`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(action),
-  });
-}

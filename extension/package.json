@@ -1,0 +1,13 @@
+{
+  "name": "cartis-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs && cp popup/popup.html dist/popup/popup.html && sed -i '' 's/popup.ts/popup.js/' dist/popup/popup.html"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5"
+  }
+}

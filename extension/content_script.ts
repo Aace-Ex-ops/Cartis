@@ -1,5 +1,5 @@
 import { detectProduct, type ScrapedProduct } from "./lib/scraper.js";
-import { analyzeProduct, logAction, type Verdict } from "./lib/api.js";
+import { analyzeProduct, type Verdict } from "./lib/api.js";
 
 const OVERLAY_ID = "cartis-overlay";
 
@@ -26,7 +26,7 @@ function renderOverlay(verdict: Verdict, product: ScrapedProduct): void {
     .join("<br>");
 
   el.innerHTML = `
-    <div class="cartis-overlay cartis-verdict-${tone}" style="border-left:4px solid ${color}">
+    <div class="cartis-overlay cartis-verdict-${tone}" style="position:fixed;top:16px;right:16px;z-index:2147483647;max-width:320px;background:#fff;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.25);padding:14px;font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.4;color:#111;border-left:4px solid ${color}">
       <div style="display:flex;justify-content:space-between;gap:12px">
         <strong>${icon} Cartis verdict: ${verdict.verdict.toUpperCase()}</strong>
         <button id="cartis-close" style="border:0;background:none;cursor:pointer">✕</button>
@@ -40,19 +40,6 @@ function renderOverlay(verdict: Verdict, product: ScrapedProduct): void {
     </div>`;
   document.body.appendChild(el);
   el.querySelector("#cartis-close")?.addEventListener("click", removeOverlay);
-
-  chrome.runtime.onMessage.addListener(function onMsg(msg) {
-    if (msg?.type === "cartis_action") {
-      void logAction({
-        product,
-        verdict: verdict.verdict,
-        user_action: msg.user_action as "bought" | "skipped" | "clicked_alternative",
-        suggested_site: msg.suggested_site,
-        suggested_price: msg.suggested_price,
-      });
-      chrome.runtime.onMessage.removeListener(onMsg);
-    }
-  });
 }
 
 function removeOverlay(): void {

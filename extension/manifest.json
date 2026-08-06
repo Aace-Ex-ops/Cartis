@@ -6,17 +6,17 @@
   "permissions": ["storage", "alarms", "tabs", "cookies"],
   "host_permissions": ["https://cartis-gateway.rz8m4crnwt.workers.dev/*"],
   "background": {
-    "service_worker": "background.ts",
+    "service_worker": "dist/background.js",
     "type": "module"
   },
   "action": {
     "default_title": "Cartis",
-    "default_popup": "popup/popup.html"
+    "default_popup": "dist/popup/popup.html"
   },
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["content_script.ts"],
+      "js": ["dist/content.js"],
       "run_at": "document_idle"
     }
   ]
