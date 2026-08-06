@@ -90,7 +90,12 @@ export default function OverviewPage() {
     let cancelled = false;
     void gql<DashboardData>(QUERY)
       .then((d) => {
-        if (!cancelled) setData(d);
+        if (cancelled) return;
+        if (!d.me) {
+          setFailed(true);
+          return;
+        }
+        setData(d);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);

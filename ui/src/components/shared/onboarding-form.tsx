@@ -141,7 +141,7 @@ export function OnboardingForm() {
     const revenue = Number(business.monthlyRevenue);
     const expenses = Number(business.monthlyExpenses);
     await gql<{ updateUserType: unknown }>(
-      `mutation { updateUserType(userType: "seller"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
+      `mutation { updateUserType(userType: "business"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
     );
     const today = new Date().toISOString().slice(0, 10);
     if (Number.isFinite(revenue) && revenue > 0) {
@@ -195,7 +195,7 @@ export function OnboardingForm() {
               <User className="h-4 w-4" />
             </span>
             <span>
-              <span className="block text-[14px] font-medium text-foreground">Personal finance</span>
+              <span className="block text-[14px] font-medium text-foreground">Personal</span>
               <span className="mt-0.5 block text-[12px] text-muted-foreground">Budget, spend, save & invest</span>
             </span>
           </button>
@@ -212,7 +212,7 @@ export function OnboardingForm() {
               <Store className="h-4 w-4" />
             </span>
             <span>
-              <span className="block text-[14px] font-medium text-foreground">Business + personal</span>
+              <span className="block text-[14px] font-medium text-foreground">Business</span>
               <span className="mt-0.5 block text-[12px] text-muted-foreground">Everything, plus P&L, GST & inventory</span>
             </span>
           </button>

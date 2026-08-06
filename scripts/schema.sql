@@ -11,7 +11,7 @@ CREATE TABLE users (
     full_name VARCHAR(255) NOT NULL,
     avatar_url TEXT,
     oauth_provider VARCHAR(20) NOT NULL,
-    user_type VARCHAR(20) DEFAULT 'consumer' CHECK (user_type IN ('consumer', 'seller')),
+    user_type VARCHAR(20) DEFAULT 'personal' CHECK (user_type IN ('personal', 'business')),
     business_name TEXT,
     wallet_balance NUMERIC(12,2) DEFAULT 0.00,
     monthly_tab_limit NUMERIC(12,2) DEFAULT 0,

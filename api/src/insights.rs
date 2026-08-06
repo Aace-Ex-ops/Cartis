@@ -486,8 +486,8 @@ pub async fn scheduler(state: Arc<AppState>) {
                 for row in &rows {
                     let uid: String = row.get(0);
                     let ut: Option<String> = row.get(1);
-                    let role = ut.unwrap_or_else(|| "consumer".to_string());
-                    if role != "consumer" && role != "seller" {
+                    let role = ut.unwrap_or_else(|| "personal".to_string());
+                    if role != "personal" && role != "business" {
                         continue;
                     }
                     if let Err(e) = refresh(&state, &uid, &role).await {

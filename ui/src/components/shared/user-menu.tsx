@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Repeat } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -21,6 +21,7 @@ import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
 import { TermsPanel } from "@/components/consumer/terms-panel";
 import { SupportPanel } from "@/components/consumer/support-panel";
+import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -44,8 +45,21 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
+  const [userType, setUserType] = useState(user.userType);
   const pathname = usePathname();
   const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
+      .then((d) => {
+        if (!cancelled && d.me?.userType) setUserType(d.me.userType);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isSeller = pathname?.startsWith("/seller") ?? false;
 
@@ -88,7 +102,7 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          {user.userType === "seller" && (
+          {userType === "business" && (
             <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")}>
               <Repeat className="mr-2 h-4 w-4" />
               {isSeller ? "Switch to Consumer" : "Switch to Seller"}

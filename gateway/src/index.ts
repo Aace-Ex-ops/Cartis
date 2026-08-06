@@ -40,7 +40,7 @@ function sendEmail(env: Env, to: string, subject: string, html: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-cartis-backend-secret': env.BACKEND_SECRET },
     body: JSON.stringify({ to, subject, html }),
-  }).catch(() => {})
+  }).catch((e) => console.error('sendEmail failed', e))
 }
 
 // Self-verifying OAuth state: id.provider.intent.exp.hex-sig — no KV read-after-write race (KV is only globally consistent within ~60s).
@@ -323,7 +323,7 @@ app.get('/auth/callback', async (c) => {
   const userId = data.upsertGoogleUser?.userId
   if (!userId) return c.json({ error: 'user provisioning failed' }, 502)
   if (created === true) {
-    sendEmail(c.env, info.email, 'Welcome to Cartis!', '<h1>Welcome to Cartis!</h1><p>Track your finances, get AI insights, and take control of your money.</p><p><a href="https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard">Open Dashboard</a></p>')
+    c.executionCtx.waitUntil(sendEmail(c.env, info.email, 'Welcome to Cartis!', '<h1>Welcome to Cartis!</h1><p>Track your finances, get AI insights, and take control of your money.</p><p><a href="https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard">Open Dashboard</a></p>'))
   }
 
   const sessionId = randomHex()
@@ -358,7 +358,7 @@ app.post('/auth/signup', async (c) => {
     }
     if (!data?.signup) return c.json({ error: 'email already registered' }, 409)
     await createSession(c, { user_id: data.signup, email, name, avatar: '', provider: 'password' })
-    sendEmail(c.env, email, 'Welcome to Cartis!', '<h1>Welcome to Cartis!</h1><p>Track your finances, get AI insights, and take control of your money.</p><p><a href="https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard">Open Dashboard</a></p>')
+    c.executionCtx.waitUntil(sendEmail(c.env, email, 'Welcome to Cartis!', '<h1>Welcome to Cartis!</h1><p>Track your finances, get AI insights, and take control of your money.</p><p><a href="https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard">Open Dashboard</a></p>'))
     return c.json({ ok: true })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
@@ -841,8 +841,8 @@ app.post('/webhooks/polar', async (c) => {
   console.log('[polar]', event.type ?? 'unknown', event.data?.id ?? '')
   if (event.type === 'order.paid' && event.data?.customer_email) {
     const amount = event.data.amount_total != null ? `$${(event.data.amount_total / 100).toFixed(2)}` : ''
-    sendEmail(c.env, event.data.customer_email, 'Your Cartis Subscription Receipt',
-      `<h1>Subscription Confirmed</h1><p>Thank you for subscribing to ${event.data.product_name ?? 'Cartis Pro'}!</p>${amount ? `<p>Amount charged: <b>${amount}</b></p>` : ''}<p><a href="https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard">Open Dashboard</a></p>`)
+    c.executionCtx.waitUntil(sendEmail(c.env, event.data.customer_email, 'Your Cartis Subscription Receipt',
+      `<h1>Subscription Confirmed</h1><p>Thank you for subscribing to ${event.data.product_name ?? 'Cartis Pro'}!</p>${amount ? `<p>Amount charged: <b>${amount}</b></p>` : ''}<p><a href="https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard">Open Dashboard</a></p>`))
   }
   return c.json({ ok: true })
 })
