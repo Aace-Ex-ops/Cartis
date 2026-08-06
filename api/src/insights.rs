@@ -1,65 +1,43 @@
 use std::env;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_graphql::{Error, Object, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 
 use crate::AppState;
 
-static CF_TOKEN: Mutex<Option<(String, Instant)>> = Mutex::const_new(None);
-
-pub async fn ai_token() -> Result<String, String> {
-    if let Some((tok, at)) = CF_TOKEN.lock().await.as_ref() {
-        if at.elapsed() < Duration::from_secs(50 * 60) {
-            return Ok(tok.clone());
+fn new_regime_tax(annual: f64) -> f64 {
+    let taxable = annual.max(0.0) - 75_000.0;
+    if taxable <= 1_200_000.0 {
+        return 0.0;
+    }
+    let mut tax = 0.0;
+    let mut income = taxable;
+    let bands: &[(f64, f64)] = &[
+        (400_000.0, 0.0),
+        (400_000.0, 0.05),
+        (400_000.0, 0.10),
+        (400_000.0, 0.15),
+        (400_000.0, 0.20),
+        (400_000.0, 0.25),
+        (f64::INFINITY, 0.30),
+    ];
+    for &(width, rate) in bands {
+        let take = income.min(width);
+        tax += take * rate;
+        income -= take;
+        if income <= 0.0 {
+            break;
         }
     }
-    let refresh_res = (async {
-        let client_id = env::var("CF_CLIENT_ID").map_err(|_| "CF_CLIENT_ID not set".to_string())?;
-        let refresh = env::var("CF_REFRESH_TOKEN").map_err(|_| "CF_REFRESH_TOKEN not set".to_string())?;
-        let res = reqwest::Client::new()
-            .post("https://dash.cloudflare.com/oauth2/token")
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh.as_str()),
-                ("client_id", client_id.as_str()),
-            ])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        if !res.status().is_success() {
-            return Err(format!("token refresh status {}", res.status().as_u16()));
-        }
-        let v: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
-        let tok = v["access_token"].as_str().ok_or("no access_token in refresh")?.to_string();
-        let new_refresh = v["refresh_token"].as_str().unwrap_or(&refresh).to_string();
-        if let Some(path) = env::var("CF_ENV_FILE").ok() {
-            let content = std::fs::read_to_string(&path).unwrap_or_default();
-            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-            for (key, val) in [("CF_API_TOKEN", &tok), ("CF_REFRESH_TOKEN", &new_refresh)] {
-                let prefix = format!("{key}=");
-                if let Some(idx) = lines.iter().position(|l| l.starts_with(&prefix)) {
-                    lines[idx] = format!("{prefix}{val}");
-                } else {
-                    lines.push(format!("{prefix}{val}"));
-                }
-            }
-            let _ = std::fs::write(&path, lines.join("\n") + "\n");
-        }
-        Ok((tok, new_refresh))
-    })
-    .await;
-    match refresh_res {
-        Ok((tok, _)) => {
-            *CF_TOKEN.lock().await = Some((tok.clone(), Instant::now()));
-            Ok(tok)
-        }
-        Err(e) => match env::var("CF_API_TOKEN") {
-            Ok(t) if !t.is_empty() => Ok(t),
-            _ => Err(e),
-        },
+    tax * 1.04
+}
+
+pub async fn ai_token() -> Result<String, String> {
+    match env::var("CF_AI_TOKEN") {
+        Ok(t) if !t.is_empty() => Ok(t),
+        _ => Err("CF_AI_TOKEN not set".to_string()),
     }
 }
 
@@ -113,17 +91,31 @@ impl CoachInsights {
 const DEFAULT_MODEL: &str = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Option<CoachInsights>> {
-    let row = state
-        .pg
-        .get()
-        .await?
+    let conn = state.pg.get().await?;
+    let row = conn
         .query_opt(
-            "SELECT insights::text, generated_at::text FROM coach_insights
-             WHERE user_id::text = $1 AND role = $2",
+            "SELECT ci.insights::text, ci.generated_at::text,
+                    (SELECT GREATEST(
+                        (SELECT MAX(ba.last_sync_at) FROM bank_accounts ba WHERE ba.user_id::text = $1),
+                        (SELECT MAX(l.created_at) FROM ledger_entries l WHERE l.user_id::text = $1),
+                        (SELECT MAX(sf.created_at) FROM seller_finances sf WHERE sf.user_id::text = $1),
+                        (SELECT MAX(bs.created_at) FROM budget_suggestions bs WHERE bs.user_id::text = $1),
+                        (SELECT u.updated_at FROM users u WHERE u.user_id::text = $1)
+                    )) > ci.generated_at AS stale
+             FROM coach_insights ci
+             WHERE ci.user_id::text = $1 AND ci.role = $2",
             &[&uid, &role],
         )
         .await?;
-    let Some(row) = row else { return Ok(None) };
+    let Some(row) = row else {
+        eprintln!("insights query: no cached insights for uid={uid} role={role}");
+        return Ok(None);
+    };
+    let stale: bool = row.try_get(2).unwrap_or(false);
+    if stale {
+        eprintln!("insights query: stale for uid={uid} role={role}, will refresh");
+        return Ok(None);
+    }
     let raw: String = row.get(0);
     let insights: Vec<RawInsight> = serde_json::from_str(&raw).unwrap_or_default();
     Ok(Some(CoachInsights {
@@ -133,7 +125,12 @@ pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Optio
 }
 
 pub async fn refresh(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Vec<Insight>> {
-    let insights = generate(state, uid, role).await.map_err(|e| Error::new(format!("generate: {e}")))?;
+    eprintln!("insights refresh: generating for uid={uid} role={role}");
+    let insights = generate(state, uid, role).await.map_err(|e| {
+        eprintln!("insights generate FAILED for uid={uid} role={role}: {e}");
+        Error::new(format!("generate: {e}"))
+    })?;
+    eprintln!("insights refresh: got {} insights for uid={uid}", insights.len());
     save(state, uid, role, &insights).await?;
     Ok(insights)
 }
@@ -188,13 +185,14 @@ async fn generate(
         )
     } else {
         format!(
-            "You are the Cartis personal finance coach for an Indian salaried user. Based ONLY on this live data:\n{context}\nGenerate exactly 3 insights. Return ONLY JSON:\n{{\"insights\":[{{\"title\":\"short headline\",\"detail\":\"2-3 plain-English sentences with ₹ amounts\",\"tone\":\"warn\"|\"good\"|\"info\"}}]}}\nwarn = problem to fix, good = opportunity to grow, info = neutral update.\nOne insight MUST cover income tax: estimate yearly income tax under the new regime (slabs: 0-4L nil, 4-8L 5%, 8-12L 10%, 12-16L 15%, 16-20L 20%, 20-24L 25%, above 24L 30%; standard deduction ₹75,000), compare with TDS already deducted, and flag the ITR deadline of 31 July (or 31 Dec for business) with a filing reminder. Never invent numbers."
+            "You are the Cartis personal finance coach for an Indian salaried user. Based ONLY on this live data:\n{context}\nGenerate exactly 3 insights. Return ONLY JSON:\n{{\"insights\":[{{\"title\":\"short headline\",\"detail\":\"2-3 plain-English sentences with ₹ amounts\",\"tone\":\"warn\"|\"good\"|\"info\"}}]}}\nwarn = problem to fix, good = opportunity to grow, info = neutral update.\nOne insight MUST cover income tax: use the computed tax liability provided in the context (already accounts for standard deduction, rebate u/s 87A, and cess). If computed tax is 0, note the user has no tax liability. Compare with TDS if available. Flag the ITR deadline of 31 July (or 31 Dec for business) with a filing reminder. Never invent numbers."
         )
     };
 
     let token = ai_token().await?;
     let account = env::var("CF_ACCOUNT_ID").map_err(|_| "CF_ACCOUNT_ID not set".to_string())?;
     let model = env::var("CF_AI_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    eprintln!("insights generate: model={model}, account={account}, token_len={}", token.len());
     let url = format!(
         "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
     );
@@ -215,7 +213,12 @@ async fn generate(
         .await
         .map_err(|e| e.to_string())?;
     if !res.status().is_success() {
-        return Err(format!("ai status {}", res.status().as_u16()));
+        let status = res.status().as_u16();
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!(
+            "ai status {status}: {}",
+            body.chars().take(300).collect::<String>()
+        ));
     }
     let value: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
     let content = value
@@ -224,10 +227,12 @@ async fn generate(
         .or_else(|| value.pointer("/choices/0/message/content").and_then(|v| v.as_str()))
         .or_else(|| value.get("response").and_then(|v| v.as_str()))
         .unwrap_or("");
+    eprintln!("insights ai response content (len={}): {}", content.len(), content.chars().take(500).collect::<String>());
 
     let start = content.find('{');
     let end = content.rfind('}');
     let Some((s, e)) = start.zip(end) else {
+        eprintln!("insights ai response has no JSON braces. full value: {}", serde_json::to_string(&value).unwrap_or_default().chars().take(500).collect::<String>());
         return Err("no insights".to_string());
     };
     let parsed: RawPayload = serde_json::from_str(&content[s..=e]).map_err(|_| "bad json".to_string())?;
@@ -253,14 +258,24 @@ async fn consumer_context(
     let mut lines: Vec<String> = vec![];
     if let Some(r) = conn
         .query_opt(
-            "SELECT wallet_balance::float8, monthly_tab_limit::float8 FROM users WHERE user_id::text = $1",
+            "SELECT COALESCE(b.name, ''), COALESCE(ba.balance, u.wallet_balance)::float8, u.monthly_tab_limit::float8
+             FROM users u
+             LEFT JOIN bank_accounts ba ON ba.user_id = u.user_id
+             LEFT JOIN banks b ON b.bank_id = ba.bank_id
+             WHERE u.user_id::text = $1
+             ORDER BY ba.is_primary DESC, ba.created_at DESC LIMIT 1",
             &[&uid],
         )
         .await?
     {
-        let bal: f64 = r.get(0);
-        let limit: f64 = r.get(1);
-        lines.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+        let bank: String = r.get(0);
+        let bal: f64 = r.get::<_, Option<f64>>(1).unwrap_or(0.0);
+        let limit: f64 = r.get::<_, Option<f64>>(2).unwrap_or(600.0);
+        if bank.is_empty() {
+            lines.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+        } else {
+            lines.push(format!("Wallet: balance ₹{bal:.0} ({bank}), monthly tab limit ₹{limit:.0}."));
+        }
     }
     if let Some(r) = conn
         .query_opt(
@@ -276,8 +291,8 @@ async fn consumer_context(
         )
         .await?
     {
-        let limit: f64 = r.get(0);
-        let spent: f64 = r.get(1);
+        let limit: f64 = r.get::<_, Option<f64>>(0).unwrap_or(600.0);
+        let spent: f64 = r.get::<_, Option<f64>>(1).unwrap_or(0.0);
         let pct = if limit > 0.0 { (spent / limit * 100.0).round() } else { 0.0 };
         lines.push(format!("Spent this month: ₹{spent:.0} of ₹{limit:.0} ({pct}%)."));
     }
@@ -291,7 +306,7 @@ async fn consumer_context(
         )
         .await?;
     if !days.is_empty() {
-        let total: f64 = days[0].get(0);
+        let total: f64 = days[0].get::<_, Option<f64>>(0).unwrap_or(0.0);
         lines.push(format!("Spent last 30 days: ₹{total:.0}."));
     }
     let accs = conn
@@ -306,7 +321,7 @@ async fn consumer_context(
         let parts: Vec<String> = accs
             .iter()
             .map(|r| {
-                let bal: f64 = r.get(1);
+                let bal: f64 = r.get::<_, Option<f64>>(1).unwrap_or(0.0);
                 format!("{} ₹{bal:.0}", r.get::<_, String>(0))
             })
             .collect();
@@ -315,7 +330,7 @@ async fn consumer_context(
     if let Some(r) = conn
         .query_opt(
             "SELECT monthly_income::float8, monthly_spend::float8, investment_pct::float8,
-                    housing_cost::float8, dependents, debt_emis::float8, monthly_tax::float8
+                    housing_cost::float8, dependents, debt_emis::float8
              FROM users WHERE user_id::text = $1",
             &[&uid],
         )
@@ -323,7 +338,9 @@ async fn consumer_context(
     {
         let income: Option<f64> = r.get(0);
         if let Some(inc) = income {
-            let tax: f64 = r.get::<_, Option<f64>>(6).unwrap_or(0.0);
+            let annual = inc * 12.0;
+            let computed_tax = new_regime_tax(annual);
+            let monthly_tax = (computed_tax / 12.0).round();
             let invest: f64 = r.get::<_, Option<f64>>(2).unwrap_or(0.0);
             let invest_amt = (inc * invest / 100.0).round();
             let spend: Option<f64> = r.get(1);
@@ -331,7 +348,7 @@ async fn consumer_context(
             let dependents: Option<i32> = r.get(4);
             let emis: f64 = r.get::<_, Option<f64>>(5).unwrap_or(0.0);
             lines.push(format!(
-                "Profile: income ₹{inc:.0}/mo, TDS ₹{tax:.0}/mo, spend ₹{}/mo, invests {invest:.0}% (₹{invest_amt:.0}/mo), housing ₹{housing:.0}/mo, dependents {}, EMIs ₹{emis:.0}/mo.",
+                "Profile: income ₹{inc:.0}/mo, computed monthly tax ₹{monthly_tax:.0}/mo (annual ₹{computed_tax:.0}, new regime with rebate u/s 87A + 4% cess), spend ₹{}/mo, invests {invest:.0}% (₹{invest_amt:.0}/mo), housing ₹{housing:.0}/mo, dependents {}, EMIs ₹{emis:.0}/mo.",
                 spend.map(|s| format!("{s:.0}")).unwrap_or_else(|| "?".to_string()),
                 dependents.map(|d| d.to_string()).unwrap_or_else(|| "0".to_string()),
             ));
@@ -388,7 +405,7 @@ async fn seller_context(
     if !cats.is_empty() {
         let parts: Vec<String> = cats
             .iter()
-            .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, f64>(1)))
+            .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, Option<f64>>(1).unwrap_or(0.0)))
             .collect();
         lines.push(format!("Top expense categories: {}", parts.join(", ")));
     }
@@ -409,7 +426,7 @@ async fn seller_context(
                 format!(
                     "{} ₹{:.0} {} ({})",
                     r.get::<_, String>(0),
-                    r.get::<_, f64>(1),
+                    r.get::<_, Option<f64>>(1).unwrap_or(0.0),
                     if desc.is_empty() { cat } else { desc },
                     r.get::<_, String>(4),
                 )
@@ -457,19 +474,56 @@ pub async fn scheduler(state: Arc<AppState>) {
             }
         };
         let rows = conn
-            .query("SELECT user_id::text, user_type FROM users", &[])
+            .query(
+                "SELECT user_id::text, user_type, email, email_notifications,
+                        EXTRACT(EPOCH FROM last_digest_email_at)::float8 AS last_digest
+                 FROM users",
+                &[],
+            )
             .await;
         match rows {
             Ok(rows) => {
                 for row in &rows {
                     let uid: String = row.get(0);
                     let ut: Option<String> = row.get(1);
-                    let role = ut.unwrap_or_else(|| "consumer".to_string());
-                    if role != "consumer" && role != "seller" {
+                    let role = ut.unwrap_or_else(|| "personal".to_string());
+                    if role != "personal" && role != "business" {
                         continue;
                     }
                     if let Err(e) = refresh(&state, &uid, &role).await {
                         eprintln!("insights scheduler: user {uid} ({role}): {e:?}");
+                    }
+                    let email_on: bool = row.get(3);
+                    if !email_on {
+                        continue;
+                    }
+                    let email: String = row.get(2);
+                    let last_digest: Option<f64> = row.get(4);
+                    let send = last_digest
+                        .map(|ts| {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs_f64();
+                            ((now - ts) / 86400.0) >= 7.0
+                        })
+                        .unwrap_or(true);
+                    if send {
+                        if let Ok(Some(ci)) = query(&state, &uid, &role).await {
+                            let body = ci.insights.iter()
+                                .map(|i| format!("<li><b>{}</b>: {}</li>", i.title, i.detail))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            crate::email::send_email(
+                                &email,
+                                "Your Cartis Weekly Insights",
+                                &format!("<p>Here are your latest insights:</p>\n<ul>\n{body}</ul>\n<p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
+                            ).await;
+                            let _ = conn.execute(
+                                "UPDATE users SET last_digest_email_at = NOW() WHERE user_id::text = $1",
+                                &[&uid],
+                            ).await;
+                        }
                     }
                 }
             }

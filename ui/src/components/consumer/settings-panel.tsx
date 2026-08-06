@@ -10,7 +10,7 @@ import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
-function SettingToggle({ title, desc, defaultOn }: { title: string; desc: string; defaultOn: boolean }) {
+function SettingToggle({ title, desc, defaultOn, onCheckedChange }: { title: string; desc: string; defaultOn: boolean; onCheckedChange?: (v: boolean) => void }) {
   const [on, setOn] = useState(defaultOn);
   return (
     <div className="flex items-center justify-between py-3">
@@ -18,7 +18,7 @@ function SettingToggle({ title, desc, defaultOn }: { title: string; desc: string
         <span className="text-[14px] text-foreground">{title}</span>
         <span className="text-[12px] text-muted-foreground">{desc}</span>
       </div>
-      <Switch checked={on} onCheckedChange={setOn} />
+      <Switch checked={on} onCheckedChange={(v) => { setOn(v); onCheckedChange?.(v); }} />
     </div>
   );
 }
@@ -34,6 +34,7 @@ type SettingsData = {
     dependents: number | null;
     debtEmis: number | null;
     monthlyTax: number | null;
+    emailNotifications: boolean;
   };
   monthlyTab: { limit: number };
 };
@@ -57,7 +58,7 @@ export function SettingsPanel() {
   useEffect(() => {
     let cancelled = false;
     void gql<SettingsData>(
-      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } monthlyTab { limit } }`
+      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax emailNotifications } monthlyTab { limit } }`
     )
       .then((d) => {
         if (cancelled) return;
@@ -74,7 +75,7 @@ export function SettingsPanel() {
         });
       })
       .catch(() => {
-        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null }, monthlyTab: { limit: 0 } });
+        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null, emailNotifications: true }, monthlyTab: { limit: 0 } });
       });
     return () => {
       cancelled = true;
@@ -111,6 +112,7 @@ export function SettingsPanel() {
           `mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`,
         );
       }
+      fetch(`${GATEWAY}/api/budget/cache/clear`, { method: "POST", credentials: "include" }).catch(() => {});
       setProfileSaved(true);
     } catch {
       setProfileSaved(false);
@@ -129,14 +131,11 @@ export function SettingsPanel() {
           <CardTitle>Account</CardTitle>
           <CardDescription>Signed in with Google</CardDescription>
         </CardHeader>
-        <CardContent className="flex items-center justify-between">
+        <CardContent>
           <div className="flex flex-col">
             <span className="text-[14px] font-medium text-foreground">{data?.me.fullName ?? "…"}</span>
             <span className="text-[12px] text-muted-foreground">{data?.me.email ?? ""}</span>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <a href={`${GATEWAY}/auth/start?provider=google`}>Re-connect</a>
-          </Button>
         </CardContent>
       </Card>
 
@@ -191,7 +190,7 @@ export function SettingsPanel() {
               <Input id="sp-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => { setProfile((p) => ({ ...p, dependents: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
+              <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total loans (₹)</Label>
               <Input id="sp-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => { setProfile((p) => ({ ...p, debtEmis: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
@@ -225,7 +224,10 @@ export function SettingsPanel() {
         </CardHeader>
         <CardContent className="flex flex-col divide-y divide-border/50">
           <SettingToggle title="WhatsApp" desc="Send verdicts and alerts over WhatsApp" defaultOn />
-          <SettingToggle title="Email" desc="Weekly digest with spending summary" defaultOn={false} />
+          <SettingToggle title="Email" desc="Weekly digest with spending summary" defaultOn={data?.me.emailNotifications ?? true}
+            onCheckedChange={async (v) => {
+              try { await gql<unknown>(`mutation { updateFinancialProfile(emailNotifications: ${v}) { id } }`); } catch {}
+            }} />
         </CardContent>
       </Card>
     </div>

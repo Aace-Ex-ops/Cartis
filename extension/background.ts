@@ -6,7 +6,7 @@ chrome.runtime.onInstalled.addListener(() => {
   void chrome.alarms.create("cartis_sync", { periodInMinutes: 15 });
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms.onAlarm.addListener((alarm: any) => {
   if (alarm.name === "cartis_sync") void syncAlerts();
 });
 
@@ -34,7 +34,7 @@ async function syncAlerts(): Promise<void> {
   }
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse: any) => {
   if (msg?.type === "cartis_open_login") {
     void chrome.tabs.create({ url: `${GATEWAY}/auth/start` });
   }

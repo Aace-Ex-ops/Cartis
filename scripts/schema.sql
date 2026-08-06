@@ -11,10 +11,10 @@ CREATE TABLE users (
     full_name VARCHAR(255) NOT NULL,
     avatar_url TEXT,
     oauth_provider VARCHAR(20) NOT NULL,
-    user_type VARCHAR(20) DEFAULT 'consumer' CHECK (user_type IN ('consumer', 'seller')),
+    user_type VARCHAR(20) DEFAULT 'personal' CHECK (user_type IN ('personal', 'business')),
     business_name TEXT,
     wallet_balance NUMERIC(12,2) DEFAULT 0.00,
-    monthly_tab_limit NUMERIC(12,2) DEFAULT 600.00,
+    monthly_tab_limit NUMERIC(12,2) DEFAULT 0,
     annual_deferred_limit NUMERIC(12,2) DEFAULT 2500.00,
     financial_health_score INT DEFAULT 750,
     coach_adherence_score NUMERIC(5,2) DEFAULT 0.00,
@@ -26,7 +26,10 @@ CREATE TABLE users (
     dependents INT DEFAULT 0,
     debt_emis NUMERIC(12,2),
     monthly_tax NUMERIC(12,2),
-    ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct'
+    ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
+    last_digest_email_at TIMESTAMPTZ
 );
 
 CREATE TABLE sessions (
@@ -46,6 +49,7 @@ CREATE TABLE bank_accounts (
     fip_id VARCHAR(50),
     data_as_of TIMESTAMPTZ,
     last_sync_at TIMESTAMPTZ,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

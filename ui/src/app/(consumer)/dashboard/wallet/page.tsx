@@ -13,10 +13,11 @@ type BankAccount = {
   mobileNumber: string | null;
   balance: number | null;
   lastSyncAt: string | null;
+  isPrimary: boolean;
 };
 
 const QUERY = `{
-  bankAccounts { accountId bankName mobileNumber balance lastSyncAt }
+  bankAccounts { accountId bankName mobileNumber balance lastSyncAt isPrimary }
   monthlyTab { limit spent }
   aaConnections { aaHandle consentStatus fipId lastFetchedAt bankName }
 }`;
@@ -95,7 +96,14 @@ export default function WalletPage() {
               className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-3"
             >
               <div>
-                <div className="text-[14px] font-medium text-foreground">{a.bankName}</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-medium text-foreground">{a.bankName}</span>
+                  {a.isPrimary && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      Primary
+                    </span>
+                  )}
+                </div>
                 <div className="text-[12px] text-muted-foreground">
                   synced {formatSync(a.lastSyncAt)}
                 </div>

@@ -406,7 +406,9 @@ async fn persist_and_stream(
     };
     if !res.status().is_success() {
         let status = res.status().as_u16();
-        send(sse(&format!(r#"{{"error":"ai status {status}"}}"#))).await;
+        let body = res.text().await.unwrap_or_default();
+        let detail = body.chars().take(300).collect::<String>();
+        send(sse(&format!(r#"{{"error":"ai status {status}: {detail}"}}"#))).await;
         return;
     }
 
@@ -464,28 +466,24 @@ async fn persist_turn(
             return;
         }
     };
-    let _ = conn
-        .execute(
-            "INSERT INTO chat_messages (session_id, role, content) VALUES ($1::text::uuid, 'user', $2)",
-            &[&session_id, &user_message],
-        )
-        .await;
+    let sid = session_id.replace('\'', "''");
+    let user_esc = user_message.replace('\'', "''");
+    let mut sql = format!(
+        "BEGIN; INSERT INTO chat_messages (session_id, role, content) VALUES ('{sid}'::uuid, 'user', '{user_esc}'); UPDATE chat_sessions SET updated_at = now() WHERE session_id::text = '{sid}';"
+    );
     if !assistant.trim().is_empty() {
-        let _ = conn
-            .execute(
-                "INSERT INTO chat_messages (session_id, role, content) VALUES ($1::text::uuid, 'assistant', $2)",
-                &[&session_id, &assistant],
-            )
-            .await;
+        let a = assistant.replace('\'', "''");
+        sql += &format!(
+            " INSERT INTO chat_messages (session_id, role, content) VALUES ('{sid}'::uuid, 'assistant', '{a}');"
+        );
     }
-    let _ = conn
-        .execute(
-            "UPDATE chat_sessions SET updated_at = now() WHERE session_id::text = $1",
-            &[&session_id],
-        )
-        .await;
+    sql += " COMMIT;";
+    if let Err(e) = (&*conn).batch_execute(&sql).await {
+        eprintln!("chat persist error: {e}");
+    }
     if !assistant.trim().is_empty() {
         tokio::spawn(push_supermemory(
+            state.clone(),
             uid.to_string(),
             session_id.to_string(),
             user_message.to_string(),
@@ -496,6 +494,7 @@ async fn persist_turn(
 }
 
 async fn push_supermemory(
+    state: Arc<AppState>,
     uid: String,
     session_id: String,
     user: String,
@@ -506,25 +505,103 @@ async fn push_supermemory(
         Ok(k) if !k.is_empty() => k,
         _ => return,
     };
+    let entity_context = match state.pg.get().await {
+        Ok(conn) => {
+            let name: Option<String> = conn
+                .query_opt(
+                    "SELECT full_name FROM users WHERE user_id::text = $1",
+                    &[&uid],
+                )
+                .await
+                .ok()
+                .flatten()
+                .and_then(|r| r.try_get(0).ok());
+            match name {
+                Some(n) if !n.trim().is_empty() => {
+                    let bank: Option<String> = conn
+                        .query_opt(
+                            "SELECT b.name FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id WHERE ba.user_id::text = $1 AND ba.is_primary ORDER BY ba.created_at DESC LIMIT 1",
+                            &[&uid],
+                        )
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|r| r.try_get(0).ok());
+                    match bank {
+                        Some(b) if !b.trim().is_empty() => format!(
+                            "User {n} is a Cartis user who banks with {b}. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                        ),
+                        _ => format!(
+                            "User {n} is a Cartis user. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                        ),
+                    }
+                }
+                _ => "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                    .to_string(),
+            }
+        }
+        Err(e) => {
+            eprintln!("entity context db error: {e}");
+            "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
+                .to_string()
+        }
+    };
     let body = serde_json::json!({
         "content": format!("user: {user}\nassistant: {assistant}"),
         "containerTag": format!("user_{uid}"),
         "customId": format!("cartis_{session_id}"),
         "metadata": { "type": "chat", "mode": mode, "source": "cartis" },
+        "entityContext": entity_context,
     });
+    let client = reqwest::Client::new();
+    for attempt in 0..3 {
+        match client
+            .post("https://api.supermemory.ai/v3/documents")
+            .bearer_auth(&key)
+            .timeout(Duration::from_secs(30))
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().as_u16() == 429 => {
+                eprintln!("supermemory push rate limited (attempt {})", attempt + 1);
+                if attempt < 2 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("supermemory push status {}", r.status().as_u16());
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("supermemory push error: {e}"),
+        }
+        break;
+    }
+}
+
+pub async fn purge_supermemory(uid: String) {
+    let key = match env::var("SM_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => return,
+    };
     match reqwest::Client::new()
-        .post("https://api.supermemory.ai/v3/documents")
+        .delete("https://api.supermemory.ai/v3/documents/bulk")
         .bearer_auth(&key)
         .timeout(Duration::from_secs(30))
-        .json(&body)
+        .json(&serde_json::json!({ "containerTags": [format!("user_{uid}")] }))
         .send()
         .await
     {
-        Ok(r) if !r.status().is_success() => {
-            eprintln!("supermemory push status {}", r.status().as_u16());
+        Ok(r) if r.status().is_success() => {
+            let v: serde_json::Value = r.json().await.unwrap_or_default();
+            eprintln!(
+                "supermemory purge user_{uid}: deleted {} docs",
+                v["deletedCount"].as_u64().unwrap_or(0)
+            );
         }
-        Ok(_) => {}
-        Err(e) => eprintln!("supermemory push error: {e}"),
+        Ok(r) => eprintln!("supermemory purge status {}", r.status().as_u16()),
+        Err(e) => eprintln!("supermemory purge error: {e}"),
     }
 }
 
@@ -604,7 +681,7 @@ async fn build_context(
         if !cats.is_empty() {
             let parts: Vec<String> = cats
                 .iter()
-                .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, f64>(1)))
+                .map(|r| format!("{} ₹{:.0}", r.get::<_, String>(0), r.get::<_, Option<f64>>(1).unwrap_or(0.0)))
                 .collect();
             l.push(format!("Top expense categories: {}", parts.join(", ")));
         }
@@ -627,7 +704,7 @@ async fn build_context(
                     format!(
                         "{} ₹{:.0} {} ({})",
                         r.get::<_, String>(0),
-                        r.get::<_, f64>(1),
+                        r.get::<_, Option<f64>>(1).unwrap_or(0.0),
                         if desc.is_empty() { cat } else { desc },
                         r.get::<_, String>(4),
                     )
@@ -665,14 +742,24 @@ async fn build_context(
         let mut l = vec![];
         if let Some(r) = conn
             .query_opt(
-                "SELECT wallet_balance::float8, monthly_tab_limit::float8 FROM users WHERE user_id::text = $1",
+                "SELECT COALESCE(b.name, ''), COALESCE(ba.balance, u.wallet_balance)::float8, u.monthly_tab_limit::float8
+                 FROM users u
+                 LEFT JOIN bank_accounts ba ON ba.user_id = u.user_id
+                 LEFT JOIN banks b ON b.bank_id = ba.bank_id
+                 WHERE u.user_id::text = $1
+                 ORDER BY ba.is_primary DESC, ba.created_at DESC LIMIT 1",
                 &[&uid],
             )
             .await?
         {
-            let bal: f64 = r.get(0);
-            let limit: f64 = r.get(1);
-            l.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+            let bank: String = r.get(0);
+            let bal: f64 = r.get(1);
+            let limit: f64 = r.get(2);
+            if bank.is_empty() {
+                l.push(format!("Wallet: balance ₹{bal:.0}, monthly tab limit ₹{limit:.0}."));
+            } else {
+                l.push(format!("Wallet: balance ₹{bal:.0} ({bank}), monthly tab limit ₹{limit:.0}."));
+            }
         }
         if let Some(r) = conn
             .query_opt(

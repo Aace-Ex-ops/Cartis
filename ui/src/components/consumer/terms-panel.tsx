@@ -32,6 +32,13 @@ export function TermsPanel() {
       </Card>
 
       <Card>
+        <CardHeader><CardTitle>3.1 Browser Extension</CardTitle></CardHeader>
+        <CardContent className="text-sm text-muted-foreground leading-relaxed">
+          The Cartis browser extension reads the currently open product page on supported shopping sites (such as Amazon, Flipkart, and Best Buy) and sends the product name, price, seller, ratings, and a sample of visible reviews to our servers to generate a purchase verdict. This data is transmitted over HTTPS, cached briefly to serve repeat analyses, and is not sold or shared with third parties. The extension does not read other page content, browsing history, or personal data outside product pages. Sign-in is optional; verdicts can be generated without an account.
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>4. AI & Financial Advice</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground leading-relaxed">
           Cartis uses AI models to generate budget suggestions, spending insights, and purchase verdicts. This is not certified financial advice. All financial decisions are your own responsibility. AI outputs may occasionally be inaccurate.

@@ -3,7 +3,6 @@ import { getSession, refreshSession, clearSession } from "../lib/auth.js";
 const GATEWAY = "https://cartis-gateway.rz8m4crnwt.workers.dev";
 
 const summary = document.getElementById("summary")!;
-const historyEl = document.getElementById("history")!;
 const signInBtn = document.getElementById("signin") as HTMLButtonElement;
 const logoutBtn = document.getElementById("logout") as HTMLButtonElement;
 

@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { gql } from "@/lib/gql";
+
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 type ProfileData = {
   me: {
@@ -15,6 +18,8 @@ type ProfileData = {
 
 export function ProfilePanel() {
   const [data, setData] = useState<ProfileData | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +30,22 @@ export function ProfilePanel() {
   }, []);
 
   const me = data?.me;
+
+  async function deleteAccount() {
+    setDeleting(true);
+    try {
+      await gql(`mutation { deleteUser }`);
+    } catch {
+      // user may already be gone — proceed with logout anyway
+    }
+    try {
+      await fetch(`${GATEWAY}/auth/logout`, { redirect: "manual" });
+    } catch {
+      // fall through — clear the cookie below regardless
+    }
+    document.cookie = "session=; Max-Age=0; Path=/; Secure; SameSite=Strict";
+    window.location.href = "/";
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -47,6 +68,33 @@ export function ProfilePanel() {
             <span className="text-[13px] text-muted-foreground">{me?.email ?? ""}</span>
             <span className="mt-0.5 text-[11px] text-muted-foreground/60 capitalize">{me?.userType ?? ""}</span>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-destructive">Danger zone</CardTitle>
+          <CardDescription>
+            {confirming
+              ? "This permanently deletes your account, all data, and your AI memory. This cannot be undone."
+              : "Permanently delete your account and all associated data."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          {confirming ? (
+            <>
+              <Button variant="outline" onClick={() => setConfirming(false)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void deleteAccount()} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete my account"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" className="text-destructive" onClick={() => setConfirming(true)}>
+              Delete account
+            </Button>
+          )}
         </CardContent>
       </Card>
     </div>

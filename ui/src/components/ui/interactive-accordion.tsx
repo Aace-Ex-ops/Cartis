@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { AuthAwareLink } from "@/components/shared/auth-aware-link"
 
 export interface AccordionItem {
   id: number
@@ -109,12 +110,13 @@ export function InteractiveAccordion({
           </p>
         )}
         <div className="mt-8 flex justify-center lg:justify-start">
-          <a
+          <AuthAwareLink
             href={ctaHref}
+            signedInLabel="Go to dashboard"
             className="rounded-full bg-white px-8 py-4 font-medium text-gray-800 transition-transform duration-300 hover:scale-105"
           >
             {ctaLabel}
-          </a>
+          </AuthAwareLink>
         </div>
         <p className="mt-6 text-xs uppercase tracking-[0.3em] text-white/40">
           hover a panel to expand
