@@ -120,15 +120,11 @@ function fipIdToBankName(fipId: string): string {
 const SETU_AUTH_URL = 'https://uat.setu.co/api/v2/auth/token'
 const SETU_BASE_URL = 'https://fiu-sandbox.setu.co'
 
-async function getSetuToken(c: { env: { SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SESSIONS: KVNamespace } }): Promise<string> {
+async function getSetuToken(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string; SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SESSIONS: KVNamespace } }): Promise<string> {
   const cached = await c.env.SESSIONS.get('setu:token')
   if (cached) return cached
 
-  const res = await fetch(SETU_AUTH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientID: c.env.SETU_CLIENT_ID, secret: c.env.SETU_CLIENT_SECRET }),
-  })
+  const res = await setuProxy(c, SETU_AUTH_URL, 'POST', { 'Content-Type': 'application/json' }, { clientID: c.env.SETU_CLIENT_ID, secret: c.env.SETU_CLIENT_SECRET })
   if (!res.ok) throw new Error(`Setu auth error ${res.status}: ${await res.text()}`)
   const data = (await res.json()) as { data?: { token?: string; expiresIn?: number } }
   const token = data?.data?.token
@@ -138,17 +134,32 @@ async function getSetuToken(c: { env: { SETU_CLIENT_ID: string; SETU_CLIENT_SECR
   return token
 }
 
-async function setuFetch(c: { env: { SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SETU_PRODUCT_INSTANCE_ID: string; SESSIONS: KVNamespace } }, path: string, method = 'GET', body?: unknown) {
-  const token = await getSetuToken(c)
-  const res = await fetch(`${SETU_BASE_URL}${path}`, {
-    method,
+async function setuProxy(
+  c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } },
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body?: unknown,
+): Promise<Response> {
+  // Setu APIs are only reachable from Indian IPs; Cloudflare Workers egress is
+  // not. Route Setu traffic through the EC2 backend (ap-south-1).
+  return fetch(`${c.env.BACKEND_URL}/setu-proxy`, {
+    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      'x-product-instance-id': c.env.SETU_PRODUCT_INSTANCE_ID,
+      'x-cartis-backend-secret': c.env.BACKEND_SECRET,
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: JSON.stringify({ method, url, headers, body }),
   })
+}
+
+async function setuFetch(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string; SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SETU_PRODUCT_INSTANCE_ID: string; SESSIONS: KVNamespace } }, path: string, method = 'GET', body?: unknown) {
+  const token = await getSetuToken(c)
+  const res = await setuProxy(c, `${SETU_BASE_URL}${path}`, method, {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+    'x-product-instance-id': c.env.SETU_PRODUCT_INSTANCE_ID,
+  }, body)
   const json = await res.json() as Record<string, unknown>
   if (!res.ok || json.errorCode) {
     throw new Error(`Setu API error ${res.status}: ${JSON.stringify(json)}`)
