@@ -27,7 +27,9 @@ CREATE TABLE users (
     debt_emis NUMERIC(12,2),
     monthly_tax NUMERIC(12,2),
     ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
+    last_digest_email_at TIMESTAMPTZ
 );
 
 CREATE TABLE sessions (

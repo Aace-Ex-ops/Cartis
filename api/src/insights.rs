@@ -474,7 +474,12 @@ pub async fn scheduler(state: Arc<AppState>) {
             }
         };
         let rows = conn
-            .query("SELECT user_id::text, user_type FROM users", &[])
+            .query(
+                "SELECT user_id::text, user_type, email, email_notifications,
+                        EXTRACT(EPOCH FROM last_digest_email_at)::float8 AS last_digest
+                 FROM users",
+                &[],
+            )
             .await;
         match rows {
             Ok(rows) => {
@@ -487,6 +492,38 @@ pub async fn scheduler(state: Arc<AppState>) {
                     }
                     if let Err(e) = refresh(&state, &uid, &role).await {
                         eprintln!("insights scheduler: user {uid} ({role}): {e:?}");
+                    }
+                    let email_on: bool = row.get(3);
+                    if !email_on {
+                        continue;
+                    }
+                    let email: String = row.get(2);
+                    let last_digest: Option<f64> = row.get(4);
+                    let send = last_digest
+                        .map(|ts| {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs_f64();
+                            ((now - ts) / 86400.0) >= 7.0
+                        })
+                        .unwrap_or(true);
+                    if send {
+                        if let Ok(Some(ci)) = query(&state, &uid, &role).await {
+                            let body = ci.insights.iter()
+                                .map(|i| format!("<li><b>{}</b>: {}</li>", i.title, i.detail))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            crate::email::send_email(
+                                &email,
+                                "Your Cartis Weekly Insights",
+                                &format!("<p>Here are your latest insights:</p>\n<ul>\n{body}</ul>\n<p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
+                            ).await;
+                            let _ = conn.execute(
+                                "UPDATE users SET last_digest_email_at = NOW() WHERE user_id::text = $1",
+                                &[&uid],
+                            ).await;
+                        }
                     }
                 }
             }

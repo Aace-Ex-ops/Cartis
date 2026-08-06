@@ -60,7 +60,8 @@ impl QueryRoot {
                         investment_pct::float8, housing_cost::float8,
                         dependents, debt_emis::float8,
                         monthly_tax::float8,
-                        ai_model, business_name
+                        ai_model, business_name,
+                        email_notifications
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -480,6 +481,17 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
         ));
     }
 
+    let user_email: Option<String> = client
+        .query_opt(
+            "SELECT email, email_notifications FROM users WHERE user_id::text = $1",
+            &[&uid],
+        )
+        .await?
+        .and_then(|r| {
+            let on: bool = r.get(1);
+            if on { Some(r.get(0)) } else { None }
+        });
+
     for (alert_type, message, channel) in alerts {
         let existing = client
             .query_opt(
@@ -497,6 +509,13 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
                 &[&uid, &alert_type, &message, &channel],
             )
             .await?;
+        if let Some(to) = &user_email {
+            crate::email::send_email(
+                to,
+                "Cartis Budget Alert",
+                &format!("<p>{message}</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
+            ).await;
+        }
     }
     Ok(())
 }
@@ -554,6 +573,13 @@ impl MutationRoot {
                 &[&email, &full_name, &hash],
             )
             .await?;
+        if row.is_some() {
+            crate::email::send_email(
+                &email,
+                "Welcome to Cartis!",
+                &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
+            ).await;
+        }
         Ok(row.map(|r| r.get(0)))
     }
 
@@ -602,6 +628,7 @@ impl MutationRoot {
         dependents: Option<i32>,
         debt_emis: Option<f64>,
         monthly_tax: Option<f64>,
+        email_notifications: Option<bool>,
     ) -> Result<User> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
@@ -614,6 +641,7 @@ impl MutationRoot {
                     dependents = COALESCE($6::int, dependents),
                     debt_emis = COALESCE($7::text::numeric, debt_emis),
                     monthly_tax = COALESCE($8::text::numeric, monthly_tax),
+                    email_notifications = COALESCE($9, email_notifications),
                     updated_at = NOW()
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
@@ -623,7 +651,8 @@ impl MutationRoot {
                            monthly_income::float8, monthly_spend::float8,
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
-                           monthly_tax::float8, ai_model, business_name",
+                           monthly_tax::float8, ai_model, business_name,
+                           email_notifications",
                 &[
                     &uid,
                     &monthly_income.map(|v| v.to_string()),
@@ -633,6 +662,7 @@ impl MutationRoot {
                     &dependents,
                     &debt_emis.map(|v| v.to_string()),
                     &monthly_tax.map(|v| v.to_string()),
+                    &email_notifications,
                 ],
             )
             .await?;
@@ -651,7 +681,8 @@ impl MutationRoot {
                            monthly_income::float8, monthly_spend::float8,
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
-                           monthly_tax::float8, ai_model, business_name",
+                           monthly_tax::float8, ai_model, business_name,
+                           email_notifications",
                 &[&uid, &model],
             )
             .await?;
@@ -681,7 +712,8 @@ impl MutationRoot {
                            monthly_income::float8, monthly_spend::float8,
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
-                           monthly_tax::float8, ai_model, business_name",
+                           monthly_tax::float8, ai_model, business_name,
+                           email_notifications",
                 &[&uid, &user_type, &business_name],
             )
             .await?;
@@ -859,6 +891,26 @@ impl MutationRoot {
             None
         };
         tx.commit().await?;
+        if inserted > 0 {
+            if let Ok(r) = pg(ctx).get().await?
+                .query_opt(
+                    "SELECT email, email_notifications FROM users WHERE user_id::text = $1",
+                    &[&uid],
+                ).await {
+                if let Some(row) = r {
+                    let on: bool = row.get(1);
+                    if on {
+                        let email: String = row.get(0);
+                        let bal_str = synced_balance.map(|b| format!(" · Balance ₹{b:.0}")).unwrap_or_default();
+                        crate::email::send_email(
+                            &email,
+                            "New Transactions Synced",
+                            &format!("<p>{inserted} new transaction(s) synced{bal_str}.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
+                        ).await;
+                    }
+                }
+            }
+        }
         Ok(SyncResult {
             inserted: inserted as i32,
             balance: synced_balance,
@@ -913,6 +965,7 @@ struct User {
     monthly_tax: Option<f64>,
     ai_model: Option<String>,
     business_name: Option<String>,
+    email_notifications: bool,
 }
 
 #[Object]
@@ -936,6 +989,7 @@ impl User {
     async fn monthly_tax(&self) -> Option<f64> { self.monthly_tax }
     async fn ai_model(&self) -> Option<&str> { self.ai_model.as_deref() }
     async fn business_name(&self) -> Option<&str> { self.business_name.as_deref() }
+    async fn email_notifications(&self) -> bool { self.email_notifications }
 }
 
 struct AuthUser {
@@ -984,6 +1038,7 @@ impl User {
             monthly_tax: r.get(16),
             ai_model: r.get(17),
             business_name: r.get(18),
+            email_notifications: r.get(19),
         }
     }
 }

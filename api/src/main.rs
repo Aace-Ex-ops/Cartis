@@ -11,6 +11,7 @@ use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::Router;
 mod chat;
+mod email;
 mod graphql;
 mod insights;
 

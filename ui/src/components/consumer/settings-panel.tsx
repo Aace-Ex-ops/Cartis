@@ -10,7 +10,7 @@ import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
-function SettingToggle({ title, desc, defaultOn }: { title: string; desc: string; defaultOn: boolean }) {
+function SettingToggle({ title, desc, defaultOn, onCheckedChange }: { title: string; desc: string; defaultOn: boolean; onCheckedChange?: (v: boolean) => void }) {
   const [on, setOn] = useState(defaultOn);
   return (
     <div className="flex items-center justify-between py-3">
@@ -18,7 +18,7 @@ function SettingToggle({ title, desc, defaultOn }: { title: string; desc: string
         <span className="text-[14px] text-foreground">{title}</span>
         <span className="text-[12px] text-muted-foreground">{desc}</span>
       </div>
-      <Switch checked={on} onCheckedChange={setOn} />
+      <Switch checked={on} onCheckedChange={(v) => { setOn(v); onCheckedChange?.(v); }} />
     </div>
   );
 }
@@ -34,6 +34,7 @@ type SettingsData = {
     dependents: number | null;
     debtEmis: number | null;
     monthlyTax: number | null;
+    emailNotifications: boolean;
   };
   monthlyTab: { limit: number };
 };
@@ -57,7 +58,7 @@ export function SettingsPanel() {
   useEffect(() => {
     let cancelled = false;
     void gql<SettingsData>(
-      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax } monthlyTab { limit } }`
+      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax emailNotifications } monthlyTab { limit } }`
     )
       .then((d) => {
         if (cancelled) return;
@@ -74,7 +75,7 @@ export function SettingsPanel() {
         });
       })
       .catch(() => {
-        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null }, monthlyTab: { limit: 0 } });
+        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null, emailNotifications: true }, monthlyTab: { limit: 0 } });
       });
     return () => {
       cancelled = true;
@@ -223,7 +224,10 @@ export function SettingsPanel() {
         </CardHeader>
         <CardContent className="flex flex-col divide-y divide-border/50">
           <SettingToggle title="WhatsApp" desc="Send verdicts and alerts over WhatsApp" defaultOn />
-          <SettingToggle title="Email" desc="Weekly digest with spending summary" defaultOn={false} />
+          <SettingToggle title="Email" desc="Weekly digest with spending summary" defaultOn={data?.me.emailNotifications ?? true}
+            onCheckedChange={async (v) => {
+              try { await gql<unknown>(`mutation { updateFinancialProfile(emailNotifications: ${v}) { id } }`); } catch {}
+            }} />
         </CardContent>
       </Card>
     </div>
