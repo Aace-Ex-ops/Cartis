@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs && cp popup/popup.html dist/popup/popup.html && sed -i '' 's/popup.ts/popup.js/' dist/popup/popup.html"
+    "build": "node build.mjs && cp popup/popup.html dist/popup/popup.html && sed -i '' 's/popup.ts/popup.js/' dist/popup/popup.html",
+    "build:firefox": "node build-firefox.mjs && cd dist-firefox && zip -r ../cartis-firefox-1.0.0.zip . -x '*.DS_Store'"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",
+    "sharp": "^0.35.3",
     "typescript": "^5"
   }
 }

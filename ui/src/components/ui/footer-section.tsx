@@ -183,7 +183,7 @@ export function FooterSection() {
                 <li><a href="#" className="transition-colors hover:text-teal-200">About Cartis</a></li>
                 <li><a href="#" className="transition-colors hover:text-teal-200">Careers</a></li>
                 <li><a href="#" className="transition-colors hover:text-teal-200">Press Kit</a></li>
-                <li><a href="#" className="transition-colors hover:text-teal-200">Privacy Policy</a></li>
+                <li><a href="/privacy" className="transition-colors hover:text-teal-200">Privacy Policy</a></li>
                 <li><a href="#" className="transition-colors hover:text-teal-200">Terms of Service</a></li>
               </ul>
             </div>
@@ -201,7 +201,7 @@ export function FooterSection() {
           </div>
 
           <div className="flex items-center gap-6">
-            <a href="#" className="transition-colors hover:text-white">Privacy</a>
+            <a href="/privacy" className="transition-colors hover:text-white">Privacy</a>
             <a href="#" className="transition-colors hover:text-white">Terms</a>
             <a href="#" className="transition-colors hover:text-white">Cookies</a>
             <a href="#" className="transition-colors hover:text-white">Security</a>
