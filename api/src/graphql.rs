@@ -21,6 +21,23 @@ pub struct QueryRoot;
 #[derive(Default)]
 pub struct MutationRoot;
 
+fn revoke_gateway_sessions(uid: String) {
+    let Ok(gateway_url) = std::env::var("GATEWAY_URL") else { return };
+    let secret = std::env::var("BACKEND_SECRET").unwrap_or_default();
+    if gateway_url.is_empty() || secret.is_empty() { return; }
+    tokio::spawn(async move {
+        if let Err(e) = reqwest::Client::new()
+            .post(format!("{gateway_url}/auth/revoke-all"))
+            .header("x-cartis-backend-secret", secret)
+            .json(&serde_json::json!({ "userId": uid }))
+            .send()
+            .await
+        {
+            eprintln!("session revoke failed: {e}");
+        }
+    });
+}
+
 const USER_CHILD_TABLES: [&str; 12] = [
     "sessions",
     "bank_accounts",
@@ -552,7 +569,8 @@ impl MutationRoot {
         tx.execute("DELETE FROM users WHERE user_id::text = $1", &[&uid])
             .await?;
         tx.commit().await?;
-        tokio::spawn(purge_supermemory(uid));
+        tokio::spawn(purge_supermemory(uid.clone()));
+        revoke_gateway_sessions(uid);
         Ok(true)
     }
 

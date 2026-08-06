@@ -409,6 +409,18 @@ app.get('/auth/sessions', auth, async (c) => {
   return c.json({ sessions })
 })
 
+app.post('/auth/revoke-all', async (c) => {
+  if (c.req.header('x-cartis-backend-secret') !== c.env.BACKEND_SECRET) {
+    return c.json({ error: 'unauthorized' }, 401)
+  }
+  const body = (await c.req.json().catch(() => ({}))) as { userId?: string }
+  if (!body.userId) return c.json({ error: 'userId required' }, 400)
+  const tokens = await userSessions(c, body.userId)
+  await Promise.all(tokens.map((t) => c.env.SESSIONS.delete(`session:${t}`)))
+  await c.env.SESSIONS.delete(`user_sessions:${body.userId}`)
+  return c.json({ ok: true, revoked: tokens.length })
+})
+
 app.delete('/auth/sessions/:sessionId', auth, async (c) => {
   const session = c.get('session')
   const target = c.req.param('sessionId')
