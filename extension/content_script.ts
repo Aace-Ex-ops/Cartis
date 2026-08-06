@@ -5,8 +5,9 @@ const OVERLAY_ID = "cartis-overlay";
 
 let lastUrl = location.href;
 
-function money(n: number): string {
-  return `₹${n.toLocaleString("en-IN")}`;
+function money(n: number, currency: string): string {
+  const symbol: Record<string, string> = { INR: "₹", USD: "$", EUR: "€", GBP: "£", JPY: "¥", CAD: "CA$", AUD: "A$", CHF: "CHF" };
+  return `${symbol[currency] ?? ""}${n.toLocaleString(currency === "INR" ? "en-IN" : "en-US")}`;
 }
 
 function renderOverlay(verdict: Verdict, product: ScrapedProduct): void {
@@ -21,7 +22,7 @@ function renderOverlay(verdict: Verdict, product: ScrapedProduct): void {
   const alts = (verdict.alternatives ?? [])
     .map(
       (a) =>
-        `<a href="${a.url ?? "#"}" target="_blank" rel="noreferrer">${a.site} — ${money(a.price)}</a>`,
+        `<a href="${a.url ?? "#"}" target="_blank" rel="noreferrer">${a.site} — ${money(a.price, product.currency)}</a>`,
     )
     .join("<br>");
 
@@ -34,7 +35,7 @@ function renderOverlay(verdict: Verdict, product: ScrapedProduct): void {
       <p style="margin:8px 0">${verdict.explanation}</p>
       ${alts ? `<div style="font-size:12px">Cheaper alternatives:<br>${alts}</div>` : ""}
       <div style="margin-top:8px;font-size:12px;color:#666">
-        ${product.name}<br>${money(product.price)}
+        ${product.name}<br>${money(product.price, product.currency)}
         ${verdict.cached ? "<br><em>using cached analysis</em>" : ""}
       </div>
     </div>`;
