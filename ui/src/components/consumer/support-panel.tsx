@@ -1,17 +1,15 @@
 "use client";
 
-import { MessageCircle, Mail, HelpCircle } from "lucide-react";
-
-const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000";
+import { Mail, HelpCircle } from "lucide-react";
 
 const FAQS = [
   {
     q: "How do I sync my bank transactions?",
-    a: "Open Wallet → Sync transactions, then paste a bank SMS alert or continue on WhatsApp with your bank's number.",
+    a: "Go to Wallet → Re-sync via AA to pull your latest transactions from your bank.",
   },
   {
     q: "Why is my wallet balance not updating?",
-    a: "Sync a new bank alert or statement — the balance updates from the latest synced message.",
+    a: "Click Re-sync via AA on the Wallet page to fetch the latest data from your bank.",
   },
   {
     q: "How does Cartis calculate my income tax?",
@@ -19,7 +17,7 @@ const FAQS = [
   },
   {
     q: "Is my data secure?",
-    a: "We only read the bank alerts you choose to share. We never get your passwords or OTPs.",
+    a: "We access your bank data only through Account Aggregator with your explicit consent. We never get your passwords or OTPs.",
   },
 ];
 
@@ -32,15 +30,6 @@ export function SupportPanel() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <a
-          href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent("Hi Cartis, I need help.")}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2.5 rounded-lg border border-border/50 bg-background/50 px-3 py-2.5 text-[13px] text-foreground transition-colors hover:border-primary/40"
-        >
-          <MessageCircle className="h-4 w-4 text-primary" />
-          Chat on WhatsApp
-        </a>
         <a
           href="mailto:support@cartis.app"
           className="flex items-center gap-2.5 rounded-lg border border-border/50 bg-background/50 px-3 py-2.5 text-[13px] text-foreground transition-colors hover:border-primary/40"

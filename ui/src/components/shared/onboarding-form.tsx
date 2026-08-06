@@ -1,48 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Store, User } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { User, Store } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { SyncPasteBox } from "@/components/shared/sync-paste-box";
+import { AaConnect } from "@/components/consumer/aa-connect";
 import Stepper, { Step } from "@/components/shared/stepper";
 import { gql } from "@/lib/gql";
-
-const BANKS = [
-  "State Bank of India",
-  "HDFC Bank",
-  "ICICI Bank",
-  "Axis Bank",
-  "Kotak Mahindra Bank",
-  "Punjab National Bank",
-  "Bank of Baroda",
-  "Canara Bank",
-  "Union Bank of India",
-  "IDBI Bank",
-  "Yes Bank",
-  "IndusInd Bank",
-  "Federal Bank",
-  "IDFC First Bank",
-  "Indian Bank",
-  "Indian Overseas Bank",
-  "Bandhan Bank",
-  "AU Small Finance Bank",
-  "Ujjivan Small Finance Bank",
-  "DBS Bank",
-  "RBL Bank",
-];
-
-const WHATSAPP_NUMBER =
-  process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000";
 
 function StepHeading({ title, body }: { title: string; body: string }) {
   return (
@@ -57,7 +23,6 @@ function StepHeading({ title, body }: { title: string; body: string }) {
 
 export function OnboardingForm() {
   const [role, setRole] = useState<"consumer" | "seller">("consumer");
-  const [bank, setBank] = useState("");
   const [synced, setSynced] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profile, setProfile] = useState({
@@ -75,49 +40,6 @@ export function OnboardingForm() {
     monthlyExpenses: "",
   });
   const router = useRouter();
-  const [waNumbers, setWaNumbers] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    gql<{ banks: { name: string; whatsappNumber: string }[] }>(
-      "{ banks { name whatsappNumber } }"
-    )
-      .then((r) => {
-        const map: Record<string, string> = {};
-        for (const b of r.banks) map[b.name] = b.whatsappNumber;
-        setWaNumbers(map);
-      })
-      .catch(() => {});
-  }, []);
-
-  const waLink = `https://wa.me/${waNumbers[bank] ?? WHATSAPP_NUMBER}?text=${encodeURIComponent(
-    `Hi Cartis, I bank with ${bank || "my bank"} and want to sync my transactions to my Cartis account.`
-  )}`;
-
-  const waOpened = useRef<string | null>(null);
-  useEffect(() => {
-    if (bank && waNumbers[bank] !== undefined && waOpened.current !== bank) {
-      waOpened.current = bank;
-      window.open(waLink, "_blank", "noopener");
-    }
-  }, [bank, waNumbers, waLink]);
-
-  async function saveBank(bankName: string) {
-    try {
-      await gql(
-        `mutation ($entries: [LedgerEntryInput!]!, $bankName: String, $primary: Boolean) {
-          addLedgerEntries(entries: $entries, bankName: $bankName, primary: $primary) { inserted }
-        }`,
-        { entries: [], bankName, primary: true },
-      );
-    } catch {
-      // non-critical — saved on the paste step if skipped here
-    }
-  }
-
-  function onBankSelect(value: string) {
-    setBank(value);
-    void saveBank(value);
-  }
 
   async function saveProfile() {
     const fields: string[] = [];
@@ -141,7 +63,7 @@ export function OnboardingForm() {
     const revenue = Number(business.monthlyRevenue);
     const expenses = Number(business.monthlyExpenses);
     await gql<{ updateUserType: unknown }>(
-      `mutation { updateUserType(userType: "business"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
+      `mutation { updateUserType(userType: "seller"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
     );
     const today = new Date().toISOString().slice(0, 10);
     if (Number.isFinite(revenue) && revenue > 0) {
@@ -195,7 +117,7 @@ export function OnboardingForm() {
               <User className="h-4 w-4" />
             </span>
             <span>
-              <span className="block text-[14px] font-medium text-foreground">Personal</span>
+              <span className="block text-[14px] font-medium text-foreground">Personal finance</span>
               <span className="mt-0.5 block text-[12px] text-muted-foreground">Budget, spend, save & invest</span>
             </span>
           </button>
@@ -212,7 +134,7 @@ export function OnboardingForm() {
               <Store className="h-4 w-4" />
             </span>
             <span>
-              <span className="block text-[14px] font-medium text-foreground">Business</span>
+              <span className="block text-[14px] font-medium text-foreground">Business + personal</span>
               <span className="mt-0.5 block text-[12px] text-muted-foreground">Everything, plus P&L, GST & inventory</span>
             </span>
           </button>
@@ -221,32 +143,10 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title="Step 2 · Your bank"
-          body="Cartis reads your bank alerts over WhatsApp. We never get your passwords."
+          title="Step 2 · Connect your bank"
+          body="Select a demo persona to link your bank account. No passwords needed."
         />
-        <Select value={bank} onValueChange={onBankSelect}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select your bank" />
-          </SelectTrigger>
-          <SelectContent>
-            {BANKS.map((b) => (
-              <SelectItem key={b} value={b}>
-                {b}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="mt-3 text-center text-xs text-muted-foreground">
-          WhatsApp opens with a message to your bank — send it to start receiving alerts.
-        </p>
-      </Step>
-
-      <Step>
-        <StepHeading
-          title="Step 3 · Connect your account"
-          body="Paste a bank SMS to connect your account."
-        />
-        <SyncPasteBox bank={bank} mode="onboarding" onSynced={() => setSynced(true)} />
+        <AaConnect onSynced={() => setSynced(true)} />
         {synced && (
           <p className="mt-2 text-center text-sm text-green-600">Account connected!</p>
         )}
@@ -255,7 +155,7 @@ export function OnboardingForm() {
       {role === "seller" ? (
         <Step>
           <StepHeading
-            title="Step 4 · Your business"
+            title="Step 3 · Your business"
             body="Starting numbers for your business dashboard. All optional — you can add entries anytime."
           />
           <div className="flex flex-col gap-3">
@@ -296,7 +196,7 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title={role === "seller" ? "Step 5 · Your money" : "Step 4 · Your money"}
+          title={role === "seller" ? "Step 4 · Your money" : "Step 3 · Your money"}
           body="Help Cartis build a smarter budget. All fields optional — skip if you'd rather not say."
         />
         <div className="grid grid-cols-2 gap-3">
@@ -321,7 +221,7 @@ export function OnboardingForm() {
             <Input id="onb-dependents" type="number" placeholder="e.g. 3" value={profile.dependents} onChange={(e) => setProfile((p) => ({ ...p, dependents: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="onb-debt" className="text-xs text-muted-foreground">Total loans (₹)</Label>
+            <Label htmlFor="onb-debt" className="text-xs text-muted-foreground">Total EMIs/loans (₹)</Label>
             <Input id="onb-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => setProfile((p) => ({ ...p, debtEmis: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">

@@ -20,14 +20,14 @@ export function TermsPanel() {
       <Card>
         <CardHeader><CardTitle>2. Use of Service</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground leading-relaxed">
-          Cartis provides AI-powered financial coaching, budget suggestions, and purchase analysis for Indian consumers. The service reads bank SMS alerts over WhatsApp to track transactions. You must be at least 18 years old to use Cartis.
+          Cartis provides AI-powered financial coaching, budget suggestions, and purchase analysis for Indian consumers. The service reads bank transaction data via Account Aggregator to track your finances. You must be at least 18 years old to use Cartis.
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader><CardTitle>3. Data & Privacy</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground leading-relaxed">
-          We collect transaction data from bank SMS, financial profile information you provide, and usage data to power our AI models. We never store bank passwords or UPI PINs. Your data is encrypted in transit and at rest. We do not sell your personal data to third parties.
+          We collect transaction data from your bank via Account Aggregator, financial profile information you provide, and usage data to power our AI models. We never store bank passwords or UPI PINs. Your data is encrypted in transit and at rest. We do not sell your personal data to third parties.
         </CardContent>
       </Card>
 
