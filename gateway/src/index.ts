@@ -13,7 +13,6 @@ type Env = {
   BACKEND_SECRET: string
   POLAR_WEBHOOK_SECRET: string
   POLAR_ACCESS_TOKEN: string
-  RESEND_API_KEY: string
   POLAR_API_URL: string
 }
 
@@ -36,11 +35,11 @@ const STATE_TTL = 600
 const ROTATION_SECONDS = 600
 
 function sendEmail(env: Env, to: string, subject: string, html: string) {
-  if (!env.RESEND_API_KEY) return Promise.resolve()
-  return fetch('https://api.resend.com/emails', {
+  if (!env.BACKEND_URL || !env.BACKEND_SECRET) return Promise.resolve()
+  return fetch(`${env.BACKEND_URL}/api/email`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'Cartis <onboarding@resend.dev>', to, subject, html }),
+    headers: { 'Content-Type': 'application/json', 'x-cartis-backend-secret': env.BACKEND_SECRET },
+    body: JSON.stringify({ to, subject, html }),
   }).catch(() => {})
 }
 

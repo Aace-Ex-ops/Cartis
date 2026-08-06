@@ -8,8 +8,10 @@ use async_graphql_axum::GraphQLResponse;
 use axum::extract::State;
 use axum::extract::Extension;
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
+use serde::Deserialize;
 mod chat;
 mod email;
 mod graphql;
@@ -64,6 +66,7 @@ async fn main() {
             "/chat/sessions/{session_id}/messages",
             get(chat::session_messages),
         )
+        .route("/api/email", post(api_email))
         .with_state(state.clone())
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(
@@ -102,6 +105,20 @@ async fn require_backend_secret(
 
 async fn graphiql() -> axum::response::Html<String> {
     axum::response::Html(graphiql_source("/graphql", None))
+}
+
+#[derive(Deserialize)]
+struct EmailReq {
+    to: String,
+    subject: String,
+    html: String,
+}
+
+async fn api_email(
+    axum::extract::Json(body): axum::extract::Json<EmailReq>,
+) -> Result<StatusCode, StatusCode> {
+    email::send_email(&body.to, &body.subject, &body.html).await;
+    Ok(StatusCode::OK)
 }
 
 async fn graphql_handler(
