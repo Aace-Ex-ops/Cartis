@@ -88,10 +88,12 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")}>
-            <Repeat className="mr-2 h-4 w-4" />
-            {isSeller ? "Switch to Consumer" : "Switch to Seller"}
-          </DropdownMenuItem>
+          {user.userType === "seller" && (
+            <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")}>
+              <Repeat className="mr-2 h-4 w-4" />
+              {isSeller ? "Switch to Consumer" : "Switch to Seller"}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>
