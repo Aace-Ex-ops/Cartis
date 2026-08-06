@@ -1,7 +1,7 @@
 CREATE TABLE banks (
     bank_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) UNIQUE NOT NULL,
-    whatsapp_number VARCHAR(15) NOT NULL,
+    fip_id VARCHAR(50),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -40,9 +40,10 @@ CREATE TABLE bank_accounts (
     account_id UUID PRIMARY KEY,
     user_id UUID REFERENCES users(user_id),
     bank_id UUID REFERENCES banks(bank_id),
-    mobile_number VARCHAR(15) NOT NULL,
+    mobile_number VARCHAR(15),
     account_type VARCHAR(30),
     balance NUMERIC(12,2),
+    fip_id VARCHAR(50),
     data_as_of TIMESTAMPTZ,
     last_sync_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -155,6 +156,23 @@ CREATE TABLE budget_suggestions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX budget_suggestions_user_idx ON budget_suggestions(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS aa_connections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id),
+    aa_handle VARCHAR(100) NOT NULL,
+    consent_handle VARCHAR(100),
+    consent_id VARCHAR(100),
+    consent_status VARCHAR(20) DEFAULT 'PENDING',
+    session_id VARCHAR(100),
+    fip_id VARCHAR(50),
+    masked_acc_number VARCHAR(50),
+    linked_acc_ref VARCHAR(100),
+    last_fetched_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, aa_handle)
+);
+CREATE INDEX IF NOT EXISTS aa_connections_user_idx ON aa_connections(user_id);
 
 CREATE TABLE IF NOT EXISTS coach_insights (
     user_id UUID REFERENCES users(user_id),
