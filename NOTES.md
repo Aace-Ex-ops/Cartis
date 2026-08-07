@@ -166,3 +166,9 @@ own price history from our own traffic (free, cold start).
   CARTIS-28 (email/password auth).
 - Team `0b025df9-2525-42f7-b8eb-a1c62cfcc3eb`; Done state
   `37f90851-23e9-4ab2-a065-a5313a9579db`.
+
+## Phase 1: Kiro tools — shipped (Aug 7, post-Setu-pivot)
+- Chat tool modes: `ChatRequest.tool` (tax|retirement|budget|stock), persisted in new `chat_sessions.tool` column (in schema.sql, pending DB apply), tool-specialist system prompts in chat.rs `TOOLS`/`tool_system()`. Backend compiles; deploy blocked on SSH (CARTIS-74).
+- Gateway tools live (deploy eca5cfa0): POST /api/tools/retirement (12%/6% assumptions, 4% SWR, corpus/SIP solver), POST /api/tools/tax (FY26-27 new-vs-old, 80C/80D/HRA, 87A rebate ≤₹12L), GET /api/tools/stock (Twelve Data, 5-min KV cache via SESSIONS binding, needs TWELVE_DATA_KEY secret).
+- UI: tool chip switcher in twin-chat (consumer only), ships with out/ on deploy. Commits e05cbb1, e2f0d59.
+- Remaining Phase 1: goals/portfolio/actions pages + dashboard action cards (backend GraphQL done in graphql.rs, awaits backend deploy); apply schema.sql; Twelve Data free key signup needed.
