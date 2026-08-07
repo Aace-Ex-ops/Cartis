@@ -124,6 +124,47 @@ Aggregators (MySmartPrice, Smartprix, CamelCamel, PriceHistory India API) 403 fo
 
 Also: instance IP 18.60.39.208 (Mumbai) doesn't exist in AWS — backend may run elsewhere; gateway proxy still works (setu-proxy returns Setu 500s), so backend HTTPS is live somewhere.`,
   },
+  {
+    title: "AI Financial Advisor for Indian startups (4-step spec)",
+    state: "Backlog",
+    description: `Product spec (owner-provided article): KPI ingestion → benchmark analysis + health score → strategy generation → investor-ready report with A4 PDF export. India angle: consultant access gap, GST-era complexity, LetsVenture/SIDBI/VC funding readiness.
+
+Decisions locked: (1) replaces the Business Coach page (\`/seller/coach\` becomes the advisor); (2) 5 KPIs derived from existing \`seller_finances\` ledger (revenue, expenses, cash flow, gross margin via cogs, net margin) — no manual entry; (3) PDF = A4 print stylesheet, vector quality, zero deps; (4) Pro gating wired via Polar paid webhook → KV entitlement (checkout already sends \`metadata.user_id\`).
+
+No schema changes; backend untouched. Children: 76 KPI+score, 77 strategies, 78 page, 79 PDF, 80 entitlement.`,
+  },
+  {
+    title: "Advisor: KPI ingestion + benchmarks + Financial Health Score",
+    state: "Backlog",
+    description: `Gateway. Derive 5 KPIs from \`seller_finances\` via existing backendGql seller queries: revenue, expenses, cash flow, gross margin (revenue - cogs)/revenue, net margin (revenue - all costs)/revenue, current month + trailing period.
+
+Static benchmark table by business type: SaaS (GM 70-85%, NM 15-25%), D2C, services, retail. Rule-based Financial Health Score 0-100: per-KPI deviation buckets (healthy/at-risk/leak) weighted + cash-flow positivity weight. Flag margin leaks naming the lagging expense category (category breakdown already in seller dashboard query). KV-cached 1h. Endpoint \`/api/advisor/health\`.`,
+    parent: "AI Financial Advisor for Indian startups (4-step spec)",
+  },
+  {
+    title: "Advisor: strategy generation (revenue tactics, capital allocation, risks)",
+    state: "Backlog",
+    description: `Gateway \`/api/advisor/strategies\` using the existing CF AI binding (pattern: \`/api/budget/suggest\`). Rule-seeded prompt with KPI profile + benchmark deltas → LLM returns structured JSON: 3 revenue-optimization tactics, capital-allocation recommendation (3 branches: invest in R&D/sales vs cost reduction + retention vs operational efficiency), 4-5 risks ranked by severity with mitigations (churn for SaaS, inventory cost for D2C, talent for services). KV-cached; \`?refresh=1\` bypasses.`,
+    parent: "AI Financial Advisor for Indian startups (4-step spec)",
+  },
+  {
+    title: "Advisor: rebuild /seller/coach as the advisor page",
+    state: "Backlog",
+    description: `UI. \`/seller/coach\` becomes the advisor: Financial Health Score gauge (0-100), benchmark comparison bars, margin-leak callout, tactic cards, ranked risk list, investor-ready report summary section, Export PDF button (Pro-gated, disabled state + upgrade prompt). Existing chat remains in the AI Twin drawer. Reads \`/api/advisor/health\` + \`/api/advisor/strategies\`. Read \`node_modules/next/dist/docs\` before UI work (AGENTS.md).`,
+    parent: "AI Financial Advisor for Indian startups (4-step spec)",
+  },
+  {
+    title: "Advisor: A4 PDF export (print stylesheet, Pro-gated)",
+    state: "Backlog",
+    description: `UI. Dedicated report view with \`@media print\` A4 layout: executive summary, score, benchmark comparison, tactics, capital allocation, ranked risks — vector text, no raster. \`window.print()\` from the Export button. Gate on Pro entitlement (\`polar:entitled:<userId>\` KV); else show upgrade prompt.`,
+    parent: "AI Financial Advisor for Indian startups (4-step spec)",
+  },
+  {
+    title: "Advisor: Pro entitlement via Polar paid webhook",
+    state: "Backlog",
+    description: `Gateway. \`/webhooks/polar\`: on paid order/checkout events, read \`metadata.user_id\` (checkout creation already sends it) → write \`polar:entitled:<userId>\` KV flag. Gating checks: advisor PDF endpoint + UI. Include upgrade CTA on gated content.`,
+    parent: "AI Financial Advisor for Indian startups (4-step spec)",
+  },
 ];
 
 async function gql(query, variables = {}) {

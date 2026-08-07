@@ -882,6 +882,18 @@ app.post('/webhooks/polar', async (c) => {
   await c.env.SESSIONS.put(`polar:event:${webhookId}`, raw, { expirationTtl: 2592000 })
   const event = JSON.parse(raw) as { type?: string; data?: { id?: string } }
   console.log('[polar]', event.type ?? 'unknown', event.data?.id ?? '')
+  const ent = (event.data ?? {}) as {
+    metadata?: { user_id?: string }
+    status?: string
+    paidAt?: string | null
+    type?: string
+  }
+  const userId = ent.metadata?.user_id
+  const paid = ['order.paid', 'checkout.updated', 'order.updated'].includes(event.type ?? '') && userId
+  if (paid && (ent.status === 'paid' || ent.paidAt || event.type === 'order.paid')) {
+    await c.env.SESSIONS.put(`polar:entitled:${userId}`, JSON.stringify({ plan: 'pro', since: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 365 })
+    console.log('[polar] entitlement granted', userId)
+  }
   return c.json({ ok: true })
 })
 
@@ -1239,6 +1251,237 @@ app.get('/api/tools/stock', auth, async (c) => {
   }
   await c.env.SESSIONS.put(key, JSON.stringify(data), { expirationTtl: 300 })
   return c.json(data)
+})
+
+// ── Advisor: KPIs, benchmarks, health score ─────────────────────────────────
+
+type AdvisorFin = { entryType: string; amount: number; category: string | null; transactionDate: string }
+
+const ADVISOR_BENCHMARKS: Record<string, { gm: [number, number]; nm: [number, number]; label: string }> = {
+  saas: { gm: [70, 85], nm: [15, 25], label: 'SaaS' },
+  d2c: { gm: [40, 60], nm: [5, 15], label: 'D2C brand' },
+  services: { gm: [50, 70], nm: [10, 20], label: 'Services' },
+  retail: { gm: [20, 40], nm: [2, 8], label: 'Retail' },
+}
+
+function marginScore(v: number, low: number): number {
+  if (low <= 0) return 100
+  return Math.max(0, Math.min(100, (v / low) * 100))
+}
+function cashScore(cash: number, revenue: number): number {
+  if (revenue <= 0) return cash >= 0 ? 100 : 0
+  return Math.max(0, Math.min(100, 50 + (cash / revenue) * 200))
+}
+function momentumScore(cur: number, last: number): number {
+  if (last <= 0) return 100
+  return Math.max(0, Math.min(100, 50 + ((cur - last) / last) * 100))
+}
+function costScore(opexRev: number): number {
+  return Math.max(0, Math.min(100, 100 - Math.max(0, opexRev - 0.4) * 150))
+}
+
+function advisorHealth(fins: AdvisorFin[], businessType: string) {
+  const now = new Date()
+  const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+  const last = new Date(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)
+  const lastYm = `${last.getUTCFullYear()}-${String(last.getUTCMonth() + 1).padStart(2, '0')}`
+  let revenue = 0, cogs = 0, opex = 0, lastRevenue = 0
+  const opexCats = new Map<string, number>()
+  for (const f of fins) {
+    if (f.transactionDate.startsWith(lastYm) && f.entryType === 'revenue') lastRevenue += f.amount
+    if (!f.transactionDate.startsWith(ym)) continue
+    if (f.entryType === 'revenue') revenue += f.amount
+    else if (f.entryType === 'cogs') cogs += f.amount
+    else {
+      opex += f.amount
+      const k = f.category || 'Other'
+      opexCats.set(k, (opexCats.get(k) ?? 0) + f.amount)
+    }
+  }
+  const expenses = cogs + opex
+  const cash = revenue - expenses
+  const gm = revenue > 0 ? (revenue - cogs) / revenue : 0
+  const nm = revenue > 0 ? (revenue - expenses) / revenue : 0
+  const bench = ADVISOR_BENCHMARKS[businessType] ?? ADVISOR_BENCHMARKS.saas
+  const score = Math.round(
+    0.3 * marginScore(gm, bench.gm[0] / 100) +
+      0.3 * marginScore(nm, bench.nm[0] / 100) +
+      0.2 * cashScore(cash, revenue) +
+      0.1 * momentumScore(revenue, lastRevenue) +
+      0.1 * costScore(revenue > 0 ? opex / revenue : 0),
+  )
+  const leaks: { type: string; label: string; detail: string }[] = []
+  if (revenue <= 0) {
+    leaks.push({
+      type: 'no_data',
+      label: 'No revenue recorded',
+      detail: `Enter income and expenses for ${ym} to get a health score.`,
+    })
+  } else if (gm < bench.gm[0] / 100) {
+    leaks.push({
+      type: 'gross_margin',
+      label: 'COGS cost pressure',
+      detail: `Direct costs are ${revenue > 0 ? Math.round((cogs / revenue) * 100) : 0}% of revenue; healthy ${bench.label} businesses keep them under ${100 - bench.gm[0]}%.`,
+    })
+  } else if (nm < bench.nm[0] / 100) {
+    for (const [cat, amt] of [...opexCats.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2)) {
+      leaks.push({
+        type: 'margin_leak',
+        label: cat,
+        detail: `${cat} cost ₹${Math.round(amt).toLocaleString('en-IN')} this month${revenue > 0 ? ` (${Math.round((amt / revenue) * 100)}% of revenue)` : ''} — investigate before scaling.`,
+      })
+    }
+  }
+  return {
+    period: ym,
+    businessType: bench.label,
+    kpis: {
+      revenue: Math.round(revenue),
+      expenses: Math.round(expenses),
+      cogs: Math.round(cogs),
+      opex: Math.round(opex),
+      cash: Math.round(cash),
+      grossMarginPct: Math.round(gm * 1000) / 10,
+      netMarginPct: Math.round(nm * 1000) / 10,
+    },
+    benchmarks: { grossMargin: bench.gm, netMargin: bench.nm },
+    score,
+    leaks,
+  }
+}
+
+function advisorFallback(health: ReturnType<typeof advisorHealth>) {
+  const k = health.kpis
+  return {
+    period: health.period,
+    healthScore: health.score,
+    revenueTactics: [
+      { title: 'Fix the top cost line', detail: `${health.leaks[0]?.label ?? 'Expenses'}: ${health.leaks[0]?.detail ?? 'renegotiate the largest vendor'} — every ₹1 saved is ₹1 of profit.` },
+      { title: k.revenue > 0 ? 'Sell more to existing customers' : 'Record your first revenue', detail: k.revenue > 0 ? 'Upsell and annual plans before chasing new acquisition — retention is cheaper and faster.' : 'Enter income into the Income page so the advisor can score your business.' },
+      { title: 'Lean on GST input credit', detail: 'Reconcile purchase invoices and claim input tax credit on every eligible expense — unclaimed ITC is cash left on the table.' },
+    ],
+    capitalAllocation: {
+      recommendation: health.score >= 70 ? 'invest-in-growth' : health.score >= 40 ? 'efficiency' : 'cut-costs',
+      detail:
+        health.score >= 70
+          ? 'Healthy margins and positive cash flow — allocate to product and sales before expanding into new markets.'
+          : health.score >= 40
+            ? 'Mixed fundamentals — fix margin leaks and retention before scaling acquisition spend.'
+            : 'Thin margins and tight cash — prioritize cost reduction and customer retention over growth.',
+    },
+    risks: [
+      { risk: 'Customer concentration', severity: 'medium' as const, mitigation: 'Track top-3 customer share of revenue; diversify within the next two quarters.' },
+      { risk: 'Cash-flow timing', severity: 'medium' as const, mitigation: 'Invoice promptly, offer advance-payment discounts, keep a 3-month runway buffer.' },
+      { risk: 'Margin erosion', severity: k.grossMarginPct < 40 ? ('high' as const) : ('low' as const), mitigation: 'Review supplier pricing quarterly; renegotiate when volume grows.' },
+      { risk: 'Compliance surprises', severity: 'medium' as const, mitigation: 'Keep GST returns reconciled monthly — penalties compound faster than growth.' },
+    ],
+    fallback: true,
+  }
+}
+
+app.post('/api/advisor/health', auth, async (c) => {
+  const userId = c.get('session').user_id
+  const refresh = c.req.query('refresh') === '1'
+  const body = (await c.req.json().catch(() => ({}))) as { businessType?: string }
+  const businessType = Object.hasOwn(ADVISOR_BENCHMARKS, body.businessType ?? '') ? (body.businessType as string) : 'saas'
+  const cacheKey = `advisor:health:${userId}:${businessType}`
+  if (!refresh) {
+    const cached = await c.env.SESSIONS.get(cacheKey)
+    if (cached) return c.json(JSON.parse(cached))
+  }
+  try {
+    const data = (await backendGql(
+      c,
+      `query { sellerFinances(limit: 5000) { entryType amount category transactionDate } }`,
+      userId,
+    )) as { sellerFinances?: AdvisorFin[] }
+    const result = advisorHealth(data.sellerFinances ?? [], businessType)
+    await c.env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 })
+    return c.json(result)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/advisor/strategies', auth, async (c) => {
+  const userId = c.get('session').user_id
+  const refresh = c.req.query('refresh') === '1'
+  const body = (await c.req.json().catch(() => ({}))) as { businessType?: string }
+  const businessType = Object.hasOwn(ADVISOR_BENCHMARKS, body.businessType ?? '') ? (body.businessType as string) : 'saas'
+  const cacheKey = `advisor:strategies:${userId}:${businessType}`
+  if (!refresh) {
+    const cached = await c.env.SESSIONS.get(cacheKey)
+    if (cached) return c.json(JSON.parse(cached))
+  }
+  try {
+    const data = (await backendGql(
+      c,
+      `query { sellerFinances(limit: 5000) { entryType amount category transactionDate } }`,
+      userId,
+    )) as { sellerFinances?: AdvisorFin[] }
+    const health = advisorHealth(data.sellerFinances ?? [], businessType)
+    const prompt = `You are a financial advisor for an Indian startup. Based ONLY on these KPIs and benchmarks, produce a strategy.
+
+KPIs (${health.period}): ${JSON.stringify(health.kpis)}
+Industry benchmarks (${health.businessType}): gross margin ${health.benchmarks.grossMargin[0]}-${health.benchmarks.grossMargin[1]}%, net margin ${health.benchmarks.netMargin[0]}-${health.benchmarks.netMargin[1]}%
+Financial health score: ${health.score}/100
+Flags: ${JSON.stringify(health.leaks)}
+
+Return ONLY JSON:
+{
+  "revenueTactics": [3 specific, actionable tactics, each: { "title": "...", "detail": "..." }],
+  "capitalAllocation": { "recommendation": "invest-in-growth | cut-costs | efficiency", "detail": "1-2 sentences, concrete" },
+  "risks": [4-5 risks ranked by severity, each: { "risk": "...", "severity": "high|medium|low", "mitigation": "..." }]
+}
+Rules: be specific and actionable for an Indian SMB; mention concrete levers (GST input credit, vendor renegotiation, pricing tiers, retention); never invent numbers beyond the KPIs given; keep each field under 40 words.`
+    const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+      messages: [{ role: 'user', content: prompt }],
+    })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
+    const content = (typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')).replace(/```json|```/g, '')
+    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    let parsed: {
+      revenueTactics?: { title?: string; detail?: string }[]
+      capitalAllocation?: { recommendation?: string; detail?: string }
+      risks?: { risk?: string; severity?: string; mitigation?: string }[]
+    } | null = null
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0])
+      } catch {
+        parsed = null
+      }
+    }
+    if (!parsed) return c.json(advisorFallback(health))
+    const result = {
+      period: health.period,
+      healthScore: health.score,
+      revenueTactics: (parsed.revenueTactics ?? []).slice(0, 3).map((t) => ({ title: t.title ?? 'Tactic', detail: t.detail ?? '' })),
+      capitalAllocation: {
+        recommendation: ['invest-in-growth', 'cut-costs', 'efficiency'].includes(parsed.capitalAllocation?.recommendation ?? '')
+          ? (parsed.capitalAllocation?.recommendation as 'invest-in-growth' | 'cut-costs' | 'efficiency')
+          : 'efficiency',
+        detail: parsed.capitalAllocation?.detail ?? '',
+      },
+      risks: (parsed.risks ?? []).slice(0, 5).map((r) => ({
+        risk: r.risk ?? '',
+        severity: ['high', 'medium', 'low'].includes(r.severity ?? '') ? (r.severity as 'high' | 'medium' | 'low') : 'medium',
+        mitigation: r.mitigation ?? '',
+      })),
+    }
+    if (!result.revenueTactics.length || !result.risks.length) {
+      return c.json(advisorFallback(health))
+    }
+    await c.env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 })
+    return c.json(result)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.get('/api/advisor/entitlement', auth, async (c) => {
+  const userId = c.get('session').user_id
+  const ent = await c.env.SESSIONS.get(`polar:entitled:${userId}`)
+  return c.json({ pro: ent !== null, since: ent ? (JSON.parse(ent) as { since?: string }).since ?? null : null })
 })
 
 // ── Catch-all asset handler ─────────────────────────────────────────────────
