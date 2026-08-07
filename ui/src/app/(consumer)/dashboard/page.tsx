@@ -9,8 +9,17 @@ import { AlertList } from "@/components/consumer/alert-list";
 import { TaxCard } from "@/components/consumer/tax-card";
 import { InsightCards, type Insight } from "@/components/shared/insight-cards";
 import { gql } from "@/lib/gql";
-import { RefreshCw } from "lucide-react";
+import { ArrowRight, Check, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+type UserAction = {
+  actionId: string;
+  kind: string;
+  title: string;
+  detail: string | null;
+  ctaLabel: string | null;
+  ctaUrl: string | null;
+};
 
 type DashboardData = {
   me: { fullName: string; monthlyIncome: number | null; monthlyTax: number | null };
@@ -26,6 +35,7 @@ type DashboardData = {
     message: string;
     createdAt: string;
   }[];
+  userActions: UserAction[];
 };
 
 const QUERY = `{
@@ -34,6 +44,7 @@ const QUERY = `{
   monthlyTab { limit spent }
   financialHealthScore { score factors { key impact detail } }
   budgetAlerts { alertId alertType message createdAt }
+  userActions { actionId kind title detail ctaLabel ctaUrl }
 }`;
 
 const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
@@ -65,6 +76,7 @@ export default function OverviewPage() {
   const [failed, setFailed] = useState(false);
   const [insights, setInsights] = useState<Insight[] | null>(null);
   const [insightFailed, setInsightFailed] = useState(false);
+  const [actions, setActions] = useState<UserAction[] | null>(null);
   const router = useRouter();
 
   async function loadInsights() {
@@ -86,6 +98,17 @@ export default function OverviewPage() {
     }
   }
 
+  async function resolveAction(actionId: string, done: boolean) {
+    try {
+      await gql<unknown>(
+        `mutation { setUserActionStatus(actionId: "${actionId}", status: "${done ? "done" : "dismissed"}") }`
+      );
+      setActions((prev) => (prev ? prev.filter((a) => a.actionId !== actionId) : prev));
+    } catch {
+      // keep the card; user can retry next load
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void gql<DashboardData>(QUERY)
@@ -96,6 +119,7 @@ export default function OverviewPage() {
           return;
         }
         setData(d);
+        setActions(d.userActions && d.userActions.length > 0 ? d.userActions : null);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -204,6 +228,45 @@ export default function OverviewPage() {
       {!insights && !insightFailed && <div className="h-[190px]" />}
 
       {insights && insights.length > 0 && <InsightCards insights={insights} />}
+
+      {actions && actions.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">Suggested actions</h2>
+            <p className="mt-1 text-sm text-muted-foreground">From your advisor — mark them done as you go.</p>
+          </div>
+          <div className="flex flex-col gap-2">
+            {actions.map((a) => (
+              <div
+                key={a.actionId}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/50 bg-background/60 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-foreground">{a.title}</p>
+                  {a.detail && <p className="mt-0.5 text-[12px] text-muted-foreground">{a.detail}</p>}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {a.ctaUrl && (
+                    <Button variant="outline" size="sm" onClick={() => router.push(a.ctaUrl!)}>
+                      {a.ctaLabel ?? "Open"} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={() => void resolveAction(a.actionId, true)}>
+                    <Check className="mr-1.5 h-3.5 w-3.5" /> Done
+                  </Button>
+                  <button
+                    onClick={() => void resolveAction(a.actionId, false)}
+                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Dismiss"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <TaxCard monthlyIncome={data.me.monthlyIncome} monthlyTax={data.me.monthlyTax} />
 

@@ -489,6 +489,20 @@ impl QueryRoot {
         Ok(summary)
     }
 
+    async fn holdings(&self, ctx: &Context<'_>) -> Result<Vec<Holding>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT holding_id::text, asset_type, name, quantity::float8, avg_price::float8, current_price::float8, as_of::text, created_at::text
+                 FROM holdings
+                 WHERE user_id::text = $1
+                 ORDER BY created_at DESC",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(Holding::from_row).collect())
+    }
+
     async fn user_actions(&self, ctx: &Context<'_>, status: Option<String>) -> Result<Vec<UserAction>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let status_filter = status.unwrap_or_else(|| "suggested".into());

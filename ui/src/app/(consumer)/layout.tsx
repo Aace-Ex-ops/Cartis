@@ -6,6 +6,9 @@ import {
   PieChart,
   ShoppingCart,
   Wallet,
+  Target,
+  Briefcase,
+  Calculator,
 } from "lucide-react";
 import { DashboardShell } from "@/components/shared/dashboard-shell";
 
@@ -17,6 +20,9 @@ const CONSUMER_NAV = [
       { id: "nav-analysis", title: "Analysis History", href: "/dashboard/analysis", icon: History },
       { id: "nav-budget", title: "Budget & Spending", href: "/dashboard/budget", icon: PieChart },
       { id: "nav-purchases", title: "Purchase Tracker", href: "/dashboard/purchases", icon: ShoppingCart },
+      { id: "nav-goals", title: "Goals", href: "/dashboard/goals", icon: Target },
+      { id: "nav-portfolio", title: "Portfolio", href: "/dashboard/portfolio", icon: Briefcase },
+      { id: "nav-tools", title: "Tools", href: "/dashboard/tools", icon: Calculator },
     ],
   },
 ];
