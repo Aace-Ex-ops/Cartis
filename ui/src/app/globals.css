@@ -679,3 +679,13 @@
 .osmo-credits__p-a:hover {
   color: #fff;
 }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  body {
+    background: #fff !important;
+  }
+}

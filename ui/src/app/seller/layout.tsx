@@ -23,7 +23,7 @@ const SELLER_NAV = [
       { id: "tax", title: "GST & Tax", href: "/seller/tax", icon: Calculator },
       { id: "cashflow", title: "Cash Flow", href: "/seller/cashflow", icon: Waves },
       { id: "inventory", title: "Inventory", href: "/seller/inventory", icon: Package },
-      { id: "coach", title: "Business Coach", href: "/seller/coach", icon: Sparkles },
+      { id: "coach", title: "Financial Advisor", href: "/seller/coach", icon: Sparkles },
     ],
   },
 ];
