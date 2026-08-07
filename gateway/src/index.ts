@@ -17,6 +17,7 @@ type Env = {
   SETU_CLIENT_ID: string
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
+  TWELVE_DATA_KEY?: string
 }
 
 type Session = {
@@ -570,6 +571,7 @@ app.post('/api/coach/chat', auth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     session_id?: string
     mode?: string
+    tool?: string
     message?: string
   }
   if (!body.message?.trim()) return c.json({ error: 'message required' }, 400)
@@ -581,7 +583,12 @@ app.post('/api/coach/chat', auth, async (c) => {
         'x-cartis-backend-secret': c.env.BACKEND_SECRET,
         'x-user-id': c.get('session').user_id,
       },
-      body: JSON.stringify({ session_id: body.session_id, mode: body.mode, message: body.message }),
+      body: JSON.stringify({
+        session_id: body.session_id,
+        mode: body.mode,
+        tool: body.tool,
+        message: body.message,
+      }),
     })
     if (!res.ok) {
       const text = await res.text()
@@ -1113,6 +1120,125 @@ app.post('/api/aa/reconnect', auth, async (c) => {
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }
+})
+
+// ── Tools ────────────────────────────────────────────────────────────────────
+
+app.post('/api/tools/retirement', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    current_age?: number
+    retire_age?: number
+    monthly_expense?: number
+    current_corpus?: number
+    monthly_sip?: number
+  }
+  const a = Number(body.current_age) || 30
+  const r = Number(body.retire_age) || 60
+  const exp = Number(body.monthly_expense) || 50000
+  const corpus = Number(body.current_corpus) || 0
+  const sip = Number(body.monthly_sip) || 0
+  if (a >= r) return c.json({ error: 'retire_age must be > current_age' }, 400)
+  const years = r - a
+  const growth = Math.pow(1.12, years)
+  const sipGrowth = sip * 12 * ((growth - 1) / 0.12)
+  const future = corpus * growth + sipGrowth
+  const swr = future * 0.04
+  const infl = Math.pow(1.06, years)
+  const today = swr / infl
+  const shortfall = Math.max(0, exp - today)
+  const requiredSip = (exp * infl - corpus * growth * 0.04) / (12 * ((growth - 1) / 0.12) * 0.04)
+  return c.json({
+    years,
+    growth_assumption_pct: 12,
+    inflation_pct: 6,
+    projected_corpus: Math.round(future),
+    monthly_retirement_income: Math.round(swr),
+    monthly_retirement_income_today: Math.round(today),
+    monthly_expense_today: exp,
+    monthly_shortfall: Math.round(shortfall),
+    required_monthly_sip_for_full_cover: Math.max(0, Math.round(requiredSip)),
+  })
+})
+
+app.post('/api/tools/tax', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    annual_income?: number
+    hra?: number
+    rent_paid?: number
+    metro?: boolean
+    basic_da?: number
+    s80c?: number
+    s80d?: number
+    other_exemptions?: number
+  }
+  const income = Number(body.annual_income) || 0
+  const newRegimeTax = (n: number) => {
+    if (n <= 300000) return 0
+    const slabs: [number, number][] = [[700000, 0.05], [1000000, 0.1], [1200000, 0.15], [1500000, 0.2], [Infinity, 0.3]]
+    let tax = 0
+    let prev = 300000
+    for (const [cap, rate] of slabs) {
+      const slice = Math.min(n, cap) - prev
+      if (slice > 0) tax += slice * rate
+      prev = cap
+    }
+    return tax
+  }
+  const oldRegimeTax = (n: number) => {
+    if (n <= 250000) return 0
+    const slabs: [number, number][] = [[500000, 0.05], [1000000, 0.2], [Infinity, 0.3]]
+    let tax = 0
+    let prev = 250000
+    for (const [cap, rate] of slabs) {
+      const slice = Math.min(n, cap) - prev
+      if (slice > 0) tax += slice * rate
+      prev = cap
+    }
+    return tax
+  }
+  const s80c = Math.min(Number(body.s80c) || 0, 150000)
+  const s80d = Math.min(Number(body.s80d) || 0, 25000)
+  const other = Number(body.other_exemptions) || 0
+  const hraClaimed = Math.min(
+    Number(body.hra) || 0,
+    Math.min((Number(body.basic_da) || 0) * 0.5, Math.max(0, (Number(body.rent_paid) || 0) - ((Number(body.basic_da) || 0) * 0.1))),
+  )
+  const newTaxRaw = newRegimeTax(income)
+  const newTax = income <= 1200000 ? 0 : newTaxRaw // 87A rebate (₹60k) zeroes tax up to ₹12L; marginal relief ignored
+  const oldTaxable = Math.max(0, income - 50000 - s80c - s80d - hraClaimed - other)
+  const oldTax = Math.max(0, oldRegimeTax(oldTaxable))
+  const better = newTax <= oldTax ? 'new' : 'old'
+  return c.json({
+    fy: '2026-27',
+    new_regime_tax: Math.round(newTax),
+    old_regime_tax: Math.round(oldTax),
+    better_regime: better,
+    saving_if_switch: Math.round(Math.abs(newTax - oldTax)),
+    hra_exemption_used: Math.round(hraClaimed),
+    s80c_headroom: Math.max(0, 150000 - s80c),
+  })
+})
+
+app.get('/api/tools/stock', auth, async (c) => {
+  const symbol = (c.req.query('symbol') || '').trim().toUpperCase()
+  if (!symbol) return c.json({ error: 'symbol required, e.g. RELIANCE.NSE' }, 400)
+  const key = `stock:${symbol}`
+  const cached = await c.env.SESSIONS.get(key)
+  if (cached) {
+    c.header('x-cache', 'hit')
+    return c.json(JSON.parse(cached))
+  }
+  if (!c.env.TWELVE_DATA_KEY) return c.json({ error: 'TWELVE_DATA_KEY not set' }, 500)
+  const res = await fetch(
+    `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${c.env.TWELVE_DATA_KEY}`,
+  )
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null
+  if (!res.ok || !data) return c.json({ error: `twelve data error ${res.status}` }, 502)
+  if ((data as { status?: string }).status === 'error') {
+    return c.json({ error: (data as { message?: string }).message || 'symbol lookup failed' }, 400)
+  }
+  await c.env.SESSIONS.put(key, JSON.stringify(data), { expirationTtl: 300 })
+  return c.json(data)
 })
 
 // ── Catch-all asset handler ─────────────────────────────────────────────────

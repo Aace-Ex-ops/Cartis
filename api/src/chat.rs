@@ -20,7 +20,37 @@ struct ChatRequest {
     session_id: Option<String>,
     #[serde(default)]
     mode: Option<String>,
+    #[serde(default)]
+    tool: Option<String>,
     message: String,
+}
+
+const TOOLS: [&str; 4] = ["tax", "retirement", "budget", "stock"];
+
+fn tool_system(tool: &str) -> Option<&'static str> {
+    match tool {
+        "tax" => Some(
+            "You are Cartis's India tax specialist. Use the user's financial context and Indian tax law (FY 2026-27): \
+             Section 80C up to ₹1.5L (PPF, ELSS, EPF, life insurance), 80D health insurance (₹25k self/family, ₹50k senior \
+             parents), HRA exemption vs standard deduction, and the old vs new regime comparison (new regime slabs: 0-3L 0%, \
+             3-7L 5%, 7-10L 10%, 10-12L 15%, 12-15L 20%, >15L 30%, standard deduction ₹75k; old regime: 2.5-5L 5%, 5-10L 20%, \
+             >10L 30%, standard deduction ₹50k). Suggest concrete deductions available to this user.",
+        ),
+        "retirement" => Some(
+            "You are Cartis's retirement planner. Advise using SIP math at a 12% pre-tax equity return assumption and 6% \
+             inflation: projected corpus = PV(1+r)^n + SIP*(((1+r)^n-1)/r), monthly retirement income ≈ 4% SWR on corpus, \
+             adjusted to today's rupees for inflation. Be conservative and honest about assumptions.",
+        ),
+        "budget" => Some(
+            "You are Cartis's budget coach. Anchor suggestions in the user's actual spending, monthly tab limit, and \
+             income. Round budgets to ₹500, respect income-minus-savings caps, and prefer achievable nudges over drastic cuts.",
+        ),
+        "stock" => Some(
+            "You are Cartis's equity analyst. Use only facts about the user's portfolio and holdings. For current prices \
+             refer the user to the Stock tool; do not invent prices, returns, or recommendations. Keep advice educational.",
+        ),
+        _ => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -92,16 +122,16 @@ pub async fn chat_stream(
         .session_id
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let (session_id, mode) = match sid {
+    let (session_id, mode, tool) = match sid {
         Some(sid) => {
             match conn
                 .query_opt(
-                    "SELECT mode FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
+                    "SELECT mode, COALESCE(tool, '') FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
                     &[&sid, &uid],
                 )
                 .await
             {
-                Ok(Some(r)) => (sid, r.get::<_, String>(0)),
+                Ok(Some(r)) => (sid, r.get::<_, String>(0), r.get::<_, String>(1)),
                 Ok(None) => return json_err(StatusCode::NOT_FOUND, "session not found"),
                 Err(e) => {
                     eprintln!("chat session lookup error: {e}");
@@ -116,6 +146,11 @@ pub async fn chat_stream(
                 .filter(|m| *m == "seller")
                 .map(|_| "seller")
                 .unwrap_or("consumer");
+            let tool = req
+                .tool
+                .as_deref()
+                .filter(|t| TOOLS.contains(t))
+                .unwrap_or("");
             let title: String = message
                 .chars()
                 .take(60)
@@ -124,12 +159,12 @@ pub async fn chat_stream(
                 .to_string();
             match conn
                 .query_one(
-                    "INSERT INTO chat_sessions (user_id, mode, title) VALUES ($1::text::uuid, $2, $3) RETURNING session_id::text",
-                    &[&uid, &mode, &title],
+                    "INSERT INTO chat_sessions (user_id, mode, tool, title) VALUES ($1::text::uuid, $2, NULLIF($4, ''), $3) RETURNING session_id::text",
+                    &[&uid, &mode, &title, &tool],
                 )
                 .await
             {
-                Ok(r) => (r.get::<_, String>(0), mode.to_string()),
+                Ok(r) => (r.get::<_, String>(0), mode.to_string(), tool.to_string()),
                 Err(e) => {
                     eprintln!("chat session create error: {e}");
                     return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
@@ -151,7 +186,10 @@ pub async fn chat_stream(
         Ok(Some(m)) if !m.is_empty() => m,
         _ => "@cf/meta/llama-4-scout-17b-16e-instruct".to_string(),
     };
-    let system = system_prompt(seller, &context);
+    let mut system = system_prompt(seller, &context);
+    if let Some(t) = tool_system(&tool) {
+        system = format!("{t}\n\n{system}");
+    }
 
     let history = match load_history(&state, &session_id).await {
         Ok(h) => h,
