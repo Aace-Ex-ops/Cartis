@@ -878,7 +878,39 @@ app.post('/webhooks/polar', async (c) => {
   return c.json({ ok: true })
 })
 
+// Setu posts webhook events (no signature) to the notification URL configured on Bridge.
+// Payloads: CONSENT_STATUS_UPDATE (consentId, data.status) and SESSION_STATUS_UPDATE (dataSessionId, data.status).
+async function handleSetuWebhook(c: Context<{ Bindings: Env }>) {
+  let event: Record<string, unknown>
+  try {
+    event = (await c.req.json()) as Record<string, unknown>
+  } catch {
+    return c.json({ error: 'invalid JSON' }, 400)
+  }
+  const type = event.type as string
+  const status = ((event.data ?? {}) as { status?: string }).status ?? null
+  const ts = (event.timestamp as string) ?? new Date().toISOString()
+  if (type === 'CONSENT_STATUS_UPDATE') {
+    const consentId = event.consentId as string
+    if (consentId) {
+      await c.env.SESSIONS.put(`setu:consent:${consentId}`, JSON.stringify({ status, timestamp: ts, success: event.success ?? true }), { expirationTtl: 604800 })
+    }
+  } else if (type === 'SESSION_STATUS_UPDATE') {
+    const dataSessionId = event.dataSessionId as string
+    if (dataSessionId) {
+      await c.env.SESSIONS.put(`setu:session:${dataSessionId}`, JSON.stringify({ status, timestamp: ts, success: event.success ?? true }), { expirationTtl: 604800 })
+    }
+  }
+  console.log('[setu]', type, event.consentId ?? event.dataSessionId ?? '', status)
+  return c.json({ ok: true })
+}
+
 // ── Account Aggregator (Setu AA) routes ────────────────────────────────────
+
+// Sahamati-standard paths + our own; Bridge config uses the full URL, so the handler is mounted on all three.
+app.post('/webhooks/setu', handleSetuWebhook)
+app.post('/v1/consents/notify', handleSetuWebhook)
+app.post('/v1/fi/notify', handleSetuWebhook)
 
 app.post('/api/aa/consent', auth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { mobileNumber?: string; fiTypes?: string[] }
@@ -927,6 +959,12 @@ app.post('/api/aa/consent', auth, async (c) => {
 app.get('/api/aa/status/:consentId', auth, async (c) => {
   const consentId = c.req.param('consentId')
   if (!consentId) return c.json({ error: 'consentId required' }, 400)
+
+  const cached = await c.env.SESSIONS.get(`setu:consent:${consentId}`)
+  if (cached) {
+    const ev = JSON.parse(cached) as { status: string; timestamp: string }
+    return c.json({ consentStatus: ev.status, consentId, cached: true, timestamp: ev.timestamp })
+  }
 
   try {
     const res = await setuFetch(c, `/v2/consents/${consentId}`)
