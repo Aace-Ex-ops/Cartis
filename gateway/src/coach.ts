@@ -1,4 +1,4 @@
-type CoachEnv = { AI: Ai; SESSIONS: KVNamespace; BACKEND_URL: string; BACKEND_SECRET: string }
+type CoachEnv = { AI: Ai; SESSIONS: KVNamespace; BACKEND_URL: string; BACKEND_SECRET: string; SERPAPI_KEY?: string }
 
 const DEFAULT_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct'
 
@@ -66,7 +66,7 @@ async function step3(env: CoachEnv, p: ScrapedProduct, model?: string) {
 async function step4(env: CoachEnv, p: ScrapedProduct, s1: unknown, s3: unknown, budget: unknown, price: unknown, model?: string) {
   const system = `You are the Cartis financial coach. Decide if the user should buy now, wait, or avoid this product.
 Return ONLY JSON:
-{"verdict":"buy"|"wait"|"avoid","explanation":"2-3 plain-English sentences","alternatives":[{"site":"amazon.in","price":14500}]|[],"coach_note":"how this affects the user's goals"}`
+{"verdict":"buy"|"wait"|"avoid","explanation":"2-3 plain-English sentences","coach_note":"how this affects the user's goals"}`
   const context = {
     name: p.name,
     price: p.price,
@@ -75,7 +75,7 @@ Return ONLY JSON:
     budget: budget ?? 'unavailable',
     price_index: price ?? 'unavailable',
   }
-  return extractJson<Omit<Verdict, 'cached' | 'sources'>>(
+  return extractJson<Omit<Verdict, 'cached' | 'sources' | 'alternatives'>>(
     await llm(env, `${system}\n\nProduct: ${JSON.stringify(context).slice(0, 4000)}`, model)
   )
 }
@@ -84,6 +84,51 @@ async function priceIndex(env: CoachEnv, p: ScrapedProduct): Promise<unknown | n
   if (!p.gtin) return null
   const raw = await env.SESSIONS.get(`price_index:${p.gtin}`)
   return raw ? (JSON.parse(raw) as unknown) : null
+}
+
+async function recordObservation(env: CoachEnv, p: ScrapedProduct): Promise<void> {
+  if (!p.gtin) return
+  const key = `price_index:${p.gtin}`
+  const raw = await env.SESSIONS.get(key)
+  let keep: { price: number; site: string; url: string; currency?: string; observedAt: string }
+  const now = new Date().toISOString()
+  if (raw) {
+    const prev = JSON.parse(raw) as { price: number; site: string; url: string; currency?: string; observedAt: string }
+    keep = prev.observedAt.slice(0, 10) === now.slice(0, 10) && prev.price <= p.price ? prev : { price: p.price, site: p.site, url: p.url, currency: p.currency, observedAt: now }
+  } else {
+    keep = { price: p.price, site: p.site, url: p.url, currency: p.currency, observedAt: now }
+  }
+  await env.SESSIONS.put(key, JSON.stringify(keep), { expirationTtl: 86400 * 365 })
+}
+
+// Real alternatives via SerpAPI Google Shopping (works from Cloudflare IPs; Indian aggregators 403 datacenter traffic).
+async function alternativesFromSerp(env: CoachEnv, p: ScrapedProduct): Promise<Array<{ site: string; price: number; url?: string }>> {
+  if (!p.gtin || !env.SERPAPI_KEY) return []
+  const cacheKey = `serp:${p.gtin}`
+  const cached = await env.SESSIONS.get(cacheKey)
+  if (cached) return JSON.parse(cached) as Array<{ site: string; price: number; url?: string }>
+  try {
+    const res = await fetch(
+      `https://serpapi.com/search.json?engine=google_shopping&q=${encodeURIComponent(p.gtin)}&gl=in&hl=en&api_key=${env.SERPAPI_KEY}`,
+    )
+    if (!res.ok) return []
+    const data = (await res.json()) as { shopping_results?: Array<{ title?: string; price?: string; link?: string; source?: string; offers?: Array<{ price?: string }> }>; error?: string }
+    if (data.error) return []
+    const out = (data.shopping_results ?? [])
+      .map((r): { site: string; price: number; url?: string } | null => {
+        const priceStr = r.price ?? r.offers?.[0]?.price ?? ''
+        const price = parseFloat(priceStr.replace(/[^0-9.,]/g, '').replace(/,/g, ''))
+        if (!price) return null
+        return { site: r.source ?? r.title ?? 'store', price, url: r.link ?? undefined }
+      })
+      .filter((x): x is { site: string; price: number; url?: string } => x !== null)
+      .slice(0, 5)
+    await env.SESSIONS.put(cacheKey, JSON.stringify(out), { expirationTtl: 86400 })
+    return out
+    return out
+  } catch {
+    return []
+  }
 }
 
 async function budgetCheck(env: CoachEnv, price: number): Promise<unknown | null> {
@@ -123,6 +168,17 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
     priceIndex(env, p).catch(() => null),
   ])
 
+  // Record our own observation into the price index (newer/cheaper wins).
+  await recordObservation(env, p).catch(() => {})
+
+  // Real alternatives: Google Shopping first, own history second, none last.
+  // Alternatives come from code, never from the model — no hallucinated prices.
+  let realAlternatives = await alternativesFromSerp(env, p).catch(() => [])
+  if (!realAlternatives.length && price) {
+    const rec = price as { site: string; price: number; url?: string }
+    if (rec.site !== p.site && rec.price > 0) realAlternatives = [{ site: rec.site, price: rec.price, url: rec.url }]
+  }
+
   // Step 3: trust check
   let s3: unknown = null
   try {
@@ -133,14 +189,13 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
   }
 
   // Step 4: verdict
-  let verdict: Omit<Verdict, 'cached' | 'sources'>
+  let verdict: Omit<Verdict, 'cached' | 'sources' | 'alternatives'>
   try {
     verdict = await step4(env, p, s1, s3, budget, price, model)
   } catch {
     verdict = {
       verdict: 'wait',
       explanation: 'We could not reach the coach model. Based on the listed price alone, consider waiting.',
-      alternatives: [],
       coach_note: budget === null ? 'Your current budget state was not available for this check.' : undefined,
     }
   }
@@ -148,11 +203,13 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
 
   const result: Verdict = {
     ...verdict,
+    alternatives: realAlternatives,
     sources: {
       extraction: s1 ? 'ai' : 'none',
       budget: budget ? 'live' : 'unavailable',
       trust: s3 ? 'ai' : 'fallback',
       ...(price ? { price: 'kv' } : {}),
+      ...(realAlternatives.length ? { alternatives: env.SERPAPI_KEY ? 'serpapi' : 'kv' } : {}),
     },
   }
   await env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 })

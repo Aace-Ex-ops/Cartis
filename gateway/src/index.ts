@@ -18,6 +18,7 @@ type Env = {
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
   TWELVE_DATA_KEY?: string
+  SERPAPI_KEY?: string
 }
 
 type Session = {
