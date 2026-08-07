@@ -171,7 +171,14 @@ own price history from our own traffic (free, cold start).
 - Chat tool modes: `ChatRequest.tool` (tax|retirement|budget|stock), persisted in new `chat_sessions.tool` column (in schema.sql, pending DB apply), tool-specialist system prompts in chat.rs `TOOLS`/`tool_system()`. Backend compiles; deploy blocked on SSH (CARTIS-74).
 - Gateway tools live (deploy eca5cfa0): POST /api/tools/retirement (12%/6% assumptions, 4% SWR, corpus/SIP solver), POST /api/tools/tax (FY26-27 new-vs-old, 80C/80D/HRA, 87A rebate ≤₹12L), GET /api/tools/stock (Twelve Data, 5-min KV cache via SESSIONS binding, needs TWELVE_DATA_KEY secret).
 - UI: tool chip switcher in twin-chat (consumer only), ships with out/ on deploy. Commits e05cbb1, e2f0d59.
-- Remaining Phase 1: goals/portfolio/actions pages + dashboard action cards (backend GraphQL done in graphql.rs, awaits backend deploy); apply schema.sql; Twelve Data free key signup needed.
+
+## Goals/portfolio/tools/actions UI — shipped Aug 7 (43ebbdb, deploy 3fd3254c)
+- Pages: /dashboard/goals (CRUD goals, ±₹1k/10k quick-bump, progress bars), /dashboard/portfolio (add/delete/update-price holdings, allocation bars, invested/current/returns header), /dashboard/tools (tabs retirement/tax/stock hitting /api/tools/*, supports ?tab= for action CTAs).
+- Dashboard action cards: userActions query (already in graphql.rs w/ rule-based ensure_suggested_actions) rendered with Done/Dismiss via setUserActionStatus mutation; cards auto-hide on resolve.
+- Nav: consumer sidebar gains Goals/Portfolio/Tools.
+- `holdings` query + `portfolio` summary committed in same commit (14 lines graphql.rs).
+- Gotcha: static export has no SPA fallback (not_found_handling: none) — hit /dashboard/goals/ trailing-slash URLs; fresh deploys may 404 once on CDN edge cache, resolves.
+- Backend GraphQL for these was already merged; the queries 404 over the gateway proxy until backend deploy lands (CARTIS-74).
 
 ## Advisor (CARTIS-75..80) — shipped Aug 7
 - /api/advisor/health (76): KPIs from seller_finances(limit 5000) filtered client-side by month (revenue/cogs/opex/cash/GM/NM), static benchmarks saas/d2c/services/retail, rule-based 0-100 score (GM 30 / NM 30 / cash 20 / momentum 10 / cost 10), leak flags (COGS pressure, top-2 opex cats), KV 1h.
