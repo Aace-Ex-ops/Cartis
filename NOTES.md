@@ -179,3 +179,8 @@ own price history from our own traffic (free, cold start).
 - /api/advisor/entitlement + Polar webhook → polar:entitled:<userId> KV 1y on paid events (80); checkout already sends metadata.user_id.
 - UI: /seller/coach = Financial Advisor (78): score gauge, benchmark bars with healthy band, leak callouts, 3 tactic cards, capital allocation, severity-badged risks, business-type chips (saas/d2c/services/retail), Export PDF Pro-gated (79) via window.print() + @page A4 in globals.css. Commits d77a634, 9486fda; deploys 63014ada (UI+gw).
 - TODO: PDF button needs real Polar productId checkout link when Pro is configured; entitlement currently only grantable via a real paid Polar event.
+
+## CARTIS-73: real price alternatives — shipped Aug 7 (ea73ea4, deploy 09e18cc7)
+- step4 schema no longer includes alternatives; verdict.alternatives assigned from code: SerpAPI google_shopping (gtin, gl=in, 24h KV `serp:<gtin>`) → own `price_index:<gtin>` (different-site record) → [].
+- recordObservation: every /api/coach/analyze upserts price_index:<gtin> (same-day cheaper wins, 1y TTL).
+- Pending: `wrangler secret put SERPAPI_KEY` (user getting free key) — without it alternatives stay [] (no hallucination).
