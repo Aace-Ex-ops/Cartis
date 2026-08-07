@@ -900,12 +900,12 @@ app.post('/api/aa/consent', auth, async (c) => {
       purpose: {
         code: '102',
         refUri: 'https://api.rebit.org.in/aa/purpose/102.xml',
-        text: 'Personal finance management',
+        text: 'Customer spending patterns, budget or other reportings',
         category: { type: 'string' },
       },
       dataRange: { from, to },
-      dataLife: { unit: 'MONTH', value: '1' },
-      frequency: { unit: 'MONTH', value: '1' },
+      dataLife: { unit: 'MONTH', value: 1 },
+      frequency: { unit: 'MONTH', value: 1 },
       redirectUrl: new URL('/onboarding', c.req.url).toString(),
     })
 
