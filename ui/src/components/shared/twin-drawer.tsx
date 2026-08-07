@@ -56,6 +56,16 @@ export function TwinDrawer({
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <TwinChat
                 mode={mode}
+                tools={
+                  mode === "seller"
+                    ? undefined
+                    : [
+                        { id: "budget", label: "Budget" },
+                        { id: "retirement", label: "Retirement" },
+                        { id: "tax", label: "Tax" },
+                        { id: "stock", label: "Stocks" },
+                      ]
+                }
                 title="AI Twin"
                 subtitle="Your financial twin — ask about your money, budget, or business."
                 welcome="Hi, I'm your AI twin. Ask me about your spending, budget, savings, or business numbers."

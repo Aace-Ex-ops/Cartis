@@ -31,15 +31,18 @@ export function TwinChat({
   welcome,
   placeholder,
   mode,
+  tools,
 }: {
   title: string;
   subtitle: string;
   welcome: string;
   placeholder: string;
   mode?: "seller";
+  tools?: { id: string; label: string }[];
 }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [tool, setTool] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: welcome },
   ]);
@@ -91,6 +94,7 @@ export function TwinChat({
   const newChat = () => {
     abortRef.current?.abort();
     setActiveId(null);
+    setTool(null);
     setMessages([{ role: "assistant", content: welcome }]);
     setError("");
   };
@@ -110,7 +114,7 @@ export function TwinChat({
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ session_id: activeId ?? undefined, mode, message: content }),
+        body: JSON.stringify({ session_id: activeId ?? undefined, mode, tool: tool ?? undefined, message: content }),
       });
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -205,6 +209,24 @@ export function TwinChat({
             >
               <span className="block max-w-[180px] truncate font-medium">{s.title || "New chat"}</span>
               <span className="block text-[10px] opacity-70">{timeAgo(s.updated_at)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {listActive && tools && (
+        <div className="flex flex-wrap gap-2">
+          {tools.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTool(tool === t.id ? null : t.id)}
+              className={`rounded-full border px-3 py-1 text-[12px] transition-colors ${
+                tool === t.id
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border/50 bg-background/60 text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
             </button>
           ))}
         </div>
