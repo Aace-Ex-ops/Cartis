@@ -172,3 +172,10 @@ own price history from our own traffic (free, cold start).
 - Gateway tools live (deploy eca5cfa0): POST /api/tools/retirement (12%/6% assumptions, 4% SWR, corpus/SIP solver), POST /api/tools/tax (FY26-27 new-vs-old, 80C/80D/HRA, 87A rebate ≤₹12L), GET /api/tools/stock (Twelve Data, 5-min KV cache via SESSIONS binding, needs TWELVE_DATA_KEY secret).
 - UI: tool chip switcher in twin-chat (consumer only), ships with out/ on deploy. Commits e05cbb1, e2f0d59.
 - Remaining Phase 1: goals/portfolio/actions pages + dashboard action cards (backend GraphQL done in graphql.rs, awaits backend deploy); apply schema.sql; Twelve Data free key signup needed.
+
+## Advisor (CARTIS-75..80) — shipped Aug 7
+- /api/advisor/health (76): KPIs from seller_finances(limit 5000) filtered client-side by month (revenue/cogs/opex/cash/GM/NM), static benchmarks saas/d2c/services/retail, rule-based 0-100 score (GM 30 / NM 30 / cash 20 / momentum 10 / cost 10), leak flags (COGS pressure, top-2 opex cats), KV 1h.
+- /api/advisor/strategies (77): rule-seeded llama-4-scout prompt → JSON; model is flaky (broken JSON / empty sections ~2/3) → deterministic advisorFallback() (article's 3 allocation branches + 4 risk templates) serves when parse fails or sections empty; KV 1h, refresh=1.
+- /api/advisor/entitlement + Polar webhook → polar:entitled:<userId> KV 1y on paid events (80); checkout already sends metadata.user_id.
+- UI: /seller/coach = Financial Advisor (78): score gauge, benchmark bars with healthy band, leak callouts, 3 tactic cards, capital allocation, severity-badged risks, business-type chips (saas/d2c/services/retail), Export PDF Pro-gated (79) via window.print() + @page A4 in globals.css. Commits d77a634, 9486fda; deploys 63014ada (UI+gw).
+- TODO: PDF button needs real Polar productId checkout link when Pro is configured; entitlement currently only grantable via a real paid Polar event.
