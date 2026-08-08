@@ -109,10 +109,13 @@ Gap-closing round on the seller advisor (per user decisions: keep ledger-derived
 
 - **Setu proxy (EC2)** — Setu APIs are reachable only from Indian IPs;
   Cloudflare Workers egress is not → 403. Fix: `/setu-proxy` route on the
-  EC2 backend (ap-south-1), generic passthrough gated by
-  `x-cartis-backend-secret`. Lives **only on the server**
-  (`/home/ubuntu/api-src/src/main.rs`, NOT in the local `api/` repo).
-  Gateway `setuProxy`/`getSetuToken`/`setuFetch` route all Setu traffic
+  EC2 backend (ap-south-1), generic HTTP passthrough gated by
+  `x-cartis-backend-secret`. **Aug 8: the route moved INTO the local repo**
+  (`api/src/main.rs` — was previously server-only in `/home/ubuntu/api-src/`,
+  an orphaned tree that isn't what cartis-api builds from; the deployed
+  binary silently lost `/setu-proxy`, so Setu routes + anything proxy-based
+  were 404ing until the route was ported to the repo and redeployed).
+  Gateway `setuProxy`/`getSetuToken`/`setuFetch` route all proxied traffic
   through `{BACKEND_URL}/setu-proxy`.
 - **AA routes (gateway)** — `/api/aa/consent`, `/api/aa/status/:consentId`,
   `/api/aa/fetch`, `/api/aa/reconnect` (commit `b44676f`).
@@ -190,7 +193,8 @@ own price history from our own traffic (free, cold start).
 
 ## Phase 1: Kiro tools — shipped (Aug 7, post-Setu-pivot)
 - Chat tool modes: `ChatRequest.tool` (tax|retirement|budget|stock), persisted in new `chat_sessions.tool` column (in schema.sql, pending DB apply), tool-specialist system prompts in chat.rs `TOOLS`/`tool_system()`. Backend compiles; deploy blocked on SSH (CARTIS-74).
-- Gateway tools live (deploy eca5cfa0): POST /api/tools/retirement (12%/6% assumptions, 4% SWR, corpus/SIP solver), POST /api/tools/tax (FY26-27 new-vs-old, 80C/80D/HRA, 87A rebate ≤₹12L), GET /api/tools/stock (Twelve Data, 5-min KV cache via SESSIONS binding, needs TWELVE_DATA_KEY secret).
+- Gateway tools live (deploy eca5cfa0): POST /api/tools/retirement (12%/6% assumptions, 4% SWR, corpus/SIP solver), POST /api/tools/tax (FY26-27 new-vs-old, 80C/80D/HRA, 87A rebate ≤₹12L), GET /api/tools/stock.
+- **Stock lookup (Aug 8, Twelve Data dropped)**: EC2 Python service `apps/stock-service/` (FastAPI + `yfinance`, systemd `cartis-stock.service`, uvicorn on 127.0.0.1:8001, localhost-only) → **Redis cache** `stock:<sym>` TTL 300 (Redis was already running on the EC2). Gateway `/api/tools/stock` routes through the existing `setuProxy` helper → nginx 443 → `/setu-proxy` → Python. Symbol normalization in Python: `.NSE`→`.NS`, `.BSE`→`.BO`, bare → as-is then `.NS` retry. Response shape matches the UI `Stock` type (symbol/name/close/previous_close/change/percent_change) — no UI changes. No API keys anywhere (Twelve Data free tier is US-only anyway; Grow $29/mo would unlock India but yfinance is free). Gleam WebSocket streaming (`pipeline/pricescan.gleam` + `broadcast.gleam` scaffolds) deferred — Redis pub/sub path is clear when needed.
 - UI: tool chip switcher in twin-chat (consumer only), ships with out/ on deploy. Commits e05cbb1, e2f0d59.
 
 ## Goals/portfolio/tools/actions UI — shipped Aug 7 (43ebbdb, deploy 3fd3254c)

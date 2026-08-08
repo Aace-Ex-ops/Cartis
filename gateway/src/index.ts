@@ -17,7 +17,6 @@ type Env = {
   SETU_CLIENT_ID: string
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
-  TWELVE_DATA_KEY?: string
   SERPAPI_KEY?: string
 }
 
@@ -1233,25 +1232,18 @@ app.post('/api/tools/tax', auth, async (c) => {
 })
 
 app.get('/api/tools/stock', auth, async (c) => {
-  const symbol = (c.req.query('symbol') || '').trim().toUpperCase()
+  const symbol = (c.req.query('symbol') || '').trim()
   if (!symbol) return c.json({ error: 'symbol required, e.g. RELIANCE.NSE' }, 400)
-  const key = `stock:${symbol}`
-  const cached = await c.env.SESSIONS.get(key)
-  if (cached) {
-    c.header('x-cache', 'hit')
-    return c.json(JSON.parse(cached))
+  try {
+    // EC2 Python yfinance service via the generic setu-proxy passthrough (Redis-cached there).
+    const res = await setuProxy(c, `http://127.0.0.1:8001/quote?symbol=${encodeURIComponent(symbol)}`, 'GET', {})
+    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null
+    if (data && typeof data.error === 'string') return c.json({ error: data.error }, res.status === 404 ? 404 : 502)
+    if (!res.ok || !data) return c.json({ error: `stock service error ${res.status}` }, 502)
+    return c.json(data)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
   }
-  if (!c.env.TWELVE_DATA_KEY) return c.json({ error: 'TWELVE_DATA_KEY not set' }, 500)
-  const res = await fetch(
-    `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${c.env.TWELVE_DATA_KEY}`,
-  )
-  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null
-  if (!res.ok || !data) return c.json({ error: `twelve data error ${res.status}` }, 502)
-  if ((data as { status?: string }).status === 'error') {
-    return c.json({ error: (data as { message?: string }).message || 'symbol lookup failed' }, 400)
-  }
-  await c.env.SESSIONS.put(key, JSON.stringify(data), { expirationTtl: 300 })
-  return c.json(data)
 })
 
 // ── Advisor: KPIs, benchmarks, health score ─────────────────────────────────
