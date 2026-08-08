@@ -91,11 +91,11 @@ export function TaxCard({
             </div>
             <div className="flex items-center justify-between text-[12px]">
               <span className="text-muted-foreground">Status</span>
-              <span className={`font-medium ${tds != null && tax != null && tds < tax ? "text-amber-400" : "text-green-500"}`}>
+              <span className={`font-medium ${tds != null && tax != null && tds < tax ? "text-amber-600" : "text-green-600"}`}>
                 {due}
               </span>
             </div>
-            <p className="rounded-lg bg-amber-400/10 px-3 py-2 text-[12px] text-amber-400">
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-amber-600">
               ITR due 31 July 2026 — don&apos;t miss the deadline.
             </p>
           </>

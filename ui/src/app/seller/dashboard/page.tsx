@@ -47,7 +47,7 @@ export default function SellerDashboardPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Business Overview</h1>
+        <h1 className="text-2xl font-heading font-semibold tracking-tight text-foreground">Business Overview</h1>
         <p className="mt-1 text-sm text-muted-foreground">Your shop at a glance — live from your books.</p>
       </div>
 

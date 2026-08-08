@@ -58,7 +58,7 @@ export default function IncomePage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Income</h1>
+        <h1 className="text-2xl font-heading font-semibold tracking-tight text-foreground">Income</h1>
         <p className="mt-1 text-sm text-muted-foreground">Where the money comes from.</p>
       </div>
       <StatCard title="6-month growth" value={`${growth >= 0 ? "+" : ""}${growth}%`} icon={<TrendingUp className="h-4 w-4 text-primary" />} />

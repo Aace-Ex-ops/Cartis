@@ -121,7 +121,7 @@ export default function PortfolioPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Portfolio</h1>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Portfolio</h1>
           <p className="mt-1 text-sm text-muted-foreground">Manual holdings — update prices to track returns.</p>
         </div>
         <Button size="sm" onClick={() => setOpen(!open)}>
@@ -146,7 +146,7 @@ export default function PortfolioPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-[13px] text-muted-foreground">Returns</CardTitle>
           </CardHeader>
-          <CardContent className={`text-xl font-semibold ${up ? "text-emerald-400" : "text-red-400"}`}>
+          <CardContent className={`text-xl font-semibold ${up ? "text-emerald-600" : "text-red-600"}`}>
             {up ? "+" : ""}{fmt(portfolio?.returns ?? 0)}
             <span className="ml-1 text-sm">({up ? "+" : ""}{portfolio?.returnPct.toFixed(1) ?? "0.0"}%)</span>
           </CardContent>
@@ -239,7 +239,7 @@ export default function PortfolioPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-[13px] font-medium text-foreground">{fmt(h.currentValue)}</p>
-                      <p className={`text-[11px] ${gain >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      <p className={`text-[11px] ${gain >= 0 ? "text-emerald-600" : "text-red-600"}`}>
                         {gain >= 0 ? "+" : ""}{fmt(gain)}
                       </p>
                     </div>

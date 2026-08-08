@@ -34,7 +34,7 @@ export function HeaderBar({
       <div className="flex items-center gap-2">
         <button
           onClick={() => setTwinOpen(true)}
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
           aria-label="Open AI Twin"
           title="AI Twin"
         >

@@ -57,7 +57,7 @@ export default function PnLPage() {
     <div className="flex max-w-2xl flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Profit &amp; Loss</h1>
+          <h1 className="text-2xl font-heading font-semibold tracking-tight text-foreground">Profit &amp; Loss</h1>
           <p className="mt-1 text-sm text-muted-foreground">{currentMonth()} · auto-generated</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => window.print()}>

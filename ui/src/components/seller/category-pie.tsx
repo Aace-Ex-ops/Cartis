@@ -25,8 +25,8 @@ export function CategoryPie({ title, data }: {
               </Pie>
               <Tooltip
                 formatter={(value) => fmt(Number(value))}
-                contentStyle={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
-                labelStyle={{ color: "#9ca3af" }}
+                contentStyle={{ background: "#ffffff", border: "1px solid rgba(12,12,12,0.1)", borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: "#52525b" }}
               />
             </PieChart>
           </ResponsiveContainer>

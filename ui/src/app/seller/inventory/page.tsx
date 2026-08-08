@@ -77,7 +77,7 @@ export default function InventoryPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Inventory</h1>
+        <h1 className="text-2xl font-heading font-semibold tracking-tight text-foreground">Inventory</h1>
         <p className="mt-1 text-sm text-muted-foreground">{items.length} tracked items.</p>
       </div>
 

@@ -113,7 +113,7 @@ export function OnboardingForm() {
                 : "border-border/50 bg-background/50 hover:border-border"
             }`}
           >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "consumer" ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground"}`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "consumer" ? "bg-primary text-primary-foreground" : "bg-foreground/5 text-muted-foreground"}`}>
               <User className="h-4 w-4" />
             </span>
             <span>
@@ -130,7 +130,7 @@ export function OnboardingForm() {
                 : "border-border/50 bg-background/50 hover:border-border"
             }`}
           >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "seller" ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground"}`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "seller" ? "bg-primary text-primary-foreground" : "bg-foreground/5 text-muted-foreground"}`}>
               <Store className="h-4 w-4" />
             </span>
             <span>

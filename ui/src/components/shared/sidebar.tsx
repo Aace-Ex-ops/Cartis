@@ -77,9 +77,9 @@ export function Sidebar({
               <LineSidebar
                 key={`${group.heading ?? i}-${pathname}`}
                 items={group.items.map((item) => item.title)}
-                accentColor="#10b981"
-                textColor="#a1a1aa"
-                markerColor="#52525b"
+                accentColor="#0d9488"
+                textColor="#52525b"
+                markerColor="#a1a1aa"
                 defaultActive={activeIndex >= 0 ? activeIndex : null}
                 showIndex={false}
                 proximityRadius={80}

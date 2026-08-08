@@ -53,7 +53,7 @@ export function ModelPanel() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Model</h1>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Model</h1>
         <p className="mt-1 text-sm text-muted-foreground">Choose the AI model for your coach and budget suggestions.</p>
       </div>
 

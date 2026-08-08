@@ -19,7 +19,7 @@ export function AlertBell({
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger className="relative rounded-md p-2 text-muted-foreground outline-none transition-colors hover:bg-white/5 hover:text-foreground focus:ring-1 focus:ring-primary">
+      <DropdownMenuTrigger className="relative rounded-full p-2 text-muted-foreground outline-none transition-colors hover:bg-foreground/5 hover:text-foreground focus:ring-1 focus:ring-primary">
         <Bell className="h-[18px] w-[18px]" strokeWidth={1.5} />
         {alerts.length > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
@@ -40,7 +40,7 @@ export function AlertBell({
           alerts.map((a) => (
             <div
               key={a.id}
-              className="flex flex-col gap-0.5 px-3 py-2.5 text-[13px] transition-colors hover:bg-white/5"
+              className="flex flex-col gap-0.5 px-3 py-2.5 text-[13px] transition-colors hover:bg-foreground/5"
             >
               <span className="text-foreground">{a.title}</span>
               <span className="text-[11px] text-muted-foreground">{a.time}</span>

@@ -6,9 +6,9 @@ import { Badge } from "@/components/ui/badge";
 export type Insight = { title: string; detail: string; tone: string };
 
 export const TONE: Record<string, { label: string; cls: string }> = {
-  warn: { label: "Watch", cls: "bg-amber-400/15 text-amber-400 hover:bg-amber-400/15" },
+  warn: { label: "Watch", cls: "bg-amber-500/15 text-amber-600 hover:bg-amber-500/15" },
   good: { label: "Grow", cls: "bg-primary/15 text-primary hover:bg-primary/15" },
-  info: { label: "Info", cls: "bg-white/10 text-muted-foreground hover:bg-white/10" },
+  info: { label: "Info", cls: "bg-foreground/10 text-muted-foreground hover:bg-foreground/10" },
 };
 
 export function InsightCards({ insights }: { insights: Insight[] }) {

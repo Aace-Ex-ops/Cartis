@@ -19,7 +19,7 @@ const QUERY = `{ analysisHistory(limit: 50) { analysisId productName price verdi
 
 const VERDICT_STYLE: Record<string, string> = {
   buy: "bg-primary/15 text-primary hover:bg-primary/15",
-  wait: "bg-amber-400/15 text-amber-400 hover:bg-amber-400/15",
+  wait: "bg-amber-500/15 text-amber-600 hover:bg-amber-500/15",
   skip: "bg-destructive/15 text-destructive hover:bg-destructive/15",
 };
 
@@ -63,7 +63,7 @@ export default function PurchasesPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Purchase Tracker</h1>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Purchase Tracker</h1>
         <p className="mt-1 text-sm text-muted-foreground">What the coach said, what you decided, what you saved.</p>
       </div>
 

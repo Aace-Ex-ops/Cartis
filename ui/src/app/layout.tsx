@@ -43,7 +43,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${gantari.variable} ${inclusive.variable} ${instrument.variable} h-full antialiased dark`}
+      className={`${inter.variable} ${gantari.variable} ${inclusive.variable} ${instrument.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>

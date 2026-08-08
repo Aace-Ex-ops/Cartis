@@ -47,7 +47,7 @@ export function TwinDrawer({
               <span className="text-sm font-semibold text-foreground">AI Twin</span>
               <button
                 onClick={onClose}
-                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+                className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                 aria-label="Close AI Twin"
               >
                 <X className="h-4 w-4" />

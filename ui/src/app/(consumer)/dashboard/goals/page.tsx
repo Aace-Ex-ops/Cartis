@@ -91,7 +91,7 @@ export default function GoalsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Financial Goals</h1>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Financial Goals</h1>
           <p className="mt-1 text-sm text-muted-foreground">Track targets like an emergency fund or retirement corpus.</p>
         </div>
         <Button size="sm" onClick={() => setOpen(!open)}>

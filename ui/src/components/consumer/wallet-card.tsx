@@ -35,7 +35,7 @@ export function WalletCard({ balance, monthlySpend, monthlyBudget }: {
           )}
         </div>
         {monthlyBudget > 0 && (
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+          <div className="h-1.5 overflow-hidden rounded-full bg-foreground/5">
             <div
               className={`h-full rounded-full ${usedPct > 90 ? "bg-destructive" : "bg-primary"}`}
               style={{ width: `${Math.min(usedPct, 100)}%` }}

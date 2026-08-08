@@ -23,7 +23,7 @@ export function HealthScoreCard({ score, level, insight }: { score: number; leve
       <CardContent className="flex items-center gap-6">
         <div className="relative h-36 w-36 shrink-0">
           <svg viewBox="0 0 144 144" className="h-full w-full -rotate-90">
-            <circle cx="72" cy="72" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+            <circle cx="72" cy="72" r={r} fill="none" stroke="rgba(12,12,12,0.08)" strokeWidth="10" />
             <circle
               cx="72"
               cy="72"
