@@ -72,15 +72,36 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' \
 
 ## Infra quickies
 
-- Backend deploy (EC2): stop → `cp /home/ubuntu/api/build/target/release/cartis-api
-  /home/ubuntu/api/cartis-api` → start (binary busy otherwise).
-- curl from Mac can't reach EC2:443 (security group = Cloudflare IPs only);
-  test through the gateway.
+- Backend deploy (EC2): `su - ubuntu -c "cd /home/ubuntu/api && PATH=/home/ubuntu/.cargo/bin:$PATH cargo build --release"` → stop → `cp target/release/cartis-api /home/ubuntu/api/cartis-api` → start (binary busy otherwise). Upload changed src via SSM: gzip → base64 (fits the 97KB send-command limit; raw base64 of 81KB graphql.rs does not).
+- Backend HTTPS: nginx 443 vhost `40.192.51.1.sslip.io` (Let's Encrypt via `certbot certonly --standalone` with brief nginx stop; certbot installs under `/etc/letsencrypt/live/40.192.51.1.sslip.io/`). SG must allow 443 — opened `sg-026bedd566b638501` for 0.0.0.0/0.
+- Gateway secret puts need `printf %s | npx wrangler secret put NAME --name cartis-gateway` (wrangler 4.x; `--stdin`/`--value` flags error). Deploy after every secret change.
 - Wrangler OAuth token `~/.wrangler/config/default.toml` expires ~hourly —
   `npx wrangler whoami` to refresh before v4 API calls.
 - KV namespace `540329106cb74e56a5a2c659ccb98b49` (SESSIONS),
   account `10112875ad4b991b430e4a8ed79124a7`; keys are URL-encoded
   (colon → `session%3A…`).
+
+## Gateway↔backend connectivity — fixed Aug 8
+
+Root cause of the signup 403: Cloudflare Workers **block outbound `fetch()` to bare-IP HTTP origins** (edge returns HTTP 403, body `error code: 1003`, before hitting nginx — nginx/backend were never involved). Fix chain:
+
+1. Let's Encrypt cert for `40.192.51.1.sslip.io` (certbot standalone, brief nginx stop) + nginx 443 vhost proxying to 127.0.0.1:8000 + SG rule for 443.
+2. Gateway `BACKEND_URL=https://40.192.51.1.sslip.io` (secret put + deploy), `BACKEND_SECRET` matched both sides (`FINAL-MATCH-TOKEN`).
+3. DB grants: `cartis` role lacked privileges on newer tables → `GRANT ALL ON ALL TABLES/SEQUENCES IN SCHEMA public TO cartis`.
+4. `userActions` still failed: `ensure_suggested_actions`'s parameterized `INSERT ... WHERE NOT EXISTS` hit PG error 42P18 ("inconsistent types deduced for parameter $2: text versus character varying") — `a.kind = $2` vs target column `kind varchar(30)`. Fix in api/src/graphql.rs: `$2::varchar` in the subquery (keep `$1::text::uuid` so tokio_postgres can serialize `&str`). Same pattern elsewhere is single-use-param, safe.
+
+Verified end-to-end: gateway signup/login → Set-Cookie session → `/graphql` proxy (forwards `x-user-id` from session) → backend → postgres. Gateway signup now returns `{"ok":true}` + dashboard queries resolve.
+
+## Advisor: executive summary + saved business type + Pro checkout (Aug 8)
+
+Gap-closing round on the seller advisor (per user decisions: keep ledger-derived KPIs, add LLM exec summary, persist business type, wire Pro checkout):
+
+- **DB**: `users.business_type VARCHAR(20) NOT NULL DEFAULT 'saas' CHECK (business_type IN ('saas','d2c','services','retail'))` — live ALTER + mirrored in `scripts/schema.sql`.
+- **Backend** (api/src/graphql.rs): `User.business_type` field (struct + `from_row` `r.get(20)`, `businessType()` getter), added to `me` SELECT + 3 `RETURNING` lists; `updateUserType` now takes `businessType: Option<String>` → `SET business_type = COALESCE($4, business_type)`. Rebuilt + deployed on instance (md5 of uploaded src `af36b97e87303874651f866ac43174d0`).
+- **Gateway** (src/index.ts): `savedBusinessType(c, userId)` — queries `me { businessType }` via backendGql, falls back `'saas'`; both `/api/advisor/health` + `/api/advisor/strategies` use saved type when body omits `businessType`; strategies prompt asks LLM for `executiveSummary`; deterministic `execSummary(health)` fallback (3 score branches + `no_data`), always present in response; `advisorFallback` includes it too.
+- **UI** (ui/src/app/seller/coach/page.tsx): Executive Summary card at top of report; business-type chips load saved value via `gql('query { me { businessType } }')` and persist via `updateUserType` mutation (aliases needed for repeated same-named mutation fields); non-Pro Export button replaced with "Upgrade to Pro" → POST `/api/subscription/checkout {productId: 55681814-5a2b-4312-94c0-6fef945fc0ed}` (Cartis Monthly, $5/mo) → redirect to Polar checkout URL. Pattern from `ui/src/components/consumer/subscription-panel.tsx` (`PLANS` holds the other product ids: Annual `8ec4fb7d-…` $48/yr, One-Time `596f42f7-…` $25).
+- **Verified**: updateUserType persists → `me.businessType` round-trips; health/strategies pick up saved `d2c` with no body arg (D2C benchmarks applied); strategies returns `executiveSummary` (LLM JSON when parse succeeds, deterministic fallback otherwise — `fallback: true` flags it); checkout POST returns a sandbox Polar URL; entitlement GET works (earlier 401s were just stale rotated session cookies).
+- Session cookie rotates on auth'd requests — re-login (`/auth/login`) before re-testing long-lived curl sessions.
 
 ## Setu AA integration (2026-08-05 → 07)
 

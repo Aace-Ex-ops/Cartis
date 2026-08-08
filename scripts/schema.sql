@@ -13,6 +13,7 @@ CREATE TABLE users (
     oauth_provider VARCHAR(20) NOT NULL,
     user_type VARCHAR(20) DEFAULT 'personal' CHECK (user_type IN ('personal', 'business')),
     business_name TEXT,
+    business_type VARCHAR(20) DEFAULT 'saas' CHECK (business_type IN ('saas', 'd2c', 'services', 'retail')),
     wallet_balance NUMERIC(12,2) DEFAULT 0.00,
     monthly_tab_limit NUMERIC(12,2) DEFAULT 0,
     annual_deferred_limit NUMERIC(12,2) DEFAULT 2500.00,

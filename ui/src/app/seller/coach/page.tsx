@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Download,
+  FileText,
   Landmark,
   Percent,
   RefreshCw,
@@ -16,9 +17,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/seller/stat-card";
+import { gql } from "@/lib/gql";
 import { fmt } from "@/lib/seller";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+const PRO_PRODUCT_ID = "55681814-5a2b-4312-94c0-6fef945fc0ed";
 
 const TYPES = [
   { id: "saas", label: "SaaS" },
@@ -48,6 +51,7 @@ type Strategies = {
   period: string;
   healthScore: number;
   fallback?: boolean;
+  executiveSummary?: string;
   revenueTactics: { title: string; detail: string }[];
   capitalAllocation: { recommendation: string; detail: string };
   risks: { risk: string; severity: string; mitigation: string }[];
@@ -134,6 +138,20 @@ export default function AdvisorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
 
+  useEffect(() => {
+    let cancelled = false;
+    gql<{ me?: { businessType?: string } | null }>("query { me { businessType } }")
+      .then((d) => {
+        if (cancelled) return;
+        const saved = d.me?.businessType;
+        if (saved && TYPES.some((t) => t.id === saved)) setType(saved);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function refresh() {
     setBusy(true);
     try {
@@ -161,6 +179,31 @@ export default function AdvisorPage() {
     }
   }
 
+  function chooseType(id: string) {
+    setType(id);
+    void gql<{ updateUserType?: { businessType: string } }>(
+      "mutation ($type: String) { updateUserType(userType: \"business\", businessType: $type) { businessType } }",
+      { type: id },
+    ).catch(() => {});
+  }
+
+  async function upgrade() {
+    setBusy(true);
+    try {
+      const res = await fetch(`${GATEWAY}/api/subscription/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ productId: PRO_PRODUCT_ID }),
+      });
+      const data = (await res.json()) as { url?: string };
+      if (data.url) window.location.href = data.url;
+    } catch {
+      // ignore
+    }
+    setBusy(false);
+  }
+
   if (failed) {
     return (
       <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-[13px] text-destructive">
@@ -171,6 +214,19 @@ export default function AdvisorPage() {
 
   const report = health && (
     <div className="flex flex-col gap-6" id="advisor-report">
+      {strategies?.executiveSummary && (
+        <Card className="print:break-inside-avoid">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-[15px]">
+              <FileText className="h-4 w-4 text-primary" /> Executive Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-[13px] leading-relaxed text-foreground">{strategies.executiveSummary}</p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Revenue" value={fmt(health.kpis.revenue)} icon={<TrendingUp className="h-4 w-4 text-primary" />} />
         <StatCard title="Expenses" value={fmt(health.kpis.expenses)} icon={<Wallet className="h-4 w-4 text-destructive" />} />
@@ -326,8 +382,8 @@ export default function AdvisorPage() {
               <Download className="mr-2 h-4 w-4" /> Export PDF (Pro)
             </Button>
           ) : (
-            <Button size="sm" disabled title="Unlock PDF export on the Pro plan">
-              <Download className="mr-2 h-4 w-4" /> Export PDF (Pro)
+            <Button size="sm" onClick={() => void upgrade()} disabled={busy}>
+              <Download className="mr-2 h-4 w-4" /> Upgrade to Pro
             </Button>
           )}
         </div>
@@ -336,7 +392,7 @@ export default function AdvisorPage() {
       {!pro && (
         <p className="rounded-xl border border-border/50 bg-background/60 px-4 py-3 text-[12px] text-muted-foreground print:hidden">
           <Download className="mr-1 inline h-3.5 w-3.5" />
-          PDF export unlocks on the Pro plan — your report stays visible here for free.
+          PDF export unlocks on the Pro plan — upgrade to export the investor-ready report as an A4 PDF.
         </p>
       )}
 
@@ -344,7 +400,7 @@ export default function AdvisorPage() {
         {TYPES.map((t) => (
           <button
             key={t.id}
-            onClick={() => setType(t.id)}
+            onClick={() => chooseType(t.id)}
             className={`rounded-full border px-3 py-1 text-[12px] transition-colors ${
               type === t.id
                 ? "border-primary bg-primary/10 text-foreground"

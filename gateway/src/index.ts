@@ -1351,11 +1351,36 @@ function advisorHealth(fins: AdvisorFin[], businessType: string) {
   }
 }
 
+function execSummary(health: ReturnType<typeof advisorHealth>): string {
+  const k = health.kpis
+  if (health.leaks.some((l) => l.type === 'no_data')) {
+    return 'No revenue is recorded for this period yet — enter your income and expenses to get a financial health assessment.'
+  }
+  if (health.score >= 70) {
+    return `Your ${health.businessType} financials are healthy: ${k.grossMarginPct}% gross margin and ${k.netMarginPct}% net margin are at or above benchmark, and cash flow is ${k.cash >= 0 ? 'positive' : 'tight'}. You are positioned to invest in growth.`
+  }
+  if (health.score >= 40) {
+    return `Your financials score ${health.score}/100 for ${health.businessType}: margins are workable, but ${health.leaks[0]?.label ?? 'costs'} are eroding profitability — fix the leaks before scaling spend.`
+  }
+  return `Your financials score ${health.score}/100 — thin margins and ${k.cash < 0 ? 'negative' : 'tight'} cash flow mean the priority is cost control and customer retention, not growth.`
+}
+
+async function savedBusinessType(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } }, userId: string): Promise<string> {
+  try {
+    const data = (await backendGql(c, 'query { me { businessType } }', userId)) as { me?: { businessType?: string } | null }
+    const t = data?.me?.businessType
+    return t && Object.hasOwn(ADVISOR_BENCHMARKS, t) ? t : 'saas'
+  } catch {
+    return 'saas'
+  }
+}
+
 function advisorFallback(health: ReturnType<typeof advisorHealth>) {
   const k = health.kpis
   return {
     period: health.period,
     healthScore: health.score,
+    executiveSummary: execSummary(health),
     revenueTactics: [
       { title: 'Fix the top cost line', detail: `${health.leaks[0]?.label ?? 'Expenses'}: ${health.leaks[0]?.detail ?? 'renegotiate the largest vendor'} — every ₹1 saved is ₹1 of profit.` },
       { title: k.revenue > 0 ? 'Sell more to existing customers' : 'Record your first revenue', detail: k.revenue > 0 ? 'Upsell and annual plans before chasing new acquisition — retention is cheaper and faster.' : 'Enter income into the Income page so the advisor can score your business.' },
@@ -1384,7 +1409,7 @@ app.post('/api/advisor/health', auth, async (c) => {
   const userId = c.get('session').user_id
   const refresh = c.req.query('refresh') === '1'
   const body = (await c.req.json().catch(() => ({}))) as { businessType?: string }
-  const businessType = Object.hasOwn(ADVISOR_BENCHMARKS, body.businessType ?? '') ? (body.businessType as string) : 'saas'
+  const businessType = Object.hasOwn(ADVISOR_BENCHMARKS, body.businessType ?? '') ? (body.businessType as string) : await savedBusinessType(c, userId)
   const cacheKey = `advisor:health:${userId}:${businessType}`
   if (!refresh) {
     const cached = await c.env.SESSIONS.get(cacheKey)
@@ -1408,7 +1433,7 @@ app.post('/api/advisor/strategies', auth, async (c) => {
   const userId = c.get('session').user_id
   const refresh = c.req.query('refresh') === '1'
   const body = (await c.req.json().catch(() => ({}))) as { businessType?: string }
-  const businessType = Object.hasOwn(ADVISOR_BENCHMARKS, body.businessType ?? '') ? (body.businessType as string) : 'saas'
+  const businessType = Object.hasOwn(ADVISOR_BENCHMARKS, body.businessType ?? '') ? (body.businessType as string) : await savedBusinessType(c, userId)
   const cacheKey = `advisor:strategies:${userId}:${businessType}`
   if (!refresh) {
     const cached = await c.env.SESSIONS.get(cacheKey)
@@ -1430,6 +1455,7 @@ Flags: ${JSON.stringify(health.leaks)}
 
 Return ONLY JSON:
 {
+  "executiveSummary": "2-4 sentences interpreting this financial health for an investor, banker or co-founder: what the numbers mean, the single biggest lever, and the outlook",
   "revenueTactics": [3 specific, actionable tactics, each: { "title": "...", "detail": "..." }],
   "capitalAllocation": { "recommendation": "invest-in-growth | cut-costs | efficiency", "detail": "1-2 sentences, concrete" },
   "risks": [4-5 risks ranked by severity, each: { "risk": "...", "severity": "high|medium|low", "mitigation": "..." }]
@@ -1441,6 +1467,7 @@ Rules: be specific and actionable for an Indian SMB; mention concrete levers (GS
     const content = (typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')).replace(/```json|```/g, '')
     const jsonMatch = content.match(/\{[\s\S]*\}/)
     let parsed: {
+      executiveSummary?: string
       revenueTactics?: { title?: string; detail?: string }[]
       capitalAllocation?: { recommendation?: string; detail?: string }
       risks?: { risk?: string; severity?: string; mitigation?: string }[]
@@ -1456,6 +1483,7 @@ Rules: be specific and actionable for an Indian SMB; mention concrete levers (GS
     const result = {
       period: health.period,
       healthScore: health.score,
+      executiveSummary: (parsed.executiveSummary ?? '').trim() || execSummary(health),
       revenueTactics: (parsed.revenueTactics ?? []).slice(0, 3).map((t) => ({ title: t.title ?? 'Tactic', detail: t.detail ?? '' })),
       capitalAllocation: {
         recommendation: ['invest-in-growth', 'cut-costs', 'efficiency'].includes(parsed.capitalAllocation?.recommendation ?? '')

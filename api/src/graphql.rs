@@ -81,7 +81,7 @@ impl QueryRoot {
                         dependents, debt_emis::float8,
                         monthly_tax::float8,
                         ai_model, business_name,
-                        email_notifications
+                        email_notifications, business_type
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -577,7 +577,7 @@ async fn ensure_suggested_actions(uid: &str, pool: &deadpool_postgres::Pool) -> 
                 "INSERT INTO user_actions (user_id, kind, title, detail, cta_label, cta_url)
                  SELECT $1::text::uuid, $2, $3, $4, $5, $6
                  WHERE NOT EXISTS (
-                     SELECT 1 FROM user_actions a WHERE a.user_id::text = $1 AND a.kind = $2 AND a.status = 'suggested'
+                     SELECT 1 FROM user_actions a WHERE a.user_id::text = $1 AND a.kind = $2::varchar AND a.status = 'suggested'
                  )",
                 &[&uid, &kind, &title, &detail, &cta_label, &cta_url],
             )
@@ -825,7 +825,7 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications",
+                           email_notifications, business_type",
                 &[
                     &uid,
                     &monthly_income.map(|v| v.to_string()),
@@ -855,7 +855,7 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications",
+                           email_notifications, business_type",
                 &[&uid, &model],
             )
             .await?;
@@ -872,11 +872,13 @@ impl MutationRoot {
         &self, ctx: &Context<'_>,
         user_type: String,
         business_name: Option<String>,
+        business_type: Option<String>,
     ) -> Result<User> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
             .query_one(
-                "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name)
+                "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name),
+                                   business_type = COALESCE($4, business_type)
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
                            wallet_balance::float8, monthly_tab_limit::float8,
@@ -886,8 +888,8 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications",
-                &[&uid, &user_type, &business_name],
+                           email_notifications, business_type",
+                &[&uid, &user_type, &business_name, &business_type],
             )
             .await?;
         Ok(User::from_row(row))
@@ -1407,6 +1409,7 @@ struct User {
     ai_model: Option<String>,
     business_name: Option<String>,
     email_notifications: bool,
+    business_type: String,
 }
 
 #[Object]
@@ -1431,6 +1434,7 @@ impl User {
     async fn ai_model(&self) -> Option<&str> { self.ai_model.as_deref() }
     async fn business_name(&self) -> Option<&str> { self.business_name.as_deref() }
     async fn email_notifications(&self) -> bool { self.email_notifications }
+    async fn business_type(&self) -> &str { &self.business_type }
 }
 
 struct AuthUser {
@@ -1480,6 +1484,7 @@ impl User {
             ai_model: r.get(17),
             business_name: r.get(18),
             email_notifications: r.get(19),
+            business_type: r.get(20),
         }
     }
 }
