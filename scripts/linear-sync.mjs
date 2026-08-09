@@ -48,6 +48,8 @@ const actions = [
   { id: "CARTIS-106", state: "Done", comment: "Shipped Aug 9 (a209bc7, deploy 703aae1f): user-menu trimmed — display-only avatar/name/email header row with Consumer/Seller badge, menu = Subscription | Settings | Switch account | Sign out; PANELS reduced to subscription + settings." },
   { id: "CARTIS-107", state: "Done", comment: "Shipped Aug 9 (a209bc7, deploy 703aae1f): settings-panel.tsx rebuilt as a hub — left nav (Settings | Profile | Support | Terms), existing settings content extracted to internal SettingsSection, reuses ProfilePanel/SupportPanel/TermsPanel; user-menu dialog max-w-3xl." },
   { id: "CARTIS-108", state: "Done", comment: "Shipped Aug 9 (a209bc7, deploy 703aae1f): model-switcher.tsx dropdown above the TwinChat composer (Llama 4 Scout default, Llama 3.3 70B, Llama 3.1 8B; reads me.aiModel, writes setAiModel); model-panel.tsx deleted." },
+  { id: "CARTIS-115", state: "Done", comment: "Shipped Aug 10 (8ee1863, deploy 9ae241f9): settings dialog fixed size — max-w-3xl, h-[min(640px,calc(100vh-3rem))]; settings panel h-full with the content pane scrolling inside the fixed modal." },
+  { id: "CARTIS-116", state: "Done", comment: "Shipped Aug 10 (e583f6a, 0305f48, deploy 9ae241f9): unified /dashboard — single location renders PersonalDashboard or BusinessDashboard by me.userType; /seller/* flattened into /dashboard/* (income, expenses, pnl, tax, cashflow, inventory, coach); route group (consumer) -> (app); nav switches by user state, upgrade card business-only; 'Seller'/'Consumer' wording replaced with 'Business'/'Personal finance' (user menu badge, switch item -> /dashboard, FAQ copy); twin-drawer mode from userType." },
 ];
 
 async function gql(query, variables = {}) {
