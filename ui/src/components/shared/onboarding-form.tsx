@@ -86,10 +86,10 @@ export function OnboardingForm() {
     } catch {
       // non-critical — proceed anyway
     }
-    router.push(role === "seller" ? "/seller/dashboard" : "/dashboard");
+    router.push("/dashboard");
   }
 
-  const finishLazy = () => router.push(role === "seller" ? "/seller/dashboard" : "/dashboard");
+  const finishLazy = () => router.push("/dashboard");
 
   return (
     <Stepper

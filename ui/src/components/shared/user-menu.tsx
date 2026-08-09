@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Repeat, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -38,7 +38,6 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [userType, setUserType] = useState(user.userType);
-  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
@@ -53,7 +52,7 @@ export function UserMenu({ user }: { user: User }) {
     };
   }, []);
 
-  const isSeller = pathname?.startsWith("/seller") ?? false;
+  const isBusiness = userType === "business" || userType === "seller";
 
   const initials = user.fullName
     ?.split(" ")
@@ -91,7 +90,7 @@ export function UserMenu({ user }: { user: User }) {
               <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              {isSeller ? "Seller" : "Consumer"}
+              {isBusiness ? "Business" : "Personal finance"}
             </span>
           </div>
           <DropdownMenuSeparator />
@@ -101,10 +100,10 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          {(userType === "business" || userType === "seller") && (
-            <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")} className="cursor-pointer">
+          {isBusiness && (
+            <DropdownMenuItem onClick={() => router.push("/dashboard")} className="cursor-pointer">
               <Repeat className="mr-2 h-4 w-4" />
-              {isSeller ? "Switch to Consumer" : "Switch to Seller"}
+              Switch to Personal finance
             </DropdownMenuItem>
           )}
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">

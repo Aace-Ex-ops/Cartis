@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { History, X } from "lucide-react";
-import { usePathname } from "next/navigation";
 import { TwinChat } from "@/components/shared/twin-chat";
+import { gql } from "@/lib/gql";
 
 export function TwinDrawer({
   open,
@@ -13,9 +13,23 @@ export function TwinDrawer({
   open: boolean;
   onClose: () => void;
 }) {
-  const pathname = usePathname();
-  const mode = pathname?.startsWith("/seller") ? "seller" : undefined;
+  const [userType, setUserType] = useState<string | null>(null);
+  const mode = userType === "business" || userType === "seller" ? "seller" : undefined;
   const [railOpen, setRailOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
+      .then((d) => {
+        if (!cancelled) setUserType(d.me?.userType ?? "personal");
+      })
+      .catch(() => {
+        if (!cancelled) setUserType("personal");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;

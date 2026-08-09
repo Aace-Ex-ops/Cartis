@@ -18,7 +18,7 @@ const FAQS = [
   },
   {
     q: "Can it work with my business too?",
-    a: "Yes. Sellers get income and expense tracking, P&L, GST, cash flow, inventory, and an AI Financial Advisor that benchmarks you against your industry and produces investor-ready reports.",
+    a: "Yes. Businesses get income and expense tracking, P&L, GST, cash flow, inventory, and an AI Financial Advisor that benchmarks you against your industry and produces investor-ready reports.",
   },
   {
     q: "How much does it cost?",
