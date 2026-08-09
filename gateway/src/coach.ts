@@ -102,42 +102,46 @@ async function recordObservation(env: CoachEnv, p: ScrapedProduct): Promise<void
 }
 
 // Real alternatives via Exa AI (works from Cloudflare IPs; Indian aggregators 403 datacenter traffic).
-// Query 1 = GTIN keyword; fallback = "{name}" price. Max 2 calls, 24h KV cache `exa:<gtin>`.
+// Single query "<name>" price India; 24h KV cache `exa:<gtin>`. Bare-GTIN queries
+// match junk (digits hit model numbers), so the name query is primary.
 async function alternativesFromExa(env: CoachEnv, p: ScrapedProduct): Promise<Array<{ site: string; price: number; url?: string }>> {
   if (!p.gtin || !env.EXA_API_KEY) return []
   const cacheKey = `exa:${p.gtin}`
   const cached = await env.SESSIONS.get(cacheKey)
   if (cached) return JSON.parse(cached) as Array<{ site: string; price: number; url?: string }>
   const out: Array<{ site: string; price: number; url?: string }> = []
-  const queries = [p.gtin, `"${p.name}" price`]
-  for (const q of queries) {
-    if (out.length >= 5) break
-    try {
-      const res = await fetch('https://api.exa.ai/search', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': env.EXA_API_KEY },
-        body: JSON.stringify({ query: q, numResults: 5, type: 'keyword', contents: { text: { maxCharacters: 300 } } }),
-      })
-      if (!res.ok) continue
-      const data = (await res.json()) as { results?: Array<{ url: string; title?: string; text?: string }> }
-      if (!data.results) continue
-      for (const r of data.results) {
-        if (out.length >= 5) break
-        const m = `${r.title ?? ''} ${r.text ?? ''}`.match(/(?:₹|INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)/i)
-        if (!m) continue
-        const price = parseFloat(m[1].replace(/,/g, ''))
-        if (!price) continue
-        let site = 'store'
-        try {
-          site = new URL(r.url).hostname.replace(/^www\./, '')
-        } catch {
-          /* keep default */
-        }
-        out.push({ site, price, url: r.url })
+  try {
+    const res = await fetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: `Bearer ${env.EXA_API_KEY}` },
+      body: JSON.stringify({
+        query: `"${p.name}" price India`,
+        type: 'auto',
+        numResults: 8,
+        userLocation: 'IN',
+        contents: { text: { maxCharacters: 1500 } },
+      }),
+    })
+    if (!res.ok) return []
+    const data = (await res.json()) as { results?: Array<{ url: string; title?: string; text?: string }> }
+    if (!data.results) return []
+    for (const r of data.results) {
+      if (out.length >= 5) break
+      const m = `${r.title ?? ''} ${r.text ?? ''}`.match(/(?:₹|INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)/i)
+      if (!m) continue
+      const price = parseFloat(m[1].replace(/,/g, ''))
+      // sanity: below half the observed price is an accessory/wrong product on the page
+      if (!price || price < p.price * 0.5) continue
+      let site = 'store'
+      try {
+        site = new URL(r.url).hostname.replace(/^www\./, '')
+      } catch {
+        /* keep default */
       }
-    } catch {
-      continue
+      out.push({ site, price, url: r.url })
     }
+  } catch {
+    return []
   }
   const deduped = out.filter((x, i) => out.findIndex((y) => y.site === x.site) === i).slice(0, 5)
   await env.SESSIONS.put(cacheKey, JSON.stringify(deduped), { expirationTtl: 86400 })
