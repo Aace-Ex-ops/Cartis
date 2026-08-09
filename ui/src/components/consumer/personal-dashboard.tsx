@@ -70,7 +70,7 @@ function healthLevel(score: number): string {
   return "Needs attention";
 }
 
-export default function OverviewPage() {
+export function PersonalDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
   const [insights, setInsights] = useState<Insight[] | null>(null);

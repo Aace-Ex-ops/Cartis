@@ -6,7 +6,7 @@ import { TrendingUp, Wallet, Percent, Landmark } from "lucide-react";
 import { fetchSellerDashboard, fmt, type SellerDashboard } from "@/lib/seller";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 
-export default function SellerDashboardPage() {
+export function BusinessDashboard() {
   const [data, setData] = useState<SellerDashboard | null>(null);
   const [failed, setFailed] = useState(false);
 
