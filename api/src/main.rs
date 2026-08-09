@@ -10,7 +10,7 @@ use axum::extract::Extension;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::Deserialize;
 mod chat;
@@ -66,6 +66,10 @@ async fn main() {
         .route(
             "/chat/sessions/{session_id}/messages",
             get(chat::session_messages),
+        )
+        .route(
+            "/chat/sessions/{session_id}",
+            patch(chat::rename_session).delete(chat::delete_session),
         )
         .route("/api/email", post(api_email))
         .route("/setu-proxy", post(setu_proxy))

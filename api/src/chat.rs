@@ -58,6 +58,11 @@ pub struct CreateSessionRequest {
     mode: String,
 }
 
+#[derive(Deserialize)]
+pub struct RenameSessionRequest {
+    title: String,
+}
+
 #[derive(Serialize)]
 struct SessionOut {
     session_id: String,
@@ -281,6 +286,79 @@ pub async fn create_session(
         .into_response(),
         Err(e) => {
             eprintln!("chat session create error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
+pub async fn delete_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .execute(
+            "DELETE FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
+            &[&session_id, &uid],
+        )
+        .await
+    {
+        Ok(0) => json_err(StatusCode::NOT_FOUND, "session not found"),
+        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => {
+            eprintln!("chat session delete error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
+pub async fn rename_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+    Json(req): Json<RenameSessionRequest>,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let title = req.title.trim().to_string();
+    if title.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "title required");
+    }
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .query_opt(
+            "UPDATE chat_sessions SET title = $1 WHERE session_id::text = $2 AND user_id::text = $3 RETURNING session_id::text, mode, title, updated_at::text",
+            &[&title, &session_id, &uid],
+        )
+        .await
+    {
+        Ok(Some(r)) => Json(SessionOut {
+            session_id: r.get(0),
+            mode: r.get(1),
+            title: r.get(2),
+            updated_at: r.get(3),
+        })
+        .into_response(),
+        Ok(None) => json_err(StatusCode::NOT_FOUND, "session not found"),
+        Err(e) => {
+            eprintln!("chat session rename error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
         }
     }
@@ -623,23 +701,46 @@ pub async fn purge_supermemory(uid: String) {
         Ok(k) if !k.is_empty() => k,
         _ => return,
     };
-    match reqwest::Client::new()
-        .delete("https://api.supermemory.ai/v3/documents/bulk")
-        .bearer_auth(&key)
-        .timeout(Duration::from_secs(30))
-        .json(&serde_json::json!({ "containerTags": [format!("user_{uid}")] }))
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => {
-            let v: serde_json::Value = r.json().await.unwrap_or_default();
-            eprintln!(
-                "supermemory purge user_{uid}: deleted {} docs",
-                v["deletedCount"].as_u64().unwrap_or(0)
-            );
+    let url = format!("https://api.supermemory.ai/v3/container-tags/user_{uid}");
+    let client = reqwest::Client::new();
+    for attempt in 0..3 {
+        match client
+            .delete(&url)
+            .bearer_auth(&key)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+        {
+            // 404 = container already gone
+            Ok(r) if r.status().as_u16() == 404 => {
+                eprintln!("supermemory purge user_{uid}: nothing to delete");
+                return;
+            }
+            Ok(r) if r.status().as_u16() == 429 || r.status().is_server_error() => {
+                eprintln!(
+                    "supermemory purge user_{uid}: status {} (attempt {})",
+                    r.status().as_u16(),
+                    attempt + 1
+                );
+                if attempt < 2 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("supermemory purge status {}", r.status().as_u16());
+            }
+            Ok(r) => {
+                let v: serde_json::Value = r.json().await.unwrap_or_default();
+                eprintln!(
+                    "supermemory purge user_{uid}: deleted {} docs, {} memories",
+                    v["deletedDocumentsCount"].as_u64().unwrap_or(0),
+                    v["deletedMemoriesCount"].as_u64().unwrap_or(0)
+                );
+            }
+            Err(e) => eprintln!("supermemory purge error: {e}"),
         }
-        Ok(r) => eprintln!("supermemory purge status {}", r.status().as_u16()),
-        Err(e) => eprintln!("supermemory purge error: {e}"),
+        break;
     }
 }
 

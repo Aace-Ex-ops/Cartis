@@ -26,19 +26,23 @@ fn revoke_gateway_sessions(uid: String) {
     let secret = std::env::var("BACKEND_SECRET").unwrap_or_default();
     if gateway_url.is_empty() || secret.is_empty() { return; }
     tokio::spawn(async move {
-        if let Err(e) = reqwest::Client::new()
+        let res = reqwest::Client::new()
             .post(format!("{gateway_url}/auth/revoke-all"))
             .header("x-cartis-backend-secret", secret)
             .json(&serde_json::json!({ "userId": uid }))
             .send()
-            .await
-        {
-            eprintln!("session revoke failed: {e}");
+            .await;
+        match res {
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("session revoke-all status {}", r.status().as_u16());
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("session revoke failed: {e}"),
         }
     });
 }
 
-const USER_CHILD_TABLES: [&str; 15] = [
+const USER_CHILD_TABLES: [&str; 16] = [
     "sessions",
     "bank_accounts",
     "analysis_log",
@@ -54,6 +58,7 @@ const USER_CHILD_TABLES: [&str; 15] = [
     "financial_goals",
     "holdings",
     "user_actions",
+    "aa_connections",
 ];
 
 #[Object]
