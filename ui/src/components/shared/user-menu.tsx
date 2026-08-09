@@ -111,7 +111,7 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          {userType === "business" && (
+          {(userType === "business" || userType === "seller") && (
             <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")}>
               <Repeat className="mr-2 h-4 w-4" />
               {isSeller ? "Switch to Consumer" : "Switch to Seller"}

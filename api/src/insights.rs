@@ -487,6 +487,8 @@ pub async fn scheduler(state: Arc<AppState>) {
                     let uid: String = row.get(0);
                     let ut: Option<String> = row.get(1);
                     let role = ut.unwrap_or_else(|| "personal".to_string());
+                    // legacy "seller" rows (pre user_type normalization)
+                    let role = if role == "seller" { "business".to_string() } else { role };
                     if role != "personal" && role != "business" {
                         continue;
                     }

@@ -63,7 +63,7 @@ export function OnboardingForm() {
     const revenue = Number(business.monthlyRevenue);
     const expenses = Number(business.monthlyExpenses);
     await gql<{ updateUserType: unknown }>(
-      `mutation { updateUserType(userType: "seller"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
+      `mutation { updateUserType(userType: "business"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
     );
     const today = new Date().toISOString().slice(0, 10);
     if (Number.isFinite(revenue) && revenue > 0) {

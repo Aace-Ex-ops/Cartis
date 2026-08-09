@@ -880,6 +880,13 @@ impl MutationRoot {
         business_type: Option<String>,
     ) -> Result<User> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        // normalize legacy/aliased values at the write boundary
+        let user_type = match user_type.as_str() {
+            "seller" | "business" => "business",
+            "consumer" | "personal" => "personal",
+            _ => return Err("invalid user type".into()),
+        }
+        .to_string();
         let row = pg(ctx).get().await?
             .query_one(
                 "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name),
