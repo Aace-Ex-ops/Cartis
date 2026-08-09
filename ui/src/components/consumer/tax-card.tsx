@@ -82,12 +82,12 @@ export function TaxCard({
         ) : (
           <>
             <div>
-              <div className="text-[24px] font-semibold text-foreground">{fmt(Math.round(tax))}</div>
+              <div className="text-[24px] font-semibold tabular-nums text-foreground">{fmt(Math.round(tax))}</div>
               <div className="text-[11px] text-muted-foreground">estimated yearly tax</div>
             </div>
             <div className="flex items-center justify-between text-[12px]">
               <span className="text-muted-foreground">TDS this year</span>
-              <span className="font-medium text-foreground">{tds != null ? fmt(tds) : "—"}</span>
+              <span className="font-medium tabular-nums text-foreground">{tds != null ? fmt(tds) : "—"}</span>
             </div>
             <div className="flex items-center justify-between text-[12px]">
               <span className="text-muted-foreground">Status</span>

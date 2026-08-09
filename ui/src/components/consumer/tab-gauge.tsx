@@ -27,7 +27,7 @@ export function TabGauge({ spend, budget }: { spend: number; budget: number }) {
           </div>
         )}
         <div className="text-[13px] text-muted-foreground">
-          {fmt(spend)} of {fmt(budget)} this month
+          <span className="tabular-nums">{fmt(spend)} of {fmt(budget)}</span> this month
         </div>
       </CardContent>
     </Card>

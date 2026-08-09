@@ -62,7 +62,7 @@ export function AnalysisList({ analyses }: {
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[14px] font-medium text-foreground">{a.product}</span>
-                  <span className="text-[13px] text-muted-foreground">₹{a.price.toLocaleString("en-IN")}</span>
+                  <span className="text-[13px] tabular-nums text-muted-foreground">₹{a.price.toLocaleString("en-IN")}</span>
                 </div>
                 <span className="text-[12px] text-muted-foreground">{a.summary}</span>
               </div>
