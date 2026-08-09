@@ -17,15 +17,17 @@ const updates = [
   {
     identifier: "CARTIS-103",
     state: "Done",
-    comment: `**Shipped** (commit \`74fe97c\`, gateway deploy \`10dad121\`).
+    comment: `**Shipped + live-verified** (commit \`8f519e6\`, gateway deploy \`b3dd1ac3\`).
 
-Alternatives for coach verdicts now come from **Exa AI** instead of SerpAPI (same \`[]\` fallback behavior):
-- query 1 = GTIN keyword; fallback 2 = \`"{name}" price\` (max 2 calls)
-- price regex \`₹|INR|Rs\`, site = result URL hostname
+Alternatives for coach verdicts now come from **Exa AI** (key set: \`EXA_API_KEY\`):
+- single query \`"<name>" price India\`, \`type: auto\`, \`userLocation: IN\`, \`contents.text.maxCharacters 1500\`
+- price regex \`₹|INR|Rs\`, site = result URL hostname; sanity filter drops prices < 50% of observed (accessories/wrong products)
 - 24h KV cache \`exa:<gtin>\`; sources marker \`'exa'\`
-- graceful \`[]\` without a key — degrades silently
+- graceful \`[]\` on any error
 
-Remaining user action: provide the Exa API key → \`printf '<key>' | npx wrangler secret put EXA_API_KEY --name cartis-gateway\`. No redeploy needed (secret picks up automatically).`,
+Fixed after checking canonical docs: Bearer auth (not \`x-api-key\`), \`type: keyword\` does not exist (→ \`auto\`), bare-GTIN queries match junk digits (name query is primary; GTIN only keys the cache).
+
+E2E (Samsung Galaxy S24 Ultra @ ₹1,09,999): flipkart ₹79,999 · reliancedigital ₹1,19,999 · croma ₹1,29,999 · suprememobiles ₹1,29,999.`,
   },
   {
     identifier: "CARTIS-104",
