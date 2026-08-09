@@ -6,9 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ProfilePanel } from "@/components/consumer/profile-panel";
+import { SupportPanel } from "@/components/consumer/support-panel";
+import { TermsPanel } from "@/components/consumer/terms-panel";
 import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+
+const SECTIONS = [
+  { id: "settings", label: "Settings" },
+  { id: "profile", label: "Profile" },
+  { id: "support", label: "Support" },
+  { id: "terms", label: "Terms & Policies" },
+] as const;
 
 function SettingToggle({ title, desc, defaultOn, onCheckedChange }: { title: string; desc: string; defaultOn: boolean; onCheckedChange?: (v: boolean) => void }) {
   const [on, setOn] = useState(defaultOn);
@@ -39,7 +49,7 @@ type SettingsData = {
   monthlyTab: { limit: number };
 };
 
-export function SettingsPanel() {
+function SettingsSection() {
   const [data, setData] = useState<SettingsData | null>(null);
   const [budget, setBudget] = useState("");
   const [saved, setSaved] = useState(false);
@@ -122,8 +132,8 @@ export function SettingsPanel() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your preferences, your alerts.</p>
+        <h2 className="text-base font-semibold text-foreground">Settings</h2>
+        <p className="mt-0.5 text-[13px] text-muted-foreground">Your preferences, your alerts.</p>
       </div>
 
       <Card>
@@ -230,6 +240,36 @@ export function SettingsPanel() {
             }} />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+export function SettingsPanel() {
+  const [section, setSection] = useState<(typeof SECTIONS)[number]["id"]>("settings");
+
+  return (
+    <div className="flex min-h-[480px] gap-6">
+      <nav className="flex w-44 shrink-0 flex-col gap-1">
+        {SECTIONS.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => setSection(s.id)}
+            className={`rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors ${
+              section === s.id
+                ? "bg-primary/10 text-foreground"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+      <div className="min-w-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
+        {section === "settings" && <SettingsSection />}
+        {section === "profile" && <ProfilePanel />}
+        {section === "support" && <SupportPanel />}
+        {section === "terms" && <TermsPanel />}
+      </div>
     </div>
   );
 }

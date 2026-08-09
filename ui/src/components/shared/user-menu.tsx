@@ -15,12 +15,8 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
-import { ProfilePanel } from "@/components/consumer/profile-panel";
-import { ModelPanel } from "@/components/consumer/model-panel";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
-import { TermsPanel } from "@/components/consumer/terms-panel";
-import { SupportPanel } from "@/components/consumer/support-panel";
 import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
@@ -32,15 +28,11 @@ type User = {
   userType: string;
 };
 
-type PanelKey = "profile" | "model" | "subscription" | "settings" | "support" | "terms";
+type PanelKey = "subscription" | "settings";
 
 const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = {
-  profile: { label: "Profile", panel: ProfilePanel },
-  model: { label: "Model", panel: ModelPanel },
   subscription: { label: "Subscription", panel: SubscriptionPanel },
   settings: { label: "Settings", panel: SettingsPanel },
-  support: { label: "Support", panel: SupportPanel },
-  terms: { label: "Terms & Policies", panel: TermsPanel },
 };
 
 export function UserMenu({ user }: { user: User }) {
@@ -93,26 +85,24 @@ export function UserMenu({ user }: { user: User }) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onClick={() => setOpenPanel("profile")} className="cursor-pointer">
-            <div className="flex w-full items-center gap-2">
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium text-foreground">{user.fullName}</span>
-                <span className="truncate text-xs text-muted-foreground">{user.email}</span>
-              </div>
-              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                {isSeller ? "Seller" : "Consumer"}
-              </span>
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-sm font-medium text-foreground">{user.fullName}</span>
+              <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
-          </DropdownMenuItem>
+            <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              {isSeller ? "Seller" : "Consumer"}
+            </span>
+          </div>
           <DropdownMenuSeparator />
-          {(Object.keys(PANELS) as PanelKey[]).filter((k) => k !== "profile").map((key) => (
-            <DropdownMenuItem key={key} onClick={() => setOpenPanel(key)}>
+          {(Object.keys(PANELS) as PanelKey[]).map((key) => (
+            <DropdownMenuItem key={key} onClick={() => setOpenPanel(key)} className="cursor-pointer">
               {PANELS[key].label}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
           {(userType === "business" || userType === "seller") && (
-            <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")}>
+            <DropdownMenuItem onClick={() => router.push(isSeller ? "/dashboard" : "/seller/dashboard")} className="cursor-pointer">
               <Repeat className="mr-2 h-4 w-4" />
               {isSeller ? "Switch to Consumer" : "Switch to Seller"}
             </DropdownMenuItem>
@@ -124,7 +114,7 @@ export function UserMenu({ user }: { user: User }) {
       </DropdownMenu>
 
       <Dialog open={openPanel !== null} onOpenChange={(v) => { if (!v) setOpenPanel(null); }}>
-        <DialogContent>
+        <DialogContent className="max-w-3xl">
           {ActivePanel && <ActivePanel />}
         </DialogContent>
       </Dialog>

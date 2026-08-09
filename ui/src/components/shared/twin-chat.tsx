@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Pencil, Plus, Send, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ModelSwitcher } from "@/components/shared/model-switcher";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -417,6 +418,9 @@ export function TwinChat({
         {error && <p className="px-4 pb-1 text-[12px] text-destructive">{error}</p>}
 
         <div className="border-t border-border/50 p-3">
+          <div className="mb-1.5 flex items-center justify-between px-1">
+            <ModelSwitcher />
+          </div>
           <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background p-2 transition-colors focus-within:border-primary/40">
             <textarea
               ref={textareaRef}
