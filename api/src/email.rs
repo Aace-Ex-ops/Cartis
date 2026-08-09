@@ -1,42 +1,34 @@
 use std::env;
-use lettre::message::header::ContentType;
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::{Message, SmtpTransport, Transport};
 
+// Email goes through the gateway's POST /api/email (it holds the only valid
+// RESEND_API_KEY; the instance key is dead/unreadable). Same pattern as
+// revoke_gateway_sessions -> /auth/revoke-all. Swap for direct Resend REST
+// when a verified domain + valid key land on the instance.
 pub async fn send_email(to: &str, subject: &str, html: &str) {
-    let api_key = match env::var("MAILJET_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
+    let gateway_url = match env::var("GATEWAY_URL") {
+        Ok(u) if !u.is_empty() => u,
         _ => return,
     };
-    let secret_key = match env::var("MAILJET_SECRET_KEY") {
-        Ok(k) if !k.is_empty() => k,
+    let secret = match env::var("BACKEND_SECRET") {
+        Ok(s) if !s.is_empty() => s,
         _ => return,
     };
-    let sender_name = env::var("MAILJET_SENDER_NAME")
-        .unwrap_or_else(|_| "Cartis".into());
-    let sender_email = env::var("MAILJET_SENDER_EMAIL")
-        .unwrap_or_else(|_| "kyahifarakpdtahein@gmail.com".into());
-
-    let from = format!("{sender_name} <{sender_email}>");
-    let to_addr = format!("<{to}>");
-
-    let Ok(email) = Message::builder()
-        .from(from.parse().unwrap_or_else(|_| "Cartis <noreply@cartis.in>".parse().unwrap()))
-        .to(to_addr.parse().unwrap_or_else(|_| "noreply@cartis.in".parse().unwrap()))
-        .subject(subject)
-        .header(ContentType::TEXT_HTML)
-        .body(html.to_string())
-    else { return };
-
-    tokio::task::spawn_blocking(move || {
-        let creds = Credentials::new(api_key, secret_key);
-        let mailer = SmtpTransport::starttls_relay("in-v3.mailjet.com")
-            .unwrap()
-            .credentials(creds)
-            .build();
-        match mailer.send(&email) {
+    let body = serde_json::json!({ "to": to, "subject": subject, "html": html });
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("{gateway_url}/api/email"))
+            .header("x-cartis-backend-secret", secret)
+            .json(&body)
+            .send()
+            .await;
+        match resp {
+            Ok(r) if !r.status().is_success() => {
+                let text = r.text().await.unwrap_or_default();
+                eprintln!("email via gateway failed: {text}");
+            }
             Ok(_) => {}
-            Err(e) => eprintln!("smtp email failed: {e}"),
+            Err(e) => eprintln!("email via gateway failed: {e}"),
         }
     });
 }

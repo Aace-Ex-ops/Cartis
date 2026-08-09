@@ -18,6 +18,8 @@ type Env = {
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
   EXA_API_KEY?: string
+  RESEND_API_KEY?: string
+  EMAIL_FROM?: string
   YODLEE_CLIENT_ID: string
   YODLEE_SECRET: string
   YODLEE_ADMIN_LOGIN: string
@@ -578,6 +580,27 @@ app.post('/auth/revoke-all', async (c) => {
   }
   await c.env.SESSIONS.delete(`user_sessions:${userId}`)
   return c.json({ ok: true, revoked })
+})
+
+app.post('/api/email', async (c) => {
+  const secret = c.req.header('x-cartis-backend-secret')
+  if (!secret || secret !== c.env.BACKEND_SECRET) return c.json({ error: 'unauthorized' }, 401)
+  if (!c.env.RESEND_API_KEY) return c.json({ error: 'no RESEND_API_KEY' }, 503)
+  const { to, subject, html } = (await c.req.json().catch(() => ({}))) as { to?: string; subject?: string; html?: string }
+  if (!to || !subject || !html) return c.json({ error: 'to, subject, html required' }, 400)
+  const from = c.env.EMAIL_FROM ?? 'Cartis <onboarding@resend.dev>'
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${c.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to, subject, html }),
+  })
+  const ok = res.ok
+  if (!ok) {
+    const body = await res.text().catch(() => '')
+    c.env.SESSIONS.put(`email:fail:${Date.now()}`, body.slice(0, 500), { expirationTtl: 86400 })
+    return c.json({ error: `resend ${res.status}`, detail: body.slice(0, 300) }, 502)
+  }
+  return c.json({ ok: true })
 })
 
 app.post('/api/session/refresh', auth, (c) => {
