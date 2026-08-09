@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "motion/react";
+import Image from "next/image";
 
 const BG_VIDEO =
   "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/Overview%20section%20BG.mp4";
@@ -92,7 +93,7 @@ export function RevnueOverview() {
               transition={{ type: "spring", stiffness: 380, damping: 28 }}
               className="w-8 h-8 sm:w-[48px] sm:h-[48px] rounded-full bg-[#0C0C0C] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-105"
             >
-              <img src={ARROW} alt="Arrow" className="w-4 h-4 sm:w-6 sm:h-6" referrerPolicy="no-referrer" />
+              <Image src={ARROW} alt="Arrow" className="w-4 h-4 sm:w-6 sm:h-6" width={24} height={24} referrerPolicy="no-referrer" />
             </motion.div>
           </motion.a>
         </motion.div>

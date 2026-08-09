@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
 import { Send, ShieldCheck } from "lucide-react";
 
@@ -62,14 +63,14 @@ export function FooterSection() {
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-8 pb-12 border-b border-white/10">
           {/* Brand & Newsletter Column */}
           <div className="lg:col-span-4 space-y-6">
-            <a href="/" className="inline-flex items-center gap-3 group">
+            <Link href="/" className="inline-flex items-center gap-3 group">
               <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-teal-300/40 bg-gradient-to-br from-teal-400/25 via-emerald-500/15 to-black/60 shadow-[0_0_16px_-3px_rgba(45,212,191,0.4)] backdrop-blur-md transition-all duration-300 group-hover:border-teal-200/70">
                 <span className="text-lg font-black text-teal-100 drop-shadow-[0_0_8px_rgba(45,212,191,0.9)]">
                   C
                 </span>
               </div>
               <MetallicLogo className="h-[32px] w-[110px]" />
-            </a>
+            </Link>
 
             <p className="text-sm font-light leading-relaxed text-white/70 max-w-sm">
               Know before you spend. Real-time financial guardrails, price trend tracking,
@@ -84,7 +85,7 @@ export function FooterSection() {
               {subscribed ? (
                 <div className="flex items-center gap-2 text-sm text-teal-300 bg-teal-500/10 border border-teal-400/30 rounded-xl px-4 py-3">
                   <ShieldCheck className="h-4 w-4 shrink-0" />
-                  <span>You're on the list! Check your inbox soon.</span>
+                  <span>You&apos;re on the list! Check your inbox soon.</span>
                 </div>
               ) : (
                 <form onSubmit={handleSubscribe} className="flex gap-2 max-w-sm">

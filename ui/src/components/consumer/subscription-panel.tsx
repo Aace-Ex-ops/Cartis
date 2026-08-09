@@ -41,7 +41,7 @@ export function SubscriptionPanel() {
       });
       const data = (await res.json()) as { url?: string };
       if (data.url) {
-        window.location.href = data.url;
+        window.location.assign(data.url);
       }
     } catch {
       // ignore

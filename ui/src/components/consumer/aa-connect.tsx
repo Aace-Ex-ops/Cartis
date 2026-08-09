@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link2, Loader2, CheckCircle2, AlertTriangle, RefreshCw, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -15,15 +15,21 @@ export function AaConnect({ onSynced }: { onSynced?: () => void }) {
   const [consentId, setConsentId] = useState("");
 
   // Check for consentId in URL on mount (returning from Setu redirect)
+  const checked = useRef(false);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlConsentId = params.get("consentId");
-    if (urlConsentId) {
-      setConsentId(urlConsentId);
-      setStep("polling");
-      // Clean URL
-      window.history.replaceState({}, "", window.location.pathname);
-    }
+    if (checked.current) return;
+    checked.current = true;
+    const syncFromUrl = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlConsentId = params.get("consentId");
+      if (urlConsentId) {
+        setConsentId(urlConsentId);
+        setStep("polling");
+        // Clean URL
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    };
+    void syncFromUrl();
   }, []);
 
   // Poll consent status when in polling step
@@ -124,7 +130,7 @@ export function AaConnect({ onSynced }: { onSynced?: () => void }) {
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="text-sm font-medium text-foreground">Redirecting to consent…</p>
         <p className="text-[13px] text-muted-foreground">
-          You'll verify your identity and approve data sharing
+          You&apos;ll verify your identity and approve data sharing
         </p>
       </div>
     );
@@ -136,8 +142,7 @@ export function AaConnect({ onSynced }: { onSynced?: () => void }) {
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="text-sm font-medium text-foreground">Waiting for approval…</p>
         <p className="text-[13px] text-muted-foreground">
-          Approve the consent on the Setu screen, then come back here
-        </p>
+          Approve the consent on the Setu screen, then come back here        </p>
       </div>
     );
   }
@@ -189,7 +194,7 @@ export function AaConnect({ onSynced }: { onSynced?: () => void }) {
       )}
 
       <p className="text-[12px] text-muted-foreground">
-        Enter your bank-registered mobile number. You'll be redirected to approve data sharing via Account Aggregator.
+        Enter your bank-registered mobile number. You&apos;ll be redirected to approve data sharing via Account Aggregator.
       </p>
     </div>
   );

@@ -63,8 +63,13 @@ export function TwinChat({
     }
   }, []);
 
+  const loadedRef = useRef(false);
+
   useEffect(() => {
-    void loadSessions();
+    if (!loadedRef.current) {
+      loadedRef.current = true;
+      void loadSessions();
+    }
   }, [loadSessions]);
 
   useEffect(() => {

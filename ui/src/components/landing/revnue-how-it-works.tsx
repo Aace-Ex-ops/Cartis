@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
+import Image from "next/image";
 
 const ARROW_RIGHT = "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/arrow%20right.svg";
 const ARROW_RIGHT_UP =
@@ -71,10 +72,12 @@ function StepCard({
       transition={{ type: "spring", stiffness: 90, damping: 16, mass: 1.1, duration: 0.85, delay: isFirstCard ? 0.05 : 0.25 }}
     >
       {step.bgImage && (
-        <img
+        <Image
           className="absolute inset-0 w-full h-full object-cover pointer-events-none z-0 transition-opacity duration-500 ease-in-out"
           src={step.bgImage}
           alt=""
+          width={800}
+          height={900}
           style={{ opacity: +!hover }}
           referrerPolicy="no-referrer"
         />
@@ -105,20 +108,24 @@ function StepCard({
               hover ? "bg-white" : "bg-[#0C0C0C]"
             }`}
           >
-            <img
+            <Image
               className="w-5 h-5 transition-transform duration-300"
               src={hover ? ARROW_RIGHT_UP : ARROW_RIGHT}
               alt="Arrow icon"
+              width={20}
+              height={20}
               style={{ filter: hover ? "none" : "invert(1)" }}
               referrerPolicy="no-referrer"
             />
           </div>
         </div>
       </div>
-      <img
+      <Image
         className="absolute right-0 bottom-0 select-none pointer-events-none w-[142px] h-[92px] opacity-80 z-20 transition-all duration-300"
         src={hover && step.hoverNumberSvg ? step.hoverNumberSvg : step.numberSvg}
         alt={`Step number ${step.id}`}
+        width={142}
+        height={92}
         referrerPolicy="no-referrer"
       />
     </motion.div>
@@ -345,10 +352,12 @@ export function RevnueHowItWorks() {
                 transition={{ type: "spring", stiffness: 380, damping: 28 }}
                 className="w-12 h-12 flex justify-center items-center rounded-full bg-white transition-all duration-300"
               >
-                <img
+                <Image
                   className="w-6 h-6 transform group-hover:translate-x-0.5 transition-transform duration-300"
                   src={ARROW_RIGHT}
                   alt="Arrow right"
+                  width={24}
+                  height={24}
                   referrerPolicy="no-referrer"
                 />
               </motion.div>

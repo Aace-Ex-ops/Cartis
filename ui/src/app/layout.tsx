@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Gantari, Inclusive_Sans, Instrument_Serif } from "next/font/google";
+import { Inter, Playfair_Display, JetBrains_Mono, Anybody } from "next/font/google";
 import { SmoothScrollProvider } from "@/components/providers/smooth-scroll-provider";
 import { Preloader } from "@/components/shared/preloader";
 import "./globals.css";
@@ -10,22 +10,20 @@ const inter = Inter({
   preload: false,
 });
 
-const gantari = Gantari({
-  variable: "--font-gantari",
+const playfair = Playfair_Display({
+  variable: "--font-serif",
   subsets: ["latin"],
   preload: false,
 });
 
-const inclusive = Inclusive_Sans({
-  variable: "--font-inclusive",
+const jetbrains = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
   preload: false,
 });
 
-const instrument = Instrument_Serif({
-  variable: "--font-instrument",
-  weight: "400",
-  style: ["normal", "italic"],
+const anybody = Anybody({
+  variable: "--font-anybody",
   subsets: ["latin"],
   preload: false,
 });
@@ -43,7 +41,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${gantari.variable} ${inclusive.variable} ${instrument.variable} h-full antialiased`}
+      className={`${inter.variable} ${playfair.variable} ${jetbrains.variable} ${anybody.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>

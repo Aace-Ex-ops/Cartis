@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { gql } from "@/lib/gql";
 
 type ModelData = { me: { aiModel: string | null } };
@@ -26,7 +26,6 @@ const MODELS = [
 
 export function ModelPanel() {
   const [current, setCurrent] = useState<string>("");
-  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -36,7 +35,6 @@ export function ModelPanel() {
   }, []);
 
   async function setModel(modelId: string) {
-    setSaving(true);
     setSaved(false);
     try {
       await gql<{ setAiModel: { aiModel: string } }>(
@@ -47,7 +45,6 @@ export function ModelPanel() {
     } catch {
       // ignore
     }
-    setSaving(false);
   }
 
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CategoryPie } from "@/components/seller/category-pie";
 import { EntryForm } from "@/components/seller/entry-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,19 +26,22 @@ export default function ExpensesPage() {
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
-    const [f, c] = await Promise.all([fetchSellerFinances(50), fetchSellerCategories("expense")]);
-    setEntries(f.filter((e) => EXPENSE_TYPES.includes(e.entryType)));
-    setCategories(c);
+    try {
+      const [f, c] = await Promise.all([fetchSellerFinances(50), fetchSellerCategories("expense")]);
+      setEntries(f.filter((e) => EXPENSE_TYPES.includes(e.entryType)));
+      setCategories(c);
+    } catch {
+      setFailed(true);
+    }
   }, []);
 
+  const loaded = useRef(false);
+
   useEffect(() => {
-    let cancelled = false;
-    void load().catch(() => {
-      if (!cancelled) setFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+    if (!loaded.current) {
+      load();
+      loaded.current = true;
+    }
   }, [load]);
 
   async function remove(entryId: string) {

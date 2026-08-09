@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IncomeChart } from "@/components/seller/income-chart";
 import { CategoryBreakdown } from "@/components/consumer/category-breakdown";
 import { EntryForm } from "@/components/seller/entry-form";
@@ -24,19 +24,22 @@ export default function IncomePage() {
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
-    const [s, c] = await Promise.all([fetchSellerSeries(6), fetchSellerCategories("revenue")]);
-    setSeries(s);
-    setCategories(c);
+    try {
+      const [s, c] = await Promise.all([fetchSellerSeries(6), fetchSellerCategories("revenue")]);
+      setSeries(s);
+      setCategories(c);
+    } catch {
+      setFailed(true);
+    }
   }, []);
 
+  const loaded = useRef(false);
+
   useEffect(() => {
-    let cancelled = false;
-    void load().catch(() => {
-      if (!cancelled) setFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+    if (!loaded.current) {
+      load();
+      loaded.current = true;
+    }
   }, [load]);
 
   if (failed) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+ import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,24 +49,30 @@ export default function PortfolioPage() {
   const [avg, setAvg] = useState("");
   const [cur, setCur] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      const [h, p] = await Promise.all([
-        gql<{ holdings: Holding[] }>(`query { holdings { holdingId assetType name quantity avgPrice currentPrice invested currentValue } }`),
-        gql<{ portfolio: Portfolio }>(`query { portfolio { invested currentValue returns returnPct allocations { assetType invested currentValue } } }`),
-      ]);
-      setHoldings(h.holdings);
-      setPortfolio(p.portfolio);
-    } catch {
-      setFailed(true);
-    }
-  }, []);
+const load = useCallback(async () => {
+  try {
+    const [h, p] = await Promise.all([
+      gql<{ holdings: Holding[] }>(`query { holdings { holdingId assetType name quantity avgPrice currentPrice invested currentValue } }`),
+      gql<{ portfolio: Portfolio }>(`query { portfolio { invested currentValue returns returnPct allocations { assetType invested currentValue } } }`),
+    ]);
+    setHoldings(h.holdings);
+    setPortfolio(p.portfolio);
+  } catch {
+    setFailed(true);
+  }
+}, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+const loaded = useRef(false);
 
-  async function addHolding() {
+useEffect(() => {
+  if (!loaded.current) {
+    load();
+    loaded.current = true;
+  }
+}, [load]);
+
+// Open/close actions
+async function addHolding() {
     const quantity = parseFloat(qty);
     const avgPrice = parseFloat(avg);
     const currentPrice = parseFloat(cur);

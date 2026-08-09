@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect } from "react";
 import { Renderer, Program, Mesh, Triangle, Color } from "ogl";
 
 const PAD = 20;
@@ -134,19 +134,21 @@ export default function SpecularButton({
     autoAnimate,
   });
 
-  propsRef.current = {
-    radius,
-    lineColor,
-    baseColor,
-    intensity,
-    shineSize,
-    shineFade,
-    thickness,
-    speed,
-    followMouse,
-    proximity,
-    autoAnimate,
-  };
+  useEffect(() => {
+    propsRef.current = {
+      radius,
+      lineColor,
+      baseColor,
+      intensity,
+      shineSize,
+      shineFade,
+      thickness,
+      speed,
+      followMouse,
+      proximity,
+      autoAnimate,
+    };
+  }, [radius, lineColor, baseColor, intensity, shineSize, shineFade, thickness, speed, followMouse, proximity, autoAnimate]);
 
   useEffect(() => {
     const btn = btnRef.current;

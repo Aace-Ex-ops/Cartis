@@ -254,13 +254,13 @@ export default function OverviewPage() {
                   <Button size="sm" onClick={() => void resolveAction(a.actionId, true)}>
                     <Check className="mr-1.5 h-3.5 w-3.5" /> Done
                   </Button>
-                  <button
-                    onClick={() => void resolveAction(a.actionId, false)}
-                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    aria-label="Dismiss"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+<button
+                      onClick={() => void resolveAction(a.actionId, false)}
+                      className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label="Dismiss"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                 </div>
               </div>
             ))}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,8 +46,13 @@ export default function GoalsPage() {
     }
   }, []);
 
+  const loaded = useRef(false);
+
   useEffect(() => {
-    void load();
+    if (!loaded.current) {
+      load();
+      loaded.current = true;
+    }
   }, [load]);
 
   async function addGoal() {

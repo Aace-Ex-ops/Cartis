@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,17 +20,20 @@ export default function InventoryPage() {
   const [cost, setCost] = useState("");
 
   const load = useCallback(async () => {
-    setItems(await fetchSellerInventory());
+    try {
+      setItems(await fetchSellerInventory());
+    } catch {
+      setFailed(true);
+    }
   }, []);
 
+  const loaded = useRef(false);
+
   useEffect(() => {
-    let cancelled = false;
-    void load().catch(() => {
-      if (!cancelled) setFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+    if (!loaded.current) {
+      load();
+      loaded.current = true;
+    }
   }, [load]);
 
   const canAdd = name.trim() !== "" && Number.isFinite(Number(stock)) && Number(stock) >= 0;

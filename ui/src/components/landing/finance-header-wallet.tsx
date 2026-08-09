@@ -106,12 +106,6 @@ export function FinanceHeaderWallet() {
 
   return (
     <>
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;500;700&display=swap"
-        rel="stylesheet"
-      />
       <div
         id="scroll-container-wrapper"
         className="relative w-full h-[250vh] bg-black select-none text-white"
@@ -188,7 +182,7 @@ export function FinanceHeaderWallet() {
                 <span
                   style={{
                     color: "#0B3A17",
-                    fontFamily: "Anybody, sans-serif",
+                    fontFamily: "var(--font-anybody), sans-serif",
                     fontSize: isMobile ? "14px" : "18px",
                     fontStyle: "normal",
                     fontWeight: 700,
@@ -213,7 +207,7 @@ export function FinanceHeaderWallet() {
                   className="anybody-heading select-none"
                   style={{
                     color: "#FFF",
-                    fontFamily: "Anybody, sans-serif",
+                    fontFamily: "var(--font-anybody), sans-serif",
                     fontStyle: "normal",
                     fontWeight: 400,
                   }}
@@ -236,7 +230,7 @@ export function FinanceHeaderWallet() {
                 className="anybody-heading select-none"
                 style={{
                   color: "#FFF",
-                  fontFamily: "Anybody, sans-serif",
+                  fontFamily: "var(--font-anybody), sans-serif",
                   fontStyle: "normal",
                   fontWeight: 400,
                 }}

@@ -58,8 +58,8 @@ export default function ToolsPage() {
   const [tab, setTab] = useState("retirement");
   useEffect(() => {
     const q = window.location.search;
-    if (q.includes("tab=tax")) setTab("tax");
-    else if (q.includes("tab=stock")) setTab("stock");
+    const initialTab = q.includes("tab=tax") ? "tax" : q.includes("tab=stock") ? "stock" : "retirement";
+    setTimeout(() => setTab(initialTab), 0);
   }, []);
   const [busy, setBusy] = useState(false);
 

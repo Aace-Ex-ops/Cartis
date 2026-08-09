@@ -77,18 +77,14 @@ export function Sidebar({
               <LineSidebar
                 key={`${group.heading ?? i}-${pathname}`}
                 items={group.items.map((item) => item.title)}
-                accentColor="#0d9488"
-                textColor="#52525b"
-                markerColor="#a1a1aa"
+                accentColor="#2E2E2E"
+                textColor="#5E5A52"
+                markerColor="#D1CFC0"
                 defaultActive={activeIndex >= 0 ? activeIndex : null}
                 showIndex={false}
-                proximityRadius={80}
-                maxShift={16}
                 markerLength={40}
-                tickScale={0.5}
                 itemGap={6}
                 fontSize={0.8}
-                smoothing={90}
                 onItemClick={(index) => {
                   const href = group.items[index].href;
                   if (href.startsWith("http")) {

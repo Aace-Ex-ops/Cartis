@@ -1,7 +1,7 @@
 "use client";
 
-import { PremiumAuth } from "@/components/ui/premium-auth";
+import { SigninForm } from "@/components/ui/signin-form";
 
 export function AuthForm({ mode }: { mode: "signin" | "signup" }) {
-  return <PremiumAuth defaultMode={mode} />;
+  return <SigninForm defaultMode={mode} />;
 }

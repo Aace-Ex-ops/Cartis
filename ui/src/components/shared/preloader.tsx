@@ -29,7 +29,7 @@ export function Preloader() {
     <AnimatePresence>
       {!done && (
         <motion.div
-          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6 bg-[#0C0C0C]"
+          className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-6 bg-background"
           exit={{ opacity: 0 }}
           transition={{ duration: FADE / 1000, ease: "easeOut" }}
         >
@@ -38,7 +38,7 @@ export function Preloader() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.9, duration: 0.8 }}
-            className="font-gantari text-sm tracking-[0.2em] text-teal-200/60 uppercase"
+            className="font-sans text-sm tracking-[0.2em] text-muted-foreground/60 uppercase"
           >
             AI Financial Coach
           </motion.p>

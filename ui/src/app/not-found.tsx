@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "motion/react";
 import { Warp } from "@paper-design/shaders-react";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
-import { ArrowLeft, Home, Compass, AlertTriangle } from "lucide-react";
+import { ArrowLeft, AlertTriangle } from "lucide-react";
 
 export default function NotFound() {
   return (
@@ -71,7 +71,7 @@ export default function NotFound() {
           </h2>
 
           <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-white/75">
-            The page or purchase verdict you're looking for doesn't exist, was moved, or has expired.
+            The page or purchase verdict you&apos;re looking for doesn&apos;t exist, was moved, or has expired.
           </p>
 
           {/* Action Button - Only Return to Home per prompt request */}

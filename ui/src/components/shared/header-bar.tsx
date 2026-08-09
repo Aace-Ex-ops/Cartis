@@ -27,7 +27,7 @@ export function HeaderBar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search transactions, purchases…"
-          className="w-full rounded-md border border-border/50 bg-background/50 py-1.5 pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded-lg border border-border/50 bg-background/50 py-1.5 pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </div>
 
