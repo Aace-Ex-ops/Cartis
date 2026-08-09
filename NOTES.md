@@ -178,10 +178,10 @@ cold start).
 
 ### Infra notes
 
-- SSH to EC2 (`18.60.39.208`) now times out from Mac — was reachable
-  earlier this session; security group may have changed. Deploy path
-  otherwise: scp main.rs → `cargo build --release` → stop/`cp`/start
-  systemd unit `cartis-api`.
+- SSH to EC2 now works on **port 2222** (`ssh -p 2222 -i ~/.ssh/cartis-ec2.pem ubuntu@<ip>`) — sshd moved off 22 (SG still shows 22/0.0.0.0 open, but connection refused). Instance IP is ephemeral and has changed (18.60.39.208 → 40.192.51.1): get current IP via `aws ec2 describe-instances --region ap-south-2 --instance-ids i-04cd1166eb0544344` or SSM. SSM `aws ssm send-command` also works for mgmt.
+- Backend deploy (Aug 9): scp `src/*.rs` + Cargo.toml/lock to `/home/ubuntu/api/` → `cargo build --release` (PATH needs `$HOME/.cargo/bin`) → `systemctl restart cartis-api`. Deployed: insights role normalization, email via gateway.
+- CARTIS-105 shipped: `normalize_role` at coach_insights query/refresh/save entry (GraphQL resolvers passed raw `personal`/`business` into a `CHECK role IN ('consumer','seller')` column). Deployed; constraint errors gone.
+- CARTIS-104 shipped (email): backend `send_email` → gateway `POST /api/email` (x-cartis-backend-secret) → Resend with the worker's valid key. Instance `.env` RESEND/MAILJET keys are dead — unused now. `EMAIL_FROM` var on gateway (default `Cartis <onboarding@resend.dev>`). Verified live: 200 to key owner `dsjzcjmsh6@privaterelay.appleid.com`; 403 to other recipients until a domain is **verified in Resend** (user action) — then set `EMAIL_FROM=Cartis <no-reply@...verified-domain>`.
 - Setu token cached in KV 25 min (`setu:token`, TTL 1500s).
 
 ## Linear
@@ -222,6 +222,6 @@ cold start).
 - Setu sandbox /v2/consents was an upstream 500 (CARTIS-63, canceled). Pivoted to **Yodlee (Envestnet)**: client-credentials auth (POST /auth/token, clientId+secret+loginName → 30-min bearer), hosted **FastLink** link UI, free sandbox at `https://sandbox.api.yodlee.com/ysl` (5 preconfigured test users, sample data; Test User 1 = `sbMem6a78947d1ea541`).
 - Gateway: `yodleeToken` (KV `yodlee:token:<login>` TTL 1500), `yodleeFetch` (Bearer + Api-Version: 1.1), `parseYodleeFetch`, `syncYodleeData`. Routes: `GET /aa/link` (server-side-minted FastLink page, callback via `?cb=`), `POST /aa/success` (FastLink onSuccess → KV `yodlee:linked`), `/api/aa/consent` (returns `linkUrl`), `/api/aa/status/:x` (linked? → `/accounts`), `/api/aa/fetch` + `/reconnect` (accounts+transactions → `syncAaData`, aaHandle/consentId = 'yodlee'). Setu AA helpers + webhooks removed; `setuProxy` kept for the stock tool. Direct fetch from Workers — no EC2 proxy hop.
 - UI `aa-connect.tsx`: no more mobile number — one "Connect your bank account" button → /aa/link webview → FastLink → callback `?linked=1` → poll status → fetch. `AaReconnect` unchanged.
-- Secrets: `YODLEE_CLIENT_ID/SECRET/ADMIN_LOGIN/TEST_LOGIN`; vars `YODLEE_BASE_URL`, `YODLEE_FASTLINK_URL=https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink`. Deploy b27e833c.
+- Secrets: `YODLEE_CLIENT_ID/SECRET/ADMIN_LOGIN/TEST_LOGIN`; vars `YODLEE_BASE_URL`, `YODLEE_FASTLINK_URL=https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink`. Deploy b27e833c → 10dad121 (Exa) → 3ad5d55b (email proxy) → fc946bd1 (clean).
 - E2E verified live: status → 3 Dag Site accounts (xxxx8614/$1636.44, xxxx3xxx/$9044.78, xxxx3xxx/$44.78); fetch → synced ok, transactions 0 (sandbox has no txns until Account Simulator or a fresh FastLink link).
 - Sandbox gotchas: **KV keys written via wrangler CLI are NOT immediately visible to the worker** (API-write propagation) — for E2E tests, write sessions through a worker endpoint instead; FastLink config must be published in the dashboard with the gateway + UI domains whitelisted (user action, pending); test creds for linking: Dag Site `YodTest.site16441.2`/`site16441.2` (MFA: `YodTest.site16442.1`/`site16442.1` OTP 123456); production = Engage tier (real users via POST /user/register, real Indian FIs, licensing).
