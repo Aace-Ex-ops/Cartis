@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { gql } from "@/lib/gql";
+import { SkeletonHeading } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Goal = {
   goalId: string;
@@ -37,10 +39,12 @@ export default function GoalsPage() {
   const [target, setTarget] = useState("");
   const [current, setCurrent] = useState("");
 
+  const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     try {
       const d = await gql<{ financialGoals: Goal[] }>(`query { financialGoals { goalId goalType name targetAmount currentAmount progressPct targetDate } }`);
       setGoals(d.financialGoals);
+      setLoading(false);
     } catch {
       setFailed(true);
     }
@@ -89,6 +93,27 @@ export default function GoalsPage() {
       <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-[13px] text-destructive">
         Couldn&apos;t load your goals — refresh to try again.
       </p>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <SkeletonHeading />
+          <Skeleton className="h-8 w-24 rounded-md" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-2 w-full rounded-full" />
+              <Skeleton className="h-7 w-full rounded-md" />
+            </div>
+          ))}
+        </div>
+      </div>
     );
   }
 

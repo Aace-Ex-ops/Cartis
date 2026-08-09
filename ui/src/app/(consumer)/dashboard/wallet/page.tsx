@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WalletCard } from "@/components/consumer/wallet-card";
 import { AaReconnect } from "@/components/consumer/aa-connect";
 import { gql } from "@/lib/gql";
+import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type BankAccount = {
   accountId: string;
@@ -58,6 +60,20 @@ export default function WalletPage() {
       cancelled = true;
     };
   }, []);
+
+  if (data === null) {
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <SkeletonCard className="h-[190px]" />
+        <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-40" />
+          <SkeletonRow bare />
+          <SkeletonRow bare />
+        </div>
+      </div>
+    );
+  }
 
   const balance = data?.bankAccounts[0]?.balance ?? null;
   const aaConn = data?.aaConnections?.[0];

@@ -7,6 +7,7 @@ import { WalletCard } from "@/components/consumer/wallet-card";
 import { TabGauge } from "@/components/consumer/tab-gauge";
 import { AlertList } from "@/components/consumer/alert-list";
 import { TaxCard } from "@/components/consumer/tax-card";
+import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 import { InsightCards, type Insight } from "@/components/shared/insight-cards";
 import { gql } from "@/lib/gql";
 import { ArrowRight, Check, RefreshCw, X } from "lucide-react";
@@ -68,8 +69,6 @@ function healthLevel(score: number): string {
   if (score >= 670) return "Fair";
   return "Needs attention";
 }
-
-const PLACEHOLDER = "h-[190px]";
 
 export default function OverviewPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -144,14 +143,14 @@ export default function OverviewPage() {
   if (!data) {
     return (
       <div className="flex flex-col gap-6">
-        <div className={PLACEHOLDER} />
+        <SkeletonHeading />
         <div className="grid gap-4 lg:grid-cols-3">
-          <div className={`${PLACEHOLDER} lg:col-span-2`} />
-          <div className={PLACEHOLDER} />
+          <SkeletonCard className="h-[190px] lg:col-span-2" />
+          <SkeletonCard className="h-[190px]" />
         </div>
         <div className="grid gap-4 lg:grid-cols-3">
-          <div className={PLACEHOLDER} />
-          <div className={`${PLACEHOLDER} lg:col-span-2`} />
+          <SkeletonCard className="h-[190px]" />
+          <SkeletonCard className="h-[190px] lg:col-span-2" />
         </div>
       </div>
     );

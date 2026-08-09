@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { StatCard } from "@/components/seller/stat-card";
 import { TrendingUp, Wallet, Percent, Landmark } from "lucide-react";
 import { fetchSellerDashboard, fmt, type SellerDashboard } from "@/lib/seller";
+import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 
 export default function SellerDashboardPage() {
   const [data, setData] = useState<SellerDashboard | null>(null);
@@ -32,7 +33,14 @@ export default function SellerDashboardPage() {
   }
 
   if (!data) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} className="h-28" />)}
+        </div>
+      </div>
+    );
   }
 
   const revDelta =

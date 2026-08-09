@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { gql } from "@/lib/gql";
+import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Holding = {
   holdingId: string;
@@ -118,6 +120,29 @@ async function addHolding() {
       <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-[13px] text-destructive">
         Couldn&apos;t load your portfolio — refresh to try again.
       </p>
+    );
+  }
+
+  if (portfolio === null) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <SkeletonHeading />
+          <Skeleton className="h-8 w-24 rounded-md" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <SkeletonCard className="h-28" />
+          <SkeletonCard className="h-28" />
+          <SkeletonCard className="h-28" />
+        </div>
+        <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-32" />
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-5 w-full" />)}
+        </div>
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} withBadge={false} />)}
+        </div>
+      </div>
     );
   }
 

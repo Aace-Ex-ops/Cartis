@@ -5,6 +5,8 @@ import { CashFlowChart } from "@/components/seller/cashflow-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
 import { fetchSellerSeries, fmt, type SellerSeriesPoint } from "@/lib/seller";
+import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function CashFlowPage() {
   const [data, setData] = useState<SellerSeriesPoint[] | null>(null);
@@ -33,7 +35,17 @@ export default function CashFlowPage() {
   }
 
   if (!data) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <SkeletonCard className="h-[280px]" />
+        <div className="rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="mt-2 h-7 w-24" />
+          <Skeleton className="mt-2 h-3 w-52" />
+        </div>
+      </div>
+    );
   }
 
   const avgIn = data.reduce((s, m) => s + m.income, 0) / Math.max(data.length, 1);

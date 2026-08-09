@@ -1,17 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Bot, Search } from "lucide-react";
 import { AlertBell } from "@/components/shared/alert-bell";
-import { UserMenu } from "@/components/shared/user-menu";
+import { MetallicLogo } from "@/components/shared/metallic-logo";
 import { TwinDrawer } from "@/components/shared/twin-drawer";
 
 export function HeaderBar({
-  user,
   alerts = [],
   leading,
 }: {
-  user?: { id: string; name: string; email: string; avatar: string };
   alerts?: { id: string; title: string; time: string }[];
   leading?: React.ReactNode;
 }) {
@@ -20,7 +19,12 @@ export function HeaderBar({
 
   return (
     <header className="grid h-14 shrink-0 grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-border/50 bg-card px-4">
-      {leading}
+      <div className="flex items-center gap-3">
+        {leading}
+        <Link href="/" aria-label="Cartis home" title="Cartis" onClick={() => window.scrollTo({ top: 0 })}>
+          <MetallicLogo className="h-7 w-24" />
+        </Link>
+      </div>
       <div className="relative hidden w-64 justify-self-center md:block">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
         <input
@@ -41,9 +45,6 @@ export function HeaderBar({
           <Bot className="h-[18px] w-[18px]" strokeWidth={1.5} />
         </button>
         <AlertBell alerts={alerts} />
-        {user && (
-          <UserMenu user={{ fullName: user.name, email: user.email, avatarUrl: user.avatar, userType: "" }} />
-        )}
       </div>
 
       <TwinDrawer open={twinOpen} onClose={() => setTwinOpen(false)} />

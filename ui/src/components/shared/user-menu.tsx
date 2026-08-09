@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Repeat } from "lucide-react";
+import { Repeat, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -76,11 +76,20 @@ export function UserMenu({ user }: { user: User }) {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent/50 focus:outline-none cursor-pointer">
-            <Avatar className="h-7 w-7">
-              <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
-              <AvatarFallback className="text-xs bg-elevated text-foreground">{initials}</AvatarFallback>
-            </Avatar>
+          <button className="flex w-full cursor-pointer items-center justify-between rounded-[6px] px-2 py-2 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <Avatar className="h-8 w-8 shrink-0 rounded-[6px] bg-primary text-primary-foreground">
+                <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
+                <AvatarFallback className="bg-primary text-[13px] font-semibold text-primary-foreground">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-[13px] font-medium text-foreground">{user.fullName}</span>
+                <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+              </span>
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/50" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">

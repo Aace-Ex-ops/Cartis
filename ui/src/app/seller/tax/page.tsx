@@ -5,6 +5,7 @@ import { StatCard } from "@/components/seller/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarClock, CircleCheck } from "lucide-react";
 import { fetchSellerDashboard, fmt, nextFiling, taxPeriod, type SellerDashboard } from "@/lib/seller";
+import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
 export default function TaxPage() {
   const [data, setData] = useState<SellerDashboard | null>(null);
@@ -33,7 +34,20 @@ export default function TaxPage() {
   }
 
   if (!data) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <SkeletonCard className="h-28" />
+          <SkeletonCard className="h-28" />
+          <SkeletonCard className="h-28" />
+        </div>
+        <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4">
+          <SkeletonRow bare />
+          <SkeletonRow bare />
+        </div>
+      </div>
+    );
   }
 
   const gstLiability = Math.round(0.18 * data.revenue);

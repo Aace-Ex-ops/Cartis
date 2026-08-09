@@ -150,9 +150,15 @@ export function FinanceHeaderWallet() {
               <Link
                 href="/"
                 aria-label="Cartis home"
+                onClick={(e) => {
+                  if (window.location.pathname === "/") {
+                    e.preventDefault();
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }
+                }}
                 className="flex items-center gap-1.5 md:gap-2.5 px-2.5 py-1.5 md:px-4 md:py-2.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 active:scale-95 transition-all backdrop-blur-md"
               >
-                <MetallicLogo className="h-[16px] w-[42px] md:h-[20px] md:w-[52px]" />
+                <MetallicLogo tone="light" className="h-[16px] w-[42px] md:h-[20px] md:w-[52px]" />
               </Link>
             </div>
             <div id="right-side-actions" className="flex items-center gap-2 md:gap-4">
@@ -212,8 +218,8 @@ export function FinanceHeaderWallet() {
                     fontWeight: 400,
                   }}
                 >
-                  Know before
-                  <br /> you spend.
+                  See the future
+                  <br /> of your money.
                 </h1>
               </div>
             </motion.div>

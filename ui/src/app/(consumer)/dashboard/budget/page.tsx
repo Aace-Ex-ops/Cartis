@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SpendChart } from "@/components/consumer/spend-chart";
 import { TabGauge } from "@/components/consumer/tab-gauge";
 import { gql } from "@/lib/gql";
+import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -55,6 +56,18 @@ export default function BudgetPage() {
       cancelled = true;
     };
   }, []);
+
+  if (data === null) {
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SkeletonCard className="h-[280px]" />
+          <SkeletonCard className="h-[280px] lg:col-span-2" />
+        </div>
+      </div>
+    );
+  }
 
   const monthlyTab = data?.monthlyTab ?? { limit: 0, spent: 0 };
   const days = data?.spending30d ?? [];

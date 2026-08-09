@@ -43,8 +43,7 @@ export function RevnueHero() {
     <div id="header-root-container" className="relative w-full min-h-[220vh] bg-white">
       <section
         id="header-section"
-        className="sticky top-0 w-full h-screen overflow-hidden flex flex-col justify-between"
-        style={{ paddingTop: 20 }}
+        className="sticky top-0 w-full h-screen overflow-hidden flex flex-col justify-center"
       >
         {videoOk && (
           <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
@@ -80,20 +79,20 @@ export function RevnueHero() {
           </div>
         )}
 
-        <div className="relative z-20 w-full text-center pb-5 md:pb-8 xl:pb-12 px-4 sm:px-8 md:px-12 xl:px-16">
+        <div className="relative z-20 w-full text-center bg-black/25 backdrop-blur-[1px] rounded-[32px] py-10 md:py-12 px-4 sm:px-8 md:px-12 xl:px-16">
           <div className="overflow-hidden py-4">
             <motion.h1
               initial={{ y: 150, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1], delay: 0.3 }}
-              className="relative select-none text-white text-center font-inclusive text-[40px] sm:text-[52px] md:text-[72px] lg:text-[96px] font-medium leading-[114%] tracking-[-2px] sm:tracking-[-4px] md:tracking-[-6px] lg:tracking-[-8px]"
+              className="relative select-none text-white text-center font-inclusive text-[40px] sm:text-[52px] md:text-[72px] lg:text-[96px] font-medium leading-[114%] tracking-[-2px] sm:tracking-[-4px] md:tracking-[-6px] lg:tracking-[-8px] drop-shadow-[0_4px_24px_rgba(0,0,0,0.45)]"
             >
               <motion.span
                 className="inline-block"
                 animate={{ x: [-8, 8, -8], y: [8, -8, 8] }}
                 transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
               >
-                Know before you spend.
+                See the future of your money.
               </motion.span>
             </motion.h1>
           </div>

@@ -16,6 +16,8 @@ import {
   type SellerCategory,
   type SellerFinanceEntry,
 } from "@/lib/seller";
+import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const EXPENSE_TYPES = ["expense", "cogs", "salary", "rent", "other"];
 
@@ -58,7 +60,26 @@ export default function ExpensesPage() {
   }
 
   if (!entries || !categories) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 lg:col-span-2">
+            <Skeleton className="h-4 w-32" />
+            <SkeletonRow bare />
+            <SkeletonRow bare />
+            <SkeletonRow bare />
+          </div>
+          <SkeletonCard className="h-[280px]" />
+        </div>
+        <div className="rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-36" />
+          <div className="mt-3 flex flex-col gap-3">
+            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-4 w-full" />)}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const top3 = [...categories].sort((a, b) => b.spent - a.spent).slice(0, 3);

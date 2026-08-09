@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fetchSellerCategories, fmt, currentMonth, type SellerCategory } from "@/lib/seller";
+import { SkeletonHeading } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function Row({ label, amount, strong }: { label: string; amount: number; strong?: boolean }) {
   return (
@@ -45,7 +47,23 @@ export default function PnLPage() {
   }
 
   if (!income || !expenses) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex max-w-2xl flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <SkeletonHeading />
+          <Skeleton className="h-8 w-24 rounded-md" />
+        </div>
+        <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-6">
+          <Skeleton className="h-3 w-16" />
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-4 w-full" />)}
+          <Skeleton className="mt-2 h-4 w-2/3" />
+          <Skeleton className="mt-4 h-3 w-20" />
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-4 w-full" />)}
+          <Skeleton className="mt-2 h-4 w-2/3" />
+          <Skeleton className="mt-4 h-10 w-full rounded-lg" />
+        </div>
+      </div>
+    );
   }
 
   const incomeTotal = income.reduce((s, c) => s + c.spent, 0);

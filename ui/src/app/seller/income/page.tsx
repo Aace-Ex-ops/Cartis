@@ -16,6 +16,8 @@ import {
   type SellerCategory,
   type SellerSeriesPoint,
 } from "@/lib/seller";
+import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function IncomePage() {
   const [series, setSeries] = useState<SellerSeriesPoint[] | null>(null);
@@ -51,7 +53,20 @@ export default function IncomePage() {
   }
 
   if (!series || !categories) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <SkeletonCard className="h-28" />
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SkeletonCard className="h-[280px] lg:col-span-2" />
+          <SkeletonCard className="h-[280px]" />
+        </div>
+        <div className="rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="mt-3 h-8 w-28 rounded-md" />
+        </div>
+      </div>
+    );
   }
 
   const first = series[0]?.income ?? 0;

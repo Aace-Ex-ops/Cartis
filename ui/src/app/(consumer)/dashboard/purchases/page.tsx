@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { gql } from "@/lib/gql";
 import type { Verdict } from "@/lib/mock";
+import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
 type Analysis = {
   analysisId: string;
@@ -50,6 +51,21 @@ export default function PurchasesPage() {
       cancelled = true;
     };
   }, []);
+
+  if (items === null) {
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SkeletonCard className="h-28" />
+          <SkeletonCard className="h-28" />
+        </div>
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} />)}
+        </div>
+      </div>
+    );
+  }
 
   const purchases = (items ?? []).map((a) => {
     const verdict = toVerdict(a.verdict);

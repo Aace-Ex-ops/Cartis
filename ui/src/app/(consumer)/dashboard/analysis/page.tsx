@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AnalysisList } from "@/components/consumer/analysis-list";
 import { gql } from "@/lib/gql";
 import type { Verdict } from "@/lib/mock";
+import { SkeletonHeading, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
 type Analysis = {
   analysisId: string;
@@ -43,6 +44,17 @@ function AnalysisHistoryPage() {
       cancelled = true;
     };
   }, []);
+
+  if (items === null) {
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)}
+        </div>
+      </div>
+    );
+  }
 
   const analyses = (items ?? []).map((a) => ({
     id: a.analysisId,

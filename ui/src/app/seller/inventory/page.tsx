@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { gql } from "@/lib/gql";
 import { fetchSellerInventory, fmt, type SellerInventoryItem } from "@/lib/seller";
+import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function InventoryPage() {
   const [items, setItems] = useState<SellerInventoryItem[] | null>(null);
@@ -71,7 +73,20 @@ export default function InventoryPage() {
   }
 
   if (!items) {
-    return <div className="h-[190px]" />;
+    return (
+      <div className="flex flex-col gap-6">
+        <SkeletonHeading />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SkeletonCard className="h-28" />
+          <SkeletonCard className="h-28" />
+        </div>
+        <div className="rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="mt-4 h-3 w-full" />
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="mt-3 h-4 w-full" />)}
+        </div>
+      </div>
+    );
   }
 
   const cogs = items.reduce((s, i) => s + i.stock * i.unitCost, 0);
