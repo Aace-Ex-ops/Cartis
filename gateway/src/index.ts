@@ -18,6 +18,12 @@ type Env = {
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
   SERPAPI_KEY?: string
+  YODLEE_CLIENT_ID: string
+  YODLEE_SECRET: string
+  YODLEE_ADMIN_LOGIN: string
+  YODLEE_TEST_LOGIN: string
+  YODLEE_BASE_URL: string
+  YODLEE_FASTLINK_URL: string
 }
 
 type Session = {
@@ -100,40 +106,7 @@ async function verifyPolarWebhook(secret: string, webhookId: string, timestamp: 
   return false
 }
 
-const FIP_NAMES: Record<string, string> = {
-  'setu-fip': 'Setu FIP (Sandbox)',
-  'setu-fip-2': 'Setu FIP-2 (Sandbox)',
-  'HDFC-FIP': 'HDFC Bank',
-  'SBI-FIP': 'State Bank of India',
-  'ICICI-FIP': 'ICICI Bank',
-  'CAMS-FIP': 'CAMS (MF)',
-  'LIC-FIP': 'LIC',
-  'ICICI-INS-FIP': 'ICICI Insurance',
-  'MULTIPLE': 'Multiple FIPs',
-}
-
-function fipIdToBankName(fipId: string): string {
-  return FIP_NAMES[fipId] ?? fipId
-}
-
-// ── Setu AA helpers ────────────────────────────────────────────────────────
-
-const SETU_AUTH_URL = 'https://uat.setu.co/api/v2/auth/token'
-const SETU_BASE_URL = 'https://fiu-sandbox.setu.co'
-
-async function getSetuToken(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string; SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SESSIONS: KVNamespace } }): Promise<string> {
-  const cached = await c.env.SESSIONS.get('setu:token')
-  if (cached) return cached
-
-  const res = await setuProxy(c, SETU_AUTH_URL, 'POST', { 'Content-Type': 'application/json' }, { clientID: c.env.SETU_CLIENT_ID, secret: c.env.SETU_CLIENT_SECRET })
-  if (!res.ok) throw new Error(`Setu auth error ${res.status}: ${await res.text()}`)
-  const data = (await res.json()) as { data?: { token?: string; expiresIn?: number } }
-  const token = data?.data?.token
-  if (!token) throw new Error('No token in Setu auth response')
-  // Cache for 25 minutes (token lives 30 min)
-  await c.env.SESSIONS.put('setu:token', token, { expirationTtl: 1500 })
-  return token
-}
+// ── Setu proxy (stock tool only) ───────────────────────────────────────────
 
 async function setuProxy(
   c: { env: { BACKEND_URL: string; BACKEND_SECRET: string } },
@@ -154,55 +127,122 @@ async function setuProxy(
   })
 }
 
-async function setuFetch(c: { env: { BACKEND_URL: string; BACKEND_SECRET: string; SETU_CLIENT_ID: string; SETU_CLIENT_SECRET: string; SETU_PRODUCT_INSTANCE_ID: string; SESSIONS: KVNamespace } }, path: string, method = 'GET', body?: unknown) {
-  const token = await getSetuToken(c)
-  const res = await setuProxy(c, `${SETU_BASE_URL}${path}`, method, {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-    'x-product-instance-id': c.env.SETU_PRODUCT_INSTANCE_ID,
-  }, body)
-  const json = await res.json() as Record<string, unknown>
-  if (!res.ok || json.errorCode) {
-    throw new Error(`Setu API error ${res.status}: ${JSON.stringify(json)}`)
-  }
+// ── Yodlee (Envestnet) helpers ──────────────────────────────────────────────
+// Client-credentials auth (RFC 6749): POST /auth/token with clientId+secret +
+// loginName header -> 30-min bearer token, scoped to that loginName.
+// Sandbox: 5 preconfigured test users, so all Cartis users share YODLEE_TEST_LOGIN.
+
+async function yodleeToken(
+  c: { env: { YODLEE_CLIENT_ID: string; YODLEE_SECRET: string; YODLEE_BASE_URL: string; SESSIONS: KVNamespace } },
+  loginName: string,
+): Promise<string> {
+  const cacheKey = `yodlee:token:${loginName}`
+  const cached = await c.env.SESSIONS.get(cacheKey)
+  if (cached) return cached
+
+  const res = await fetch(`${c.env.YODLEE_BASE_URL}/auth/token`, {
+    method: 'POST',
+    headers: {
+      'loginName': loginName,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Api-Version': '1.1',
+    },
+    body: `clientId=${encodeURIComponent(c.env.YODLEE_CLIENT_ID)}&secret=${encodeURIComponent(c.env.YODLEE_SECRET)}`,
+  })
+  if (!res.ok) throw new Error(`Yodlee auth error ${res.status}: ${await res.text()}`)
+  const data = (await res.json()) as { token?: { accessToken?: string } }
+  const token = data?.token?.accessToken
+  if (!token) throw new Error('No accessToken in Yodlee auth response')
+  // Token lives 30 min; cache for 25.
+  await c.env.SESSIONS.put(cacheKey, token, { expirationTtl: 1500 })
+  return token
+}
+
+async function yodleeFetch(
+  c: { env: { YODLEE_CLIENT_ID: string; YODLEE_SECRET: string; YODLEE_BASE_URL: string; YODLEE_TEST_LOGIN: string; SESSIONS: KVNamespace } },
+  path: string,
+): Promise<Record<string, unknown>> {
+  const token = await yodleeToken(c, c.env.YODLEE_TEST_LOGIN)
+  const res = await fetch(`${c.env.YODLEE_BASE_URL}${path}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Api-Version': '1.1',
+      'Content-Type': 'application/json',
+    },
+  })
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) throw new Error(`Yodlee API error ${res.status}: ${JSON.stringify(json)}`)
   return json
 }
 
-function parseSetuFetch(sessionData: Record<string, unknown>): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] } {
-  const fips = (sessionData.fips ?? []) as { fipID?: string; accounts?: { linkRefNumber?: string; maskedAccNumber?: string; data?: Record<string, unknown> }[] }[]
+type YodleeAccount = {
+  id?: number
+  accountNumber?: string
+  accountName?: string
+  accountType?: string
+  providerAccountId?: number
+  providerName?: string
+  balance?: { amount?: number; currency?: string }
+}
+
+type YodleeTx = {
+  id?: number
+  baseType?: string
+  transactionDate?: string
+  description?: string
+  amount?: { amount?: number }
+  merchant?: { name?: string }
+}
+
+function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] } {
   const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[] = []
   const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
 
-  for (const fip of fips) {
-    const fipId = fip.fipID ?? ''
-    for (const acct of fip.accounts ?? []) {
-      const acctData = acct.data?.account as Record<string, unknown> | undefined
-      if (!acctData) continue
-      const summary = acctData.summary as Record<string, unknown> | undefined
-      const balance = summary?.currentBalance ? parseFloat(summary.currentBalance as string) : 0
+  for (const raw of data.account ?? []) {
+    const a = raw as YodleeAccount
+    accounts.push({
+      maskedAccNumber: a.accountNumber ?? a.accountName ?? '',
+      bankName: a.providerName ?? '',
+      balance: Number(a.balance?.amount) || 0,
+      fipId: String(a.providerAccountId ?? a.id ?? ''),
+    })
+  }
 
-      accounts.push({
-        maskedAccNumber: acct.maskedAccNumber ?? '',
-        bankName: fipIdToBankName(fipId),
-        balance: Number.isFinite(balance) ? balance : 0,
-        fipId,
-      })
-
-      const txContainer = acctData.transactions as { transaction?: Record<string, unknown>[] } | undefined
-      const txns = txContainer?.transaction ?? []
-      for (const tx of txns) {
-        transactions.push({
-          txnId: (tx.txnId as string) ?? `${tx.narration}-${tx.amount}-${tx.transactionTimestamp}`,
-          txnType: tx.type === 'CREDIT' ? 'credit' : 'debit',
-          amount: parseFloat(tx.amount as string) || 0,
-          narration: (tx.narration as string) ?? '',
-          timestamp: (tx.transactionTimestamp as string) ?? '',
-        })
-      }
-    }
+  for (const raw of data.transaction ?? []) {
+    const t = raw as YodleeTx
+    transactions.push({
+      txnId: String(t.id ?? ''),
+      txnType: t.baseType === 'DEBIT' ? 'debit' : 'credit',
+      amount: Number(t.amount?.amount) || 0,
+      narration: t.description ?? t.merchant?.name ?? '',
+      timestamp: t.transactionDate ?? '',
+    })
   }
 
   return { accounts, transactions }
+}
+
+async function syncYodleeData(c: { env: Env }, userId: string) {
+  const from = new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 10)
+  const to = new Date().toISOString().slice(0, 10)
+  const [accountsRes, txnsRes] = await Promise.all([
+    yodleeFetch(c, '/accounts'),
+    yodleeFetch(c, `/transactions?fromDate=${from}&toDate=${to}&top=500`),
+  ])
+  const { accounts, transactions } = parseYodleeFetch({ account: accountsRes.account as unknown[] | undefined, transaction: txnsRes.transaction as unknown[] | undefined })
+
+  const syncRes = (await backendGql(
+    c,
+    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
+      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
+        inserted balance accountId
+      }
+    }`,
+    userId,
+    { aaHandle: 'yodlee', consentId: 'yodlee', accounts, transactions },
+  )) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
+
+  return { accounts, transactions, syncRes }
 }
 
 function cookieToken(c: { req: { header: (n: string) => string | undefined } }) {
@@ -897,167 +937,80 @@ app.post('/webhooks/polar', async (c) => {
   return c.json({ ok: true })
 })
 
-// Setu posts webhook events (no signature) to the notification URL configured on Bridge.
-// Payloads: CONSENT_STATUS_UPDATE (consentId, data.status) and SESSION_STATUS_UPDATE (dataSessionId, data.status).
-async function handleSetuWebhook(c: Context<{ Bindings: Env }>) {
-  let event: Record<string, unknown>
+// ── Account linking (Yodlee FastLink) routes ───────────────────────────────
+
+// FastLink launch page: mints a user token server-side and opens the hosted
+// link UI. Callback URL (UI page with ?linked=1) is passed as cb.
+app.get('/aa/link', async (c) => {
+  const cb = c.req.query('cb') ?? ''
   try {
-    event = (await c.req.json()) as Record<string, unknown>
-  } catch {
-    return c.json({ error: 'invalid JSON' }, 400)
-  }
-  const type = event.type as string
-  const status = ((event.data ?? {}) as { status?: string }).status ?? null
-  const ts = (event.timestamp as string) ?? new Date().toISOString()
-  if (type === 'CONSENT_STATUS_UPDATE') {
-    const consentId = event.consentId as string
-    if (consentId) {
-      await c.env.SESSIONS.put(`setu:consent:${consentId}`, JSON.stringify({ status, timestamp: ts, success: event.success ?? true }), { expirationTtl: 604800 })
-    }
-  } else if (type === 'SESSION_STATUS_UPDATE') {
-    const dataSessionId = event.dataSessionId as string
-    if (dataSessionId) {
-      await c.env.SESSIONS.put(`setu:session:${dataSessionId}`, JSON.stringify({ status, timestamp: ts, success: event.success ?? true }), { expirationTtl: 604800 })
-    }
-  }
-  console.log('[setu]', type, event.consentId ?? event.dataSessionId ?? '', status)
-  return c.json({ ok: true })
-}
-
-// ── Account Aggregator (Setu AA) routes ────────────────────────────────────
-
-// Sahamati-standard paths + our own; Bridge config uses the full URL, so the handler is mounted on all three.
-app.post('/webhooks/setu', handleSetuWebhook)
-app.post('/v1/consents/notify', handleSetuWebhook)
-app.post('/v1/fi/notify', handleSetuWebhook)
-
-app.post('/api/aa/consent', auth, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { mobileNumber?: string; fiTypes?: string[] }
-  const mobile = body.mobileNumber?.trim()
-  if (!mobile || !/^\d{10}$/.test(mobile)) return c.json({ error: 'valid 10-digit mobileNumber required' }, 400)
-  const fiTypes = body.fiTypes ?? ['DEPOSIT', 'MUTUAL_FUNDS', 'INSURANCE_POLICIES']
-
+    const token = await yodleeToken(c, c.env.YODLEE_TEST_LOGIN)
+    const fl = c.env.YODLEE_FASTLINK_URL
+    const jsUrl = new URL('/fastlink/js/fastlink.js', fl).toString()
+    const paramsJson = JSON.stringify(cb ? { callbackURL: cb } : {})
+    return c.html(`<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link your bank</title><script src="${jsUrl}"></script>
+<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#334155}div{text-align:center}p{opacity:.7;font-size:14px}</style>
+</head><body><div><p>Opening secure bank link…</p></div>
+<script>
+  var params = ${paramsJson};
   try {
-    const from = new Date(Date.now() - 180 * 86400_000).toISOString()
-    const to = new Date().toISOString()
-
-    const consentRes = await setuFetch(c, '/v2/consents', 'POST', {
-      consentDuration: { unit: 'MONTH', value: '4' },
-      vua: mobile,
-      consentMode: 'STORE',
-      fetchType: 'ONETIME',
-      consentTypes: ['TRANSACTIONS', 'PROFILE', 'SUMMARY'],
-      fiTypes,
-      purpose: {
-        code: '102',
-        refUri: 'https://api.rebit.org.in/aa/purpose/102.xml',
-        text: 'Customer spending patterns, budget or other reportings',
-        category: { type: 'string' },
-      },
-      dataRange: { from, to },
-      dataLife: { unit: 'MONTH', value: 1 },
-      frequency: { unit: 'MONTH', value: 1 },
-      redirectUrl: new URL('/onboarding', c.req.url).toString(),
-    })
-
-    const consentId = consentRes.id as string
-    const consentUrl = consentRes.url as string
-
-    await backendGql(
-      c,
-      `mutation { upsertAaConnection(aaHandle: ${JSON.stringify(mobile)}, consentHandle: ${JSON.stringify(consentId)}) { aaHandle consentStatus } }`,
-      c.get('session').user_id,
-    )
-
-    return c.json({ consentId, consentUrl, status: 'PENDING' })
+    fastlink.open({ fastLinkURL: ${JSON.stringify(fl)}, jwtToken: ${JSON.stringify(token)}, params: params });
+    fastlink.on('success', function (data) {
+      if (data && data.providerAccount) {
+        fetch('/aa/success', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerAccountId: data.providerAccount.providerAccountId, sessionId: data.sessionId || null }) }).catch(function () {});
+      }
+    });
+    fastlink.on('close', function () { if (params.callbackURL) { window.location.href = params.callbackURL; } });
+  } catch (e) { document.body.innerHTML = '<p>FastLink failed to start: ' + e.message + '</p>'; }
+</script></body></html>`)
   } catch (e) {
-    return c.json({ error: String(e) }, 502)
+    return c.html(`<p>Failed to start bank link: ${String(e)}</p>`, 502)
   }
 })
 
-app.get('/api/aa/status/:consentId', auth, async (c) => {
-  const consentId = c.req.param('consentId')
-  if (!consentId) return c.json({ error: 'consentId required' }, 400)
-
-  const cached = await c.env.SESSIONS.get(`setu:consent:${consentId}`)
-  if (cached) {
-    const ev = JSON.parse(cached) as { status: string; timestamp: string }
-    return c.json({ consentStatus: ev.status, consentId, cached: true, timestamp: ev.timestamp })
+// FastLink onSuccess hook (same-origin from /aa/link page; sandbox shared login).
+app.post('/aa/success', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { providerAccountId?: number | string; sessionId?: string | null }
+  const providerAccountId = body.providerAccountId ?? null
+  if (providerAccountId !== null) {
+    await c.env.SESSIONS.put('yodlee:linked', JSON.stringify({ providerAccountId: String(providerAccountId), sessionId: body.sessionId ?? null, timestamp: new Date().toISOString() }), { expirationTtl: 86400 })
   }
+  console.log('[yodlee] linked', providerAccountId)
+  return c.json({ ok: true })
+})
 
+app.post('/api/aa/consent', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { redirectUrl?: string }
+  const cb = typeof body.redirectUrl === 'string' && body.redirectUrl ? body.redirectUrl : ''
+  const linkUrl = `${new URL('/aa/link', c.req.url).toString()}?cb=${encodeURIComponent(cb)}`
+  return c.json({ linkUrl })
+})
+
+app.get('/api/aa/status/:consentId', auth, async (c) => {
+  const linked = await c.env.SESSIONS.get('yodlee:linked')
+  if (!linked) return c.json({ consentStatus: 'PENDING', consentId: c.req.param('consentId') })
   try {
-    const res = await setuFetch(c, `/v2/consents/${consentId}`)
-    const status = res.status as string
-    const detail = res.detail as Record<string, unknown> | undefined
-    const accountsLinked = (res.accountsLinked ?? []) as { maskedAccNumber?: string; fipId?: string; accType?: string; linkRefNumber?: string }[]
-
-    return c.json({
-      consentStatus: status,
-      consentId,
-      accounts: accountsLinked.map((a) => ({
-        maskedAccNumber: a.maskedAccNumber ?? '',
-        fipId: a.fipId ?? '',
-        accType: a.accType ?? '',
-        linkRefNumber: a.linkRefNumber ?? '',
-      })),
-    })
+    const data = await yodleeFetch(c, '/accounts')
+    const raw = (data.account ?? []) as YodleeAccount[]
+    const accounts = raw.map((a) => ({
+      maskedAccNumber: a.accountNumber ?? a.accountName ?? '',
+      fipId: String(a.providerAccountId ?? a.id ?? ''),
+      accType: a.accountType ?? '',
+      linkRefNumber: String(a.id ?? ''),
+    }))
+    return c.json({ consentStatus: 'ACTIVE', consentId: c.req.param('consentId'), accounts })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }
 })
 
 app.post('/api/aa/fetch', auth, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { consentId?: string }
-  const { consentId } = body
-  if (!consentId) return c.json({ error: 'consentId required' }, 400)
-
+  const userId = c.get('session').user_id
   try {
-    const userId = c.get('session').user_id
-
-    // Step 1: Create data session
-    const from = new Date(Date.now() - 180 * 86400_000).toISOString()
-    const to = new Date().toISOString()
-
-    const sessionRes = await setuFetch(c, '/v2/sessions', 'POST', {
-      consentId,
-      dataRange: { from, to },
-      format: 'json',
-    })
-    const dataSessionId = sessionRes.id as string
-    if (!dataSessionId) return c.json({ error: 'no data session id from Setu' }, 502)
-
-    // Step 2: Poll for data readiness (max 30s)
-    let sessionData: Record<string, unknown> | null = null
-    for (let i = 0; i < 15; i++) {
-      await new Promise((r) => setTimeout(r, 2000))
-      const pollRes = await setuFetch(c, `/v2/sessions/${dataSessionId}`)
-      const pollStatus = pollRes.status as string
-      if (pollStatus === 'COMPLETED' || pollStatus === 'PARTIAL') {
-        sessionData = pollRes
-        break
-      }
-      if (pollStatus === 'FAILED' || pollStatus === 'EXPIRED') {
-        return c.json({ error: `Data session ${pollStatus.toLowerCase()}` }, 502)
-      }
-    }
-
-    if (!sessionData) return c.json({ error: 'Data session timed out (30s)' }, 502)
-
-    // Step 3: Parse FI data
-    const { accounts, transactions } = parseSetuFetch(sessionData)
-
-    // Step 4: Sync to backend
-    const syncRes = await backendGql(
-      c,
-      `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
-        syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
-          inserted balance accountId
-        }
-      }`,
-      userId,
-      { aaHandle: consentId, consentId, accounts, transactions },
-    ) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
-
+    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
     return c.json({
       ok: true,
       accounts,
@@ -1072,57 +1025,7 @@ app.post('/api/aa/fetch', auth, async (c) => {
 app.post('/api/aa/reconnect', auth, async (c) => {
   const userId = c.get('session').user_id
   try {
-    const connData = (await backendGql(
-      c,
-      `query { aaConnections { aaHandle consentId consentStatus } }`,
-      userId,
-    )) as { aaConnections?: { aaHandle: string; consentId: string; consentStatus: string }[] }
-
-    const conn = connData?.aaConnections?.[0]
-    if (!conn || !conn.consentId) return c.json({ error: 'no active AA connection' }, 400)
-
-    // Create new data session against existing consent
-    const from = new Date(Date.now() - 180 * 86400_000).toISOString()
-    const to = new Date().toISOString()
-
-    const sessionRes = await setuFetch(c, '/v2/sessions', 'POST', {
-      consentId: conn.consentId,
-      dataRange: { from, to },
-      format: 'json',
-    })
-    const dataSessionId = sessionRes.id as string
-    if (!dataSessionId) return c.json({ error: 'no data session id' }, 502)
-
-    // Poll for data readiness
-    let sessionData: Record<string, unknown> | null = null
-    for (let i = 0; i < 15; i++) {
-      await new Promise((r) => setTimeout(r, 2000))
-      const pollRes = await setuFetch(c, `/v2/sessions/${dataSessionId}`)
-      const pollStatus = pollRes.status as string
-      if (pollStatus === 'COMPLETED' || pollStatus === 'PARTIAL') {
-        sessionData = pollRes
-        break
-      }
-      if (pollStatus === 'FAILED' || pollStatus === 'EXPIRED') {
-        return c.json({ error: `Data session ${pollStatus.toLowerCase()}` }, 502)
-      }
-    }
-
-    if (!sessionData) return c.json({ error: 'Data session timed out (30s)' }, 502)
-
-    const { accounts, transactions } = parseSetuFetch(sessionData)
-
-    const syncRes = await backendGql(
-      c,
-      `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
-        syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
-          inserted balance accountId
-        }
-      }`,
-      userId,
-      { aaHandle: conn.aaHandle, consentId: conn.consentId, accounts, transactions },
-    ) as { syncAaData?: { inserted: number; balance: number | null } }
-
+    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
     return c.json({
       ok: true,
       accounts,
