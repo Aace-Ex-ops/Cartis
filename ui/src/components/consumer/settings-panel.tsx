@@ -264,7 +264,7 @@ export function SettingsPanel() {
           </button>
         ))}
       </nav>
-      <div className="min-w-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin]">
+      <div className="min-w-0 flex-1 overflow-y-auto pr-2">
         {section === "settings" && <SettingsSection />}
         {section === "profile" && <ProfilePanel />}
         {section === "support" && <SupportPanel />}
