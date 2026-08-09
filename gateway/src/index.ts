@@ -565,6 +565,21 @@ app.delete('/auth/sessions/:sessionId', auth, async (c) => {
   return c.json({ error: 'session not found' }, 404)
 })
 
+app.post('/auth/revoke-all', async (c) => {
+  const secret = c.req.header('x-cartis-backend-secret')
+  if (!secret || secret !== c.env.BACKEND_SECRET) return c.json({ error: 'unauthorized' }, 401)
+  const { userId } = (await c.req.json().catch(() => ({}))) as { userId?: string }
+  if (!userId) return c.json({ error: 'userId required' }, 400)
+  const tokens = await userSessions(c, userId)
+  let revoked = 0
+  for (const token of tokens) {
+    await c.env.SESSIONS.delete(`session:${token}`)
+    revoked++
+  }
+  await c.env.SESSIONS.delete(`user_sessions:${userId}`)
+  return c.json({ ok: true, revoked })
+})
+
 app.post('/api/session/refresh', auth, (c) => {
   const session = c.get('session')
   return c.json({
@@ -690,6 +705,42 @@ app.get('/api/coach/sessions/:id/messages', auth, async (c) => {
         },
       },
     )
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.delete('/api/coach/sessions/:id', auth, async (c) => {
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/sessions/${c.req.param('id')}`, {
+      method: 'DELETE',
+      headers: {
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+    })
+    if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json(await res.json())
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.patch('/api/coach/sessions/:id', auth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { title?: string }
+  if (!body.title?.trim()) return c.json({ error: 'title required' }, 400)
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/sessions/${c.req.param('id')}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: JSON.stringify({ title: body.title }),
+    })
     if (!res.ok) return c.json({ error: `backend error ${res.status}` }, res.status as ContentfulStatusCode)
     return c.json(await res.json())
   } catch (e) {
