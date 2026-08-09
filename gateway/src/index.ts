@@ -17,7 +17,7 @@ type Env = {
   SETU_CLIENT_ID: string
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
-  SERPAPI_KEY?: string
+  EXA_API_KEY?: string
   YODLEE_CLIENT_ID: string
   YODLEE_SECRET: string
   YODLEE_ADMIN_LOGIN: string

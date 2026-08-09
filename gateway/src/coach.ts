@@ -1,4 +1,4 @@
-type CoachEnv = { AI: Ai; SESSIONS: KVNamespace; BACKEND_URL: string; BACKEND_SECRET: string; SERPAPI_KEY?: string }
+type CoachEnv = { AI: Ai; SESSIONS: KVNamespace; BACKEND_URL: string; BACKEND_SECRET: string; EXA_API_KEY?: string }
 
 const DEFAULT_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct'
 
@@ -101,34 +101,47 @@ async function recordObservation(env: CoachEnv, p: ScrapedProduct): Promise<void
   await env.SESSIONS.put(key, JSON.stringify(keep), { expirationTtl: 86400 * 365 })
 }
 
-// Real alternatives via SerpAPI Google Shopping (works from Cloudflare IPs; Indian aggregators 403 datacenter traffic).
-async function alternativesFromSerp(env: CoachEnv, p: ScrapedProduct): Promise<Array<{ site: string; price: number; url?: string }>> {
-  if (!p.gtin || !env.SERPAPI_KEY) return []
-  const cacheKey = `serp:${p.gtin}`
+// Real alternatives via Exa AI (works from Cloudflare IPs; Indian aggregators 403 datacenter traffic).
+// Query 1 = GTIN keyword; fallback = "{name}" price. Max 2 calls, 24h KV cache `exa:<gtin>`.
+async function alternativesFromExa(env: CoachEnv, p: ScrapedProduct): Promise<Array<{ site: string; price: number; url?: string }>> {
+  if (!p.gtin || !env.EXA_API_KEY) return []
+  const cacheKey = `exa:${p.gtin}`
   const cached = await env.SESSIONS.get(cacheKey)
   if (cached) return JSON.parse(cached) as Array<{ site: string; price: number; url?: string }>
-  try {
-    const res = await fetch(
-      `https://serpapi.com/search.json?engine=google_shopping&q=${encodeURIComponent(p.gtin)}&gl=in&hl=en&api_key=${env.SERPAPI_KEY}`,
-    )
-    if (!res.ok) return []
-    const data = (await res.json()) as { shopping_results?: Array<{ title?: string; price?: string; link?: string; source?: string; offers?: Array<{ price?: string }> }>; error?: string }
-    if (data.error) return []
-    const out = (data.shopping_results ?? [])
-      .map((r): { site: string; price: number; url?: string } | null => {
-        const priceStr = r.price ?? r.offers?.[0]?.price ?? ''
-        const price = parseFloat(priceStr.replace(/[^0-9.,]/g, '').replace(/,/g, ''))
-        if (!price) return null
-        return { site: r.source ?? r.title ?? 'store', price, url: r.link ?? undefined }
+  const out: Array<{ site: string; price: number; url?: string }> = []
+  const queries = [p.gtin, `"${p.name}" price`]
+  for (const q of queries) {
+    if (out.length >= 5) break
+    try {
+      const res = await fetch('https://api.exa.ai/search', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': env.EXA_API_KEY },
+        body: JSON.stringify({ query: q, numResults: 5, type: 'keyword', contents: { text: { maxCharacters: 300 } } }),
       })
-      .filter((x): x is { site: string; price: number; url?: string } => x !== null)
-      .slice(0, 5)
-    await env.SESSIONS.put(cacheKey, JSON.stringify(out), { expirationTtl: 86400 })
-    return out
-    return out
-  } catch {
-    return []
+      if (!res.ok) continue
+      const data = (await res.json()) as { results?: Array<{ url: string; title?: string; text?: string }> }
+      if (!data.results) continue
+      for (const r of data.results) {
+        if (out.length >= 5) break
+        const m = `${r.title ?? ''} ${r.text ?? ''}`.match(/(?:₹|INR|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)/i)
+        if (!m) continue
+        const price = parseFloat(m[1].replace(/,/g, ''))
+        if (!price) continue
+        let site = 'store'
+        try {
+          site = new URL(r.url).hostname.replace(/^www\./, '')
+        } catch {
+          /* keep default */
+        }
+        out.push({ site, price, url: r.url })
+      }
+    } catch {
+      continue
+    }
   }
+  const deduped = out.filter((x, i) => out.findIndex((y) => y.site === x.site) === i).slice(0, 5)
+  await env.SESSIONS.put(cacheKey, JSON.stringify(deduped), { expirationTtl: 86400 })
+  return deduped
 }
 
 async function budgetCheck(env: CoachEnv, price: number): Promise<unknown | null> {
@@ -173,7 +186,7 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
 
   // Real alternatives: Google Shopping first, own history second, none last.
   // Alternatives come from code, never from the model — no hallucinated prices.
-  let realAlternatives = await alternativesFromSerp(env, p).catch(() => [])
+  let realAlternatives = await alternativesFromExa(env, p).catch(() => [])
   if (!realAlternatives.length && price) {
     const rec = price as { site: string; price: number; url?: string }
     if (rec.site !== p.site && rec.price > 0) realAlternatives = [{ site: rec.site, price: rec.price, url: rec.url }]
@@ -209,7 +222,7 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
       budget: budget ? 'live' : 'unavailable',
       trust: s3 ? 'ai' : 'fallback',
       ...(price ? { price: 'kv' } : {}),
-      ...(realAlternatives.length ? { alternatives: env.SERPAPI_KEY ? 'serpapi' : 'kv' } : {}),
+      ...(realAlternatives.length ? { alternatives: env.EXA_API_KEY ? 'exa' : 'kv' } : {}),
     },
   }
   await env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 })

@@ -171,9 +171,10 @@ sandboxes) use the same Sahamati spec — payload/code ~90% portable.
 hallucinated, not real. `price_index:<gtin>` KV is never written by
 anything. Real aggregators (MySmartPrice, Smartprix, CamelCamel,
 PriceHistory India API) 403 foreign + datacenter IPs — same wall as Setu.
-Candidate paths (undecided): SerpAPI Google Shopping (paid, works from
-any IP), PriceHistory India API (free key, IP tolerance unverified), or
-own price history from our own traffic (free, cold start).
+Candidates (locked: Exa AI, awaiting key): Exa AI search (works from
+Cloudflare IPs, needs `EXA_API_KEY`), PriceHistory India API (free key, IP
+tolerance unverified), or own price history from our own traffic (free,
+cold start).
 
 ### Infra notes
 
@@ -213,9 +214,9 @@ own price history from our own traffic (free, cold start).
 - TODO: PDF button needs real Polar productId checkout link when Pro is configured; entitlement currently only grantable via a real paid Polar event.
 
 ## CARTIS-73: real price alternatives — shipped Aug 7 (ea73ea4, deploy 09e18cc7)
-- step4 schema no longer includes alternatives; verdict.alternatives assigned from code: SerpAPI google_shopping (gtin, gl=in, 24h KV `serp:<gtin>`) → own `price_index:<gtin>` (different-site record) → [].
+- step4 schema no longer includes alternatives; verdict.alternatives assigned from code: Exa AI search (query 1 = GTIN keyword, fallback 2 = `"{name}" price`, max 2 calls, 24h KV cache `exa:<gtin>`, price regex `₹|INR|Rs`, site = result hostname) → own `price_index:<gtin>` (different-site record) → [].
 - recordObservation: every /api/coach/analyze upserts price_index:<gtin> (same-day cheaper wins, 1y TTL).
-- Pending: `wrangler secret put SERPAPI_KEY` (user getting free key) — without it alternatives stay [] (no hallucination).
+- Pending: `wrangler secret put EXA_API_KEY` (replaces SerpAPI — no key set; without it alternatives stay []).
 
 ## CARTIS-72: bank linking via Yodlee — shipped Aug 9 (Setu AA replaced)
 - Setu sandbox /v2/consents was an upstream 500 (CARTIS-63, canceled). Pivoted to **Yodlee (Envestnet)**: client-credentials auth (POST /auth/token, clientId+secret+loginName → 30-min bearer), hosted **FastLink** link UI, free sandbox at `https://sandbox.api.yodlee.com/ysl` (5 preconfigured test users, sample data; Test User 1 = `sbMem6a78947d1ea541`).
