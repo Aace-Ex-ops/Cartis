@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, MessageSquarePlus, Send, User } from "lucide-react";
+import { Bot, Pencil, Plus, Send, Trash2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -14,6 +13,13 @@ type ChatSession = {
   mode: string;
   title: string;
   updated_at: string;
+};
+
+const TOOL_PROMPTS: Record<string, string> = {
+  budget: "Build me a budget from my recent spending",
+  retirement: "How much should I invest monthly to retire at 60?",
+  tax: "What can I do to lower my tax this year?",
+  stock: "Review my portfolio and flag any risks",
 };
 
 function timeAgo(iso: string): string {
@@ -27,18 +33,18 @@ function timeAgo(iso: string): string {
 
 export function TwinChat({
   title,
-  subtitle,
   welcome,
   placeholder,
   mode,
   tools,
+  railOpen,
 }: {
   title: string;
-  subtitle: string;
   welcome: string;
   placeholder: string;
   mode?: "seller";
   tools?: { id: string; label: string }[];
+  railOpen: boolean;
 }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -49,8 +55,12 @@ export function TwinChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -80,7 +90,16 @@ export function TwinChat({
     return () => abortRef.current?.abort();
   }, []);
 
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
+
   const openSession = async (id: string) => {
+    setConfirmDeleteId(null);
+    setRenamingId(null);
     abortRef.current?.abort();
     try {
       const res = await fetch(`${GATEWAY}/api/coach/sessions/${id}/messages`, {
@@ -97,6 +116,8 @@ export function TwinChat({
   };
 
   const newChat = () => {
+    setConfirmDeleteId(null);
+    setRenamingId(null);
     abortRef.current?.abort();
     setActiveId(null);
     setTool(null);
@@ -104,8 +125,40 @@ export function TwinChat({
     setError("");
   };
 
-  const send = async () => {
-    const content = input.trim();
+  const deleteSession = async (id: string) => {
+    try {
+      const res = await fetch(`${GATEWAY}/api/coach/sessions/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      if (activeId === id) newChat();
+      else setConfirmDeleteId(null);
+      void loadSessions();
+    } catch {
+      // ignore
+    }
+  };
+
+  const renameSession = async (id: string) => {
+    const title = renamingTitle.trim();
+    setRenamingId(null);
+    if (!title) return;
+    try {
+      const res = await fetch(`${GATEWAY}/api/coach/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ title }),
+      });
+      if (res.ok) void loadSessions();
+    } catch {
+      // ignore
+    }
+  };
+
+  const send = async (promptOverride?: string) => {
+    const content = (promptOverride ?? input).trim();
     if (!content || busy) return;
     setMessages((m) => [...m, { role: "user" as const, content }]);
     setInput("");
@@ -186,128 +239,206 @@ export function TwinChat({
   };
 
   const listActive = !activeId;
+  const suggestions = tools
+    ? tools.map((t) => ({ id: t.id, label: t.label, prompt: TOOL_PROMPTS[t.id] ?? `Use the ${t.label} tool` }))
+    : mode === "seller"
+      ? [
+          { id: "", label: "Cash flow", prompt: "Summarize my cash flow this month and flag anything unusual" },
+          { id: "", label: "Inventory", prompt: "Which items should I reorder based on my current stock?" },
+          { id: "", label: "Profit", prompt: "How can I improve my profit margin this quarter?" },
+          { id: "", label: "Tax", prompt: "What GST filing do I need to worry about next?" },
+        ]
+      : [
+          { id: "", label: "Budget", prompt: "Build me a budget from my recent spending" },
+          { id: "", label: "Savings", prompt: "How much should I save each month?" },
+          { id: "", label: "Goals", prompt: "Help me set a savings goal for a trip" },
+          { id: "", label: "Tax", prompt: "What can I do to lower my tax this year?" },
+        ];
+
+  const runSuggestion = (s: { id: string; prompt: string }) => {
+    setTool(s.id || null);
+    void send(s.prompt);
+  };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={newChat} disabled={busy}>
-          <MessageSquarePlus className="h-3.5 w-3.5" />
-          New chat
-        </Button>
-      </div>
-
-      {sessions.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
-          {sessions.map((s) => (
-            <button
-              key={s.session_id}
-              onClick={() => void openSession(s.session_id)}
-              className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition-colors ${
-                s.session_id === activeId
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border/50 bg-background/60 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <span className="block max-w-[180px] truncate font-medium">{s.title || "New chat"}</span>
-              <span className="block text-[10px] opacity-70">{timeAgo(s.updated_at)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {listActive && tools && (
-        <div className="flex flex-wrap gap-2">
-          {tools.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTool(tool === t.id ? null : t.id)}
-              className={`rounded-full border px-3 py-1 text-[12px] transition-colors ${
-                tool === t.id
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border/50 bg-background/60 text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <Card className="min-h-[420px]">
-        <CardContent className="flex flex-col gap-4 p-4">
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto pr-1 [scrollbar-width:thin]">
-            {listActive && messages.length === 1 && (
-              <div className="flex gap-2.5">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">
-                  <Bot className="h-3.5 w-3.5" />
-                </div>
-                <div className="rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] text-muted-foreground">
-                  {welcome}
-                </div>
-              </div>
+    <div className="flex h-full min-h-0">
+      {railOpen && (
+        <div className="flex w-[190px] shrink-0 flex-col border-r border-border/50 bg-muted/20">
+          <button
+            onClick={newChat}
+            className="mx-2 mt-2 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-medium text-foreground transition-colors hover:bg-foreground/5"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Chat
+          </button>
+          <div className="mt-1 min-h-0 flex-1 overflow-y-auto p-2 [scrollbar-width:thin]">
+            {sessions.length === 0 && (
+              <p className="px-2 py-3 text-[11px] text-muted-foreground">No chats yet</p>
             )}
-            {(listActive ? messages.slice(1) : messages).map((m, i) => (
-              <div
-                key={i}
-                className={`flex gap-2.5 ${m.role === "user" ? "flex-row-reverse" : ""}`}
-              >
+            {sessions.map((s) => {
+              const active = s.session_id === activeId;
+              return (
                 <div
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                    m.role === "user" ? "bg-primary text-primary-foreground" : "bg-elevated"
+                  key={s.session_id}
+                  className={`group relative mb-0.5 flex items-center rounded-md transition-colors ${
+                    active ? "bg-primary/10" : "hover:bg-foreground/5"
                   }`}
                 >
-                  {m.role === "user" ? (
-                    <User className="h-3.5 w-3.5" />
+                  {renamingId === s.session_id ? (
+                    <Input
+                      autoFocus
+                      value={renamingTitle}
+                      onChange={(e) => setRenamingTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void renameSession(s.session_id);
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      className="h-7 border-0 px-2 text-[12px] shadow-none focus-visible:ring-1"
+                    />
                   ) : (
-                    <Bot className="h-3.5 w-3.5" />
+                    <button
+                      onClick={() => void openSession(s.session_id)}
+                      className="min-w-0 flex-1 px-2 py-1.5 text-left"
+                    >
+                      <span className={`block truncate text-[12px] ${active ? "font-medium text-foreground" : "text-foreground/80"}`}>
+                        {s.title || "New chat"}
+                      </span>
+                      <span className="block text-[10px] text-muted-foreground">
+                        {timeAgo(s.updated_at)}
+                      </span>
+                    </button>
+                  )}
+                  {renamingId !== s.session_id && (
+                    <div className="absolute right-1 hidden items-center gap-0.5 group-hover:flex">
+                      {confirmDeleteId === s.session_id ? (
+                        <button
+                          onClick={() => void deleteSession(s.session_id)}
+                          className="rounded-md bg-destructive/15 p-1 text-destructive"
+                          aria-label="Confirm delete session"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => {
+                              setRenamingId(s.session_id);
+                              setRenamingTitle(s.title);
+                            }}
+                            className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                            aria-label="Rename session"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(s.session_id)}
+                            className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                            aria-label="Delete session"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
-                <div
-                  className={`max-w-[80%] rounded-lg px-3 py-2 text-[13px] leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-background/60 border border-border/50 text-foreground"
-                  }`}
-                >
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {busy && (
-              <div className="flex gap-2.5">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">
-                  <Bot className="h-3.5 w-3.5" />
-                </div>
-                <div className="rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] text-muted-foreground">
-                  Thinking…
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
+              );
+            })}
           </div>
+        </div>
+      )}
 
-          {error && <p className="text-[13px] text-destructive">{error}</p>}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-width:thin]">
+          {listActive && messages.length === 1 && (
+            <div className="flex h-full flex-col items-center justify-center gap-3 pb-8 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+                <Bot className="h-5 w-5 text-primary" />
+              </div>
+              <div className="max-w-[320px]">
+                <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
+                <p className="mt-1 text-[12px] text-muted-foreground">{welcome}</p>
+              </div>
+              <div className="grid w-full max-w-[340px] grid-cols-2 gap-2 pt-1">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => runSuggestion(s)}
+                    className="rounded-lg border border-border/60 bg-background px-2.5 py-2 text-left text-[12px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                  >
+                    <span className="block font-medium text-foreground">{s.label}</span>
+                    {s.prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {!(listActive && messages.length === 1) && (
+            <div className="flex flex-col gap-3">
+              {(listActive ? messages.slice(1) : messages).map((m, i) => (
+                <div key={i} className={`flex gap-2.5 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
+                  <div
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                      m.role === "user" ? "bg-primary text-primary-foreground" : "bg-elevated"
+                    }`}
+                  >
+                    {m.role === "user" ? (
+                      <User className="h-3.5 w-3.5" />
+                    ) : (
+                      <Bot className="h-3.5 w-3.5" />
+                    )}
+                  </div>
+                  <div
+                    className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-3 py-2 text-[13px] leading-relaxed ${
+                      m.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : "border border-border/50 bg-background/60 text-foreground"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {busy && (
+                <div className="flex gap-2.5">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">
+                    <Bot className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-background/60 px-3 py-2 text-[13px] text-muted-foreground">
+                    Thinking…
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
 
-          <div className="flex gap-2">
-            <Input
-              placeholder={placeholder}
+        {error && <p className="px-4 pb-1 text-[12px] text-destructive">{error}</p>}
+
+        <div className="border-t border-border/50 p-3">
+          <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background p-2 transition-colors focus-within:border-primary/40">
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void send();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
               }}
+              placeholder={placeholder}
               disabled={busy}
+              className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent px-1 py-0.5 text-[13px] outline-none placeholder:text-muted-foreground"
             />
-            <Button onClick={() => void send()} disabled={busy || !input.trim()}>
+            <Button size="icon" onClick={() => void send()} disabled={busy || !input.trim()}>
               <Send className="h-4 w-4" />
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

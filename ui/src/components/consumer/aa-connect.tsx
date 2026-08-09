@@ -11,7 +11,7 @@ type ConnectStep = "input" | "redirecting" | "polling" | "fetching" | "done" | "
 export function AaConnect({ onSynced }: { onSynced?: () => void }) {
   const [step, setStep] = useState<ConnectStep>("input");
   const [error, setError] = useState("");
-  const [consentId, setConsentId] = useState("linked");
+  const [consentId] = useState("linked");
 
   // Returning from the FastLink flow (callback URL has ?linked=1)
   const checked = useRef(false);
@@ -20,7 +20,7 @@ export function AaConnect({ onSynced }: { onSynced?: () => void }) {
     checked.current = true;
     const params = new URLSearchParams(window.location.search);
     if (params.get("linked") === "1") {
-      setStep("polling");
+      queueMicrotask(() => setStep("polling"));
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X } from "lucide-react";
+import { History, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { TwinChat } from "@/components/shared/twin-chat";
 
@@ -15,6 +15,7 @@ export function TwinDrawer({
 }) {
   const pathname = usePathname();
   const mode = pathname?.startsWith("/seller") ? "seller" : undefined;
+  const [railOpen, setRailOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -37,25 +38,35 @@ export function TwinDrawer({
             onClick={onClose}
           />
           <motion.aside
-            className="fixed right-0 top-0 z-50 flex h-full w-[400px] max-w-[92vw] flex-col border-l border-border/50 bg-card"
+            className="fixed right-0 top-0 z-50 flex h-full w-[520px] max-w-[94vw] flex-col border-l border-border/50 bg-card"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", duration: 0.4 }}
           >
-            <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
-              <span className="text-sm font-semibold text-foreground">AI Twin</span>
+            <div className="grid shrink-0 grid-cols-[36px_1fr_36px] items-center border-b border-border/50 px-3 py-2.5">
+              <button
+                onClick={() => setRailOpen((v) => !v)}
+                className={`justify-self-start rounded-md p-1.5 transition-colors hover:bg-foreground/5 hover:text-foreground ${
+                  railOpen ? "text-foreground" : "text-muted-foreground"
+                }`}
+                aria-label="Toggle chat history"
+              >
+                <History className="h-4 w-4" />
+              </button>
+              <span className="text-center text-sm font-semibold text-foreground">AI Twin</span>
               <button
                 onClick={onClose}
-                className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                className="justify-self-end rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                 aria-label="Close AI Twin"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1">
               <TwinChat
                 mode={mode}
+                railOpen={railOpen}
                 tools={
                   mode === "seller"
                     ? undefined
@@ -67,7 +78,6 @@ export function TwinDrawer({
                       ]
                 }
                 title="AI Twin"
-                subtitle="Your financial twin — ask about your money, budget, or business."
                 welcome="Hi, I'm your AI twin. Ask me about your spending, budget, savings, or business numbers."
                 placeholder="Ask anything…"
               />
