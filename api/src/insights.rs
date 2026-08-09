@@ -486,12 +486,12 @@ pub async fn scheduler(state: Arc<AppState>) {
                 for row in &rows {
                     let uid: String = row.get(0);
                     let ut: Option<String> = row.get(1);
-                    let role = ut.unwrap_or_else(|| "personal".to_string());
-                    // legacy "seller" rows (pre user_type normalization)
-                    let role = if role == "seller" { "business".to_string() } else { role };
-                    if role != "personal" && role != "business" {
-                        continue;
-                    }
+                    let ut = ut.unwrap_or_else(|| "personal".to_string());
+                    // user_type vocabulary (personal/business) -> coach_insights vocabulary (consumer/seller)
+                    let role = match ut.as_str() {
+                        "seller" | "business" => "seller",
+                        _ => "consumer",
+                    };
                     if let Err(e) = refresh(&state, &uid, &role).await {
                         eprintln!("insights scheduler: user {uid} ({role}): {e:?}");
                     }
