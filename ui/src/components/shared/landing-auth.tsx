@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { LogOut, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
@@ -45,9 +46,11 @@ export function LandingAuth() {
     <DropdownMenu>
       <DropdownMenuTrigger className="flex items-center gap-2 rounded-full p-1 outline-none focus:ring-1 focus:ring-primary">
         {user.avatar ? (
-          <img
+          <Image
             src={user.avatar}
             alt=""
+            width={36}
+            height={36}
             className="h-9 w-9 rounded-full border border-border/60 object-cover"
           />
         ) : (

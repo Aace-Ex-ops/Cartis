@@ -244,19 +244,21 @@ function AppleHelloEnglishEffect({
 function CartisHelloEffect({
   className,
   speed = 1,
+  tone = "ui",
   onAnimationComplete,
   ...props
-}: Props) {
+}: Props & { tone?: "ui" | "light" }) {
   const calc = (x: number) => x * speed;
 
   return (
     <div className="relative inline-flex items-center">
       {/* Ambient background glow aura */}
-      <div className="absolute inset-0 bg-teal-300/30 blur-lg rounded-full scale-110 pointer-events-none" />
+      <div className={`absolute inset-0 blur-lg rounded-full scale-110 pointer-events-none ${tone === "light" ? "bg-white/10" : "bg-foreground/10"}`} />
       
       <motion.svg
         className={cn(
-          "h-12 w-auto overflow-visible text-teal-100 drop-shadow-[0_0_8px_rgba(255,255,255,0.95)] drop-shadow-[0_0_20px_rgba(45,212,191,0.9)] drop-shadow-[0_0_35px_rgba(20,184,166,0.85)]",
+          "h-12 w-auto overflow-visible",
+          tone === "light" ? "text-white" : "text-foreground",
           className
         )}
         xmlns="http://www.w3.org/2000/svg"

@@ -37,7 +37,7 @@ export function DashboardShell({
     <div className="flex h-screen overflow-hidden bg-background">
       <div
         className={`shrink-0 overflow-hidden transition-all duration-300 ${
-          collapsed ? "w-0 opacity-0" : "w-[240px] opacity-100"
+          collapsed ? "w-0 opacity-0" : "w-[260px] opacity-100"
         }`}
       >
         {user && <Sidebar groups={groups} upgrade={upgrade} user={user} />}
@@ -45,11 +45,10 @@ export function DashboardShell({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <HeaderBar
-          user={user ?? undefined}
           leading={
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {collapsed ? (

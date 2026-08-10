@@ -16,8 +16,16 @@
     "directory": "../ui/out",
     "binding": "ASSETS",
     "not_found_handling": "none",
-    "run_worker_first": ["/auth/*", "/api/*", "/graphql", "/webhooks/*", "/health", "/login"]
+    "run_worker_first": ["/auth/*", "/api/*", "/aa/*", "/graphql", "/webhooks/*", "/health", "/login"]
   },
+  "vars": {
+    "YODLEE_BASE_URL": "https://sandbox.api.yodlee.com/ysl",
+    "YODLEE_FASTLINK_URL": "https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink"
+  },
+  "routes": [
+    { "pattern": "cartis.dpdns.org", "custom_domain": true }
+  ],
+  "workers_dev": true,
   "observability": {
     "enabled": true
   }

@@ -1,7 +1,7 @@
 CREATE TABLE banks (
     bank_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) UNIQUE NOT NULL,
-    whatsapp_number VARCHAR(15) NOT NULL,
+    fip_id VARCHAR(50),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -11,10 +11,11 @@ CREATE TABLE users (
     full_name VARCHAR(255) NOT NULL,
     avatar_url TEXT,
     oauth_provider VARCHAR(20) NOT NULL,
-    user_type VARCHAR(20) DEFAULT 'consumer' CHECK (user_type IN ('consumer', 'seller')),
+    user_type VARCHAR(20) DEFAULT 'personal' CHECK (user_type IN ('personal', 'business')),
     business_name TEXT,
+    business_type VARCHAR(20) DEFAULT 'saas' CHECK (business_type IN ('saas', 'd2c', 'services', 'retail')),
     wallet_balance NUMERIC(12,2) DEFAULT 0.00,
-    monthly_tab_limit NUMERIC(12,2) DEFAULT 600.00,
+    monthly_tab_limit NUMERIC(12,2) DEFAULT 0,
     annual_deferred_limit NUMERIC(12,2) DEFAULT 2500.00,
     financial_health_score INT DEFAULT 750,
     coach_adherence_score NUMERIC(5,2) DEFAULT 0.00,
@@ -26,7 +27,10 @@ CREATE TABLE users (
     dependents INT DEFAULT 0,
     debt_emis NUMERIC(12,2),
     monthly_tax NUMERIC(12,2),
-    ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct'
+    ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
+    last_digest_email_at TIMESTAMPTZ
 );
 
 CREATE TABLE sessions (
@@ -40,11 +44,13 @@ CREATE TABLE bank_accounts (
     account_id UUID PRIMARY KEY,
     user_id UUID REFERENCES users(user_id),
     bank_id UUID REFERENCES banks(bank_id),
-    mobile_number VARCHAR(15) NOT NULL,
+    mobile_number VARCHAR(15),
     account_type VARCHAR(30),
     balance NUMERIC(12,2),
+    fip_id VARCHAR(50),
     data_as_of TIMESTAMPTZ,
     last_sync_at TIMESTAMPTZ,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -156,6 +162,23 @@ CREATE TABLE budget_suggestions (
 );
 CREATE INDEX budget_suggestions_user_idx ON budget_suggestions(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS aa_connections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id),
+    aa_handle VARCHAR(100) NOT NULL,
+    consent_handle VARCHAR(100),
+    consent_id VARCHAR(100),
+    consent_status VARCHAR(20) DEFAULT 'PENDING',
+    session_id VARCHAR(100),
+    fip_id VARCHAR(50),
+    masked_acc_number VARCHAR(50),
+    linked_acc_ref VARCHAR(100),
+    last_fetched_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, aa_handle)
+);
+CREATE INDEX IF NOT EXISTS aa_connections_user_idx ON aa_connections(user_id);
+
 CREATE TABLE IF NOT EXISTS coach_insights (
     user_id UUID REFERENCES users(user_id),
     role TEXT NOT NULL CHECK (role IN ('consumer', 'seller')),
@@ -182,3 +205,47 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages(session_id, id);
+
+-- ── Kiro Phase 1 ────────────────────────────────────────────────────────────
+
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS tool TEXT;
+
+CREATE TABLE IF NOT EXISTS financial_goals (
+    goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    goal_type VARCHAR(20) NOT NULL CHECK (goal_type IN ('emergency','retirement','home','education','other')),
+    name VARCHAR(255) NOT NULL,
+    target_amount NUMERIC(14,2) NOT NULL,
+    current_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    target_date DATE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS financial_goals_user_idx ON financial_goals(user_id);
+
+CREATE TABLE IF NOT EXISTS holdings (
+    holding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    asset_type VARCHAR(20) NOT NULL CHECK (asset_type IN ('equity','mutual_fund','fd','gold','cash','other')),
+    name VARCHAR(255) NOT NULL,
+    quantity NUMERIC(14,4) NOT NULL DEFAULT 1,
+    avg_price NUMERIC(14,2),
+    current_price NUMERIC(14,2),
+    as_of DATE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS holdings_user_idx ON holdings(user_id);
+
+CREATE TABLE IF NOT EXISTS user_actions (
+    action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    kind VARCHAR(30) NOT NULL CHECK (kind IN ('open_fd','book_advisor','create_budget','tax_savings','retirement_review','goal_setup')),
+    title TEXT NOT NULL,
+    detail TEXT,
+    cta_label VARCHAR(60),
+    cta_url TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','done','dismissed')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS user_actions_user_idx ON user_actions(user_id, status);

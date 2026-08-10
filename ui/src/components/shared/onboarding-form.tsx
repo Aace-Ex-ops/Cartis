@@ -1,48 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, MessageCircle, Store, User } from "lucide-react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { User, Store } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { SyncPasteBox } from "@/components/shared/sync-paste-box";
+import { AaConnect } from "@/components/consumer/aa-connect";
 import Stepper, { Step } from "@/components/shared/stepper";
 import { gql } from "@/lib/gql";
-
-const BANKS = [
-  "State Bank of India",
-  "HDFC Bank",
-  "ICICI Bank",
-  "Axis Bank",
-  "Kotak Mahindra Bank",
-  "Punjab National Bank",
-  "Bank of Baroda",
-  "Canara Bank",
-  "Union Bank of India",
-  "IDBI Bank",
-  "Yes Bank",
-  "IndusInd Bank",
-  "Federal Bank",
-  "IDFC First Bank",
-  "Indian Bank",
-  "Indian Overseas Bank",
-  "Bandhan Bank",
-  "AU Small Finance Bank",
-  "Ujjivan Small Finance Bank",
-  "DBS Bank",
-  "RBL Bank",
-];
-
-const WHATSAPP_NUMBER =
-  process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "910000000000";
 
 function StepHeading({ title, body }: { title: string; body: string }) {
   return (
@@ -57,7 +23,6 @@ function StepHeading({ title, body }: { title: string; body: string }) {
 
 export function OnboardingForm() {
   const [role, setRole] = useState<"consumer" | "seller">("consumer");
-  const [bank, setBank] = useState("");
   const [synced, setSynced] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profile, setProfile] = useState({
@@ -75,24 +40,6 @@ export function OnboardingForm() {
     monthlyExpenses: "",
   });
   const router = useRouter();
-  const [waNumbers, setWaNumbers] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    gql<{ banks: { name: string; whatsappNumber: string }[] }>(
-      "{ banks { name whatsappNumber } }"
-    )
-      .then((r) => {
-        const map: Record<string, string> = {};
-        for (const b of r.banks) map[b.name] = b.whatsappNumber;
-        setWaNumbers(map);
-      })
-      .catch(() => {});
-  }, []);
-
-  const waLinkFor = (bankName: string) =>
-    `https://wa.me/${waNumbers[bankName] ?? WHATSAPP_NUMBER}?text=${encodeURIComponent(
-      `Hi Cartis, I bank with ${bankName || "my bank"} and want to sync my transactions to my Cartis account.`
-    )}`;
 
   async function saveProfile() {
     const fields: string[] = [];
@@ -116,7 +63,7 @@ export function OnboardingForm() {
     const revenue = Number(business.monthlyRevenue);
     const expenses = Number(business.monthlyExpenses);
     await gql<{ updateUserType: unknown }>(
-      `mutation { updateUserType(userType: "seller"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
+      `mutation { updateUserType(userType: "business"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
     );
     const today = new Date().toISOString().slice(0, 10);
     if (Number.isFinite(revenue) && revenue > 0) {
@@ -136,18 +83,13 @@ export function OnboardingForm() {
     try {
       await saveProfile();
       await saveSeller();
-      if (role === "consumer" && bank) {
-        await gql<{ setPrimaryBankAccount: { accountId: string; bankName: string } }>(
-          `mutation { setPrimaryBankAccount(bankName: ${JSON.stringify(bank)}) { accountId bankName } }`
-        );
-      }
     } catch {
       // non-critical — proceed anyway
     }
-    router.push(role === "seller" ? "/seller/dashboard" : "/dashboard");
+    router.push("/dashboard");
   }
 
-  const finishLazy = () => router.push(role === "seller" ? "/seller/dashboard" : "/dashboard");
+  const finishLazy = () => router.push("/dashboard");
 
   return (
     <Stepper
@@ -171,7 +113,7 @@ export function OnboardingForm() {
                 : "border-border/50 bg-background/50 hover:border-border"
             }`}
           >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "consumer" ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground"}`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "consumer" ? "bg-primary text-primary-foreground" : "bg-foreground/5 text-muted-foreground"}`}>
               <User className="h-4 w-4" />
             </span>
             <span>
@@ -188,7 +130,7 @@ export function OnboardingForm() {
                 : "border-border/50 bg-background/50 hover:border-border"
             }`}
           >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "seller" ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground"}`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "seller" ? "bg-primary text-primary-foreground" : "bg-foreground/5 text-muted-foreground"}`}>
               <Store className="h-4 w-4" />
             </span>
             <span>
@@ -201,49 +143,10 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title="Step 2 · Your bank"
-          body="Pick your bank and we'll open WhatsApp to connect. We never get your passwords."
+          title="Step 2 · Connect your bank"
+          body="Select a demo persona to link your bank account. No passwords needed."
         />
-        <Select
-          value={bank}
-          onValueChange={(value) => {
-            setBank(value);
-            window.open(waLinkFor(value), "_blank", "noopener,noreferrer");
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select your bank" />
-          </SelectTrigger>
-          <SelectContent>
-            {BANKS.map((b) => (
-              <SelectItem key={b} value={b}>
-                {b}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {bank && (
-          <div className="mt-3 flex flex-col gap-2">
-            <p className="text-[13px] text-muted-foreground">
-              WhatsApp should have opened in a new tab. If not, tap below.
-            </p>
-            <Button asChild className="w-full">
-              <a href={waLinkFor(bank)} target="_blank" rel="noopener noreferrer">
-                <MessageCircle className="mr-2 h-4 w-4" />
-                Continue on WhatsApp
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </a>
-            </Button>
-          </div>
-        )}
-      </Step>
-
-      <Step>
-        <StepHeading
-          title="Step 3 · Connect your account"
-          body="Paste a bank SMS to connect your account."
-        />
-        <SyncPasteBox bank={bank} onSynced={() => setSynced(true)} />
+        <AaConnect onSynced={() => setSynced(true)} />
         {synced && (
           <p className="mt-2 text-center text-sm text-green-600">Account connected!</p>
         )}
@@ -252,7 +155,7 @@ export function OnboardingForm() {
       {role === "seller" ? (
         <Step>
           <StepHeading
-            title="Step 4 · Your business"
+            title="Step 3 · Your business"
             body="Starting numbers for your business dashboard. All optional — you can add entries anytime."
           />
           <div className="flex flex-col gap-3">
@@ -293,7 +196,7 @@ export function OnboardingForm() {
 
       <Step>
         <StepHeading
-          title={role === "seller" ? "Step 5 · Your money" : "Step 4 · Your money"}
+          title={role === "seller" ? "Step 4 · Your money" : "Step 3 · Your money"}
           body="Help Cartis build a smarter budget. All fields optional — skip if you'd rather not say."
         />
         <div className="grid grid-cols-2 gap-3">
