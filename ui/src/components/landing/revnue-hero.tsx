@@ -4,7 +4,18 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { AuthAwareLink } from "@/components/shared/auth-aware-link";
 
-const CHAIR_URL = "/landing/images/chair.png";
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const h = (e: MediaQueryListEvent) => setM(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  return m;
+}
+
+const CHAIR_URL = "/landing/images/chair.webp";
 const HEADER_BG_URL = "/landing/videos/header-bg.mp4";
 
 export function RevnueHero() {
@@ -13,6 +24,7 @@ export function RevnueHero() {
   const [fit, setFit] = useState<"contain" | "cover">("cover");
   const [imgOk, setImgOk] = useState(true);
   const [videoOk, setVideoOk] = useState(true);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const onScroll = () => {
@@ -87,8 +99,8 @@ export function RevnueHero() {
             >
               <motion.span
                 className="inline-block"
-                animate={{ x: [-8, 8, -8], y: [8, -8, 8] }}
-                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                animate={isMobile ? {} : { x: [-8, 8, -8], y: [8, -8, 8] }}
+                transition={{ duration: 8, repeat: isMobile ? 0 : Infinity, ease: "easeInOut" }}
               >
                 See the future of your money.
               </motion.span>

@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 
 const BG_VIDEO = "/landing/videos/capabilities-bg.mp4";
+
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const h = (e: MediaQueryListEvent) => setM(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  return m;
+}
 
 const CARDS = [
   {
@@ -54,6 +65,7 @@ function CardIcon({ title }: { title: string }) {
 }
 
 function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: string; subtitle: string }) {
+  const isMobile = useIsMobile();
   return (
     <motion.div
       className="relative flex flex-col justify-between items-center w-full lg:w-[calc(33.333%-16px)] h-[480px] p-8 rounded-2xl border overflow-hidden cursor-default group"
@@ -76,9 +88,9 @@ function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: stri
             backgroundSize: "200% 100%",
           }}
           variants={{ initial: { opacity: 0 }, visible: { opacity: 0 }, hover: { opacity: 1 } }}
-          animate={{ backgroundPosition: ["200% 0", "-200% 0"] }}
+          animate={isMobile ? {} : { backgroundPosition: ["200% 0", "-200% 0"] }}
           transition={{
-            backgroundPosition: { duration: 3.5, repeat: Infinity, ease: "linear" },
+            backgroundPosition: { duration: 3.5, repeat: isMobile ? 0 : Infinity, ease: "linear" },
             opacity: { duration: 0.3 },
           }}
         />
@@ -86,8 +98,8 @@ function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: stri
       <div className="relative z-10 flex justify-between items-start gap-8 w-full">
         <motion.div
           className="flex items-center justify-center w-12 h-12 rounded-xl bg-[#0C0C0C] text-white select-none shrink-0"
-          animate={{ rotateY: [-20, 20, -20], rotate: [-6, 6, -6] }}
-          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+          animate={isMobile ? {} : { rotateY: [-20, 20, -20], rotate: [-6, 6, -6] }}
+          transition={{ duration: 5, repeat: isMobile ? 0 : Infinity, ease: "easeInOut" }}
         >
           <motion.div
             className="flex items-center justify-center w-full h-full"
@@ -135,6 +147,20 @@ export function RevnueCapabilities() {
     if (videoRef.current) videoRef.current.playbackRate = 0.8;
   }, []);
 
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) { el.play().catch(() => {}); }
+        else { el.pause(); }
+      },
+      { rootMargin: "200px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   return (
     <section
       id="features"
@@ -144,7 +170,6 @@ export function RevnueCapabilities() {
       <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
         <video
           ref={videoRef}
-          autoPlay
           loop
           muted
           playsInline

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import Image from "next/image";
 
@@ -16,6 +16,21 @@ const lineReveal = {
 
 export function RevnueOverview() {
   const [hover, setHover] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) { el.play().catch(() => {}); }
+        else { el.pause(); }
+      },
+      { rootMargin: "200px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   return (
     <section
@@ -25,7 +40,7 @@ export function RevnueOverview() {
     >
       <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
         <video
-          autoPlay
+          ref={videoRef}
           loop
           muted
           playsInline

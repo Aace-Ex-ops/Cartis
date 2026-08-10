@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { CartisHelloEffect } from "@/components/ui/apple-hello-effect";
 
-const TOTAL = 2800;
+const TOTAL = 1200;
 const FADE = 500;
 
 export function Preloader() {

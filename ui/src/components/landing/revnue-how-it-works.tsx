@@ -383,6 +383,7 @@ export function RevnueHowItWorks() {
           <div className="absolute right-0 top-0 bottom-0 w-8 sm:w-16 bg-gradient-to-l from-white via-white/80 to-transparent pointer-events-none z-10" />
           <div
             ref={carouselRef}
+            data-lenis-prevent
             onScroll={() => {
               if (!carouselRef.current) return;
               const t = Math.round(carouselRef.current.scrollLeft / (0.75 * carouselRef.current.offsetWidth + 24));
