@@ -688,6 +688,7 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
             .await?;
         if let Some(to) = &user_email {
             crate::email::send_email(
+                pool,
                 to,
                 "Cartis Budget Alert",
                 &format!("<p>{message}</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
@@ -707,7 +708,7 @@ impl MutationRoot {
             .query_opt(
                 "INSERT INTO users (email, full_name, avatar_url, oauth_provider)
                  VALUES ($1, $2, $3, 'google')
-                 ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name, avatar_url = EXCLUDED.avatar_url
+                 ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name, avatar_url = EXCLUDED.avatar_url, last_login_at = NOW()
                  RETURNING user_id::text, (xmax = 0) AS created",
                 &[&email, &full_name, &avatar_url],
             )
@@ -715,6 +716,7 @@ impl MutationRoot {
         if let Some(r) = &row {
             if r.get::<_, bool>(1) {
                 crate::email::send_email(
+                    pg(ctx),
                     &email,
                     "Welcome to Cartis!",
                     &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
@@ -762,6 +764,7 @@ impl MutationRoot {
             .await?;
         if row.is_some() {
             crate::email::send_email(
+                pg(ctx),
                 &email,
                 "Welcome to Cartis!",
                 &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
@@ -784,6 +787,9 @@ impl MutationRoot {
         if Argon2::default().verify_password(password.as_bytes(), &parsed).is_err() {
             return Ok(None);
         }
+        let _ = pg(ctx).get().await?
+            .execute("UPDATE users SET last_login_at = NOW() WHERE email = $1", &[&email])
+            .await;
         Ok(Some(AuthUser {
             user_id: row.get(0),
             full_name: row.get(2),
@@ -1099,6 +1105,7 @@ impl MutationRoot {
                         let email: String = row.get(0);
                         let bal_str = synced_balance.map(|b| format!(" · Balance ₹{b:.0}")).unwrap_or_default();
                         crate::email::send_email(
+                            pg(ctx),
                             &email,
                             "New Transactions Synced",
                             &format!("<p>{inserted} new transaction(s) synced{bal_str}.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),

@@ -527,6 +527,7 @@ pub async fn scheduler(state: Arc<AppState>) {
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             crate::email::send_email(
+                                &state.pg,
                                 &email,
                                 "Your Cartis Weekly Insights",
                                 &format!("<p>Here are your latest insights:</p>\n<ul>\n{body}</ul>\n<p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),

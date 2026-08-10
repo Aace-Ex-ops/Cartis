@@ -766,7 +766,7 @@ async fn fetch_model(state: &Arc<AppState>, uid: &str) -> Result<Option<String>,
             &[&uid],
         )
         .await?;
-    Ok(row.map(|r| r.get::<_, Option<String>>(0).flatten().map(normalize_model)))
+    Ok(row.map(|r| r.get::<_, Option<String>>(0)).flatten().map(normalize_model))
 }
 
 fn normalize_model(m: String) -> String {
