@@ -13,6 +13,7 @@ CREATE TABLE users (
     oauth_provider VARCHAR(20) NOT NULL,
     user_type VARCHAR(20) DEFAULT 'personal' CHECK (user_type IN ('personal', 'business')),
     business_name TEXT,
+    business_type VARCHAR(20) DEFAULT 'saas' CHECK (business_type IN ('saas', 'd2c', 'services', 'retail')),
     wallet_balance NUMERIC(12,2) DEFAULT 0.00,
     monthly_tab_limit NUMERIC(12,2) DEFAULT 0,
     annual_deferred_limit NUMERIC(12,2) DEFAULT 2500.00,
@@ -204,3 +205,47 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages(session_id, id);
+
+-- ── Kiro Phase 1 ────────────────────────────────────────────────────────────
+
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS tool TEXT;
+
+CREATE TABLE IF NOT EXISTS financial_goals (
+    goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    goal_type VARCHAR(20) NOT NULL CHECK (goal_type IN ('emergency','retirement','home','education','other')),
+    name VARCHAR(255) NOT NULL,
+    target_amount NUMERIC(14,2) NOT NULL,
+    current_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    target_date DATE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS financial_goals_user_idx ON financial_goals(user_id);
+
+CREATE TABLE IF NOT EXISTS holdings (
+    holding_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    asset_type VARCHAR(20) NOT NULL CHECK (asset_type IN ('equity','mutual_fund','fd','gold','cash','other')),
+    name VARCHAR(255) NOT NULL,
+    quantity NUMERIC(14,4) NOT NULL DEFAULT 1,
+    avg_price NUMERIC(14,2),
+    current_price NUMERIC(14,2),
+    as_of DATE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS holdings_user_idx ON holdings(user_id);
+
+CREATE TABLE IF NOT EXISTS user_actions (
+    action_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    kind VARCHAR(30) NOT NULL CHECK (kind IN ('open_fd','book_advisor','create_budget','tax_savings','retirement_review','goal_setup')),
+    title TEXT NOT NULL,
+    detail TEXT,
+    cta_label VARCHAR(60),
+    cta_url TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','done','dismissed')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS user_actions_user_idx ON user_actions(user_id, status);

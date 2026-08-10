@@ -9,7 +9,8 @@ use axum::extract::State;
 use axum::extract::Extension;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::response::IntoResponse;
+use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::Deserialize;
 mod chat;
@@ -66,7 +67,12 @@ async fn main() {
             "/chat/sessions/{session_id}/messages",
             get(chat::session_messages),
         )
+        .route(
+            "/chat/sessions/{session_id}",
+            patch(chat::rename_session).delete(chat::delete_session),
+        )
         .route("/api/email", post(api_email))
+        .route("/setu-proxy", post(setu_proxy))
         .with_state(state.clone())
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(
@@ -105,6 +111,47 @@ async fn require_backend_secret(
 
 async fn graphiql() -> axum::response::Html<String> {
     axum::response::Html(graphiql_source("/graphql", None))
+}
+
+#[derive(Deserialize)]
+struct SetuProxyReq {
+    method: String,
+    url: String,
+    headers: std::collections::HashMap<String, String>,
+    body: Option<serde_json::Value>,
+}
+
+// Generic HTTP passthrough for the gateway (EC2 egress only — Setu, stock quotes).
+async fn setu_proxy(
+    axum::extract::Json(req): axum::extract::Json<SetuProxyReq>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let client = reqwest::Client::new();
+    let mut builder = client
+        .request(req.method.parse().unwrap_or(reqwest::Method::GET), &req.url)
+        .headers(
+            req.headers
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        reqwest::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                        reqwest::header::HeaderValue::from_str(v).unwrap(),
+                    )
+                })
+                .collect(),
+        );
+    if let Some(body) = &req.body {
+        builder = builder.json(body);
+    }
+    let res = builder
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("setu proxy: {e}")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("setu proxy body: {e}")))?;
+    Ok((status, text).into_response())
 }
 
 #[derive(Deserialize)]

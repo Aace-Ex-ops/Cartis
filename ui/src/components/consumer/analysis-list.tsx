@@ -7,7 +7,7 @@ import type { Verdict } from "@/lib/mock";
 
 const VERDICT_STYLE: Record<Verdict, { label: string; cls: string }> = {
   buy: { label: "Buy", cls: "bg-primary/15 text-primary hover:bg-primary/15" },
-  wait: { label: "Wait", cls: "bg-amber-400/15 text-amber-400 hover:bg-amber-400/15" },
+  wait: { label: "Wait", cls: "bg-amber-500/15 text-amber-600 hover:bg-amber-500/15" },
   skip: { label: "Skip", cls: "bg-destructive/15 text-destructive hover:bg-destructive/15" },
 };
 
@@ -34,8 +34,8 @@ export function AnalysisList({ analyses }: {
             onClick={() => setFilter(f)}
             className={`rounded-md px-3 py-1.5 text-[13px] capitalize transition-colors ${
               filter === f
-                ? "bg-white/10 font-medium text-foreground"
-                : "text-muted-foreground hover:bg-white/5"
+                ? "bg-foreground/10 font-medium text-foreground"
+                : "text-muted-foreground hover:bg-foreground/5"
             }`}
           >
             {f}
@@ -58,11 +58,11 @@ export function AnalysisList({ analyses }: {
         {filtered.map((a) => {
           const v = VERDICT_STYLE[a.verdict];
           return (
-            <div key={a.id} className="flex flex-col gap-1 px-4 py-3.5 transition-colors hover:bg-white/[0.02] sm:flex-row sm:items-center sm:gap-4">
+            <div key={a.id} className="flex flex-col gap-1 px-4 py-3.5 transition-colors hover:bg-foreground/[0.03] sm:flex-row sm:items-center sm:gap-4">
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-[14px] font-medium text-foreground">{a.product}</span>
-                  <span className="text-[13px] text-muted-foreground">₹{a.price.toLocaleString("en-IN")}</span>
+                  <span className="text-[13px] tabular-nums text-muted-foreground">₹{a.price.toLocaleString("en-IN")}</span>
                 </div>
                 <span className="text-[12px] text-muted-foreground">{a.summary}</span>
               </div>

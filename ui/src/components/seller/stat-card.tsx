@@ -19,7 +19,7 @@ export function StatCard({
         {icon}
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
-        <div className="text-2xl font-semibold text-foreground">{value}</div>
+        <div className="text-2xl font-semibold tabular-nums text-foreground">{value}</div>
         {delta && (
           <div className="flex items-center gap-1 text-[13px]">
             {delta.direction === "up" ? (

@@ -23,13 +23,13 @@ export function IncomeChart({ data }: {
                   <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `₹${v / 1000}k`} width={42} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(12,12,12,0.06)" vertical={false} />
+              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#52525b" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "#52525b" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `₹${v / 1000}k`} width={42} />
               <Tooltip
                 formatter={(value) => fmt(Number(value))}
-                contentStyle={{ background: "#1a1a1a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
-                labelStyle={{ color: "#9ca3af" }}
+                contentStyle={{ background: "#ffffff", border: "1px solid rgba(12,12,12,0.1)", borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: "#52525b" }}
               />
               <Area type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} fill="url(#incomeFill)" />
             </AreaChart>

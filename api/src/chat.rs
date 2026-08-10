@@ -20,12 +20,47 @@ struct ChatRequest {
     session_id: Option<String>,
     #[serde(default)]
     mode: Option<String>,
+    #[serde(default)]
+    tool: Option<String>,
     message: String,
+}
+
+const TOOLS: [&str; 4] = ["tax", "retirement", "budget", "stock"];
+
+fn tool_system(tool: &str) -> Option<&'static str> {
+    match tool {
+        "tax" => Some(
+            "You are Cartis's India tax specialist. Use the user's financial context and Indian tax law (FY 2026-27): \
+             Section 80C up to ₹1.5L (PPF, ELSS, EPF, life insurance), 80D health insurance (₹25k self/family, ₹50k senior \
+             parents), HRA exemption vs standard deduction, and the old vs new regime comparison (new regime slabs: 0-3L 0%, \
+             3-7L 5%, 7-10L 10%, 10-12L 15%, 12-15L 20%, >15L 30%, standard deduction ₹75k; old regime: 2.5-5L 5%, 5-10L 20%, \
+             >10L 30%, standard deduction ₹50k). Suggest concrete deductions available to this user.",
+        ),
+        "retirement" => Some(
+            "You are Cartis's retirement planner. Advise using SIP math at a 12% pre-tax equity return assumption and 6% \
+             inflation: projected corpus = PV(1+r)^n + SIP*(((1+r)^n-1)/r), monthly retirement income ≈ 4% SWR on corpus, \
+             adjusted to today's rupees for inflation. Be conservative and honest about assumptions.",
+        ),
+        "budget" => Some(
+            "You are Cartis's budget coach. Anchor suggestions in the user's actual spending, monthly tab limit, and \
+             income. Round budgets to ₹500, respect income-minus-savings caps, and prefer achievable nudges over drastic cuts.",
+        ),
+        "stock" => Some(
+            "You are Cartis's equity analyst. Use only facts about the user's portfolio and holdings. For current prices \
+             refer the user to the Stock tool; do not invent prices, returns, or recommendations. Keep advice educational.",
+        ),
+        _ => None,
+    }
 }
 
 #[derive(Deserialize)]
 pub struct CreateSessionRequest {
     mode: String,
+}
+
+#[derive(Deserialize)]
+pub struct RenameSessionRequest {
+    title: String,
 }
 
 #[derive(Serialize)]
@@ -92,16 +127,16 @@ pub async fn chat_stream(
         .session_id
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let (session_id, mode) = match sid {
+    let (session_id, mode, tool) = match sid {
         Some(sid) => {
             match conn
                 .query_opt(
-                    "SELECT mode FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
+                    "SELECT mode, COALESCE(tool, '') FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
                     &[&sid, &uid],
                 )
                 .await
             {
-                Ok(Some(r)) => (sid, r.get::<_, String>(0)),
+                Ok(Some(r)) => (sid, r.get::<_, String>(0), r.get::<_, String>(1)),
                 Ok(None) => return json_err(StatusCode::NOT_FOUND, "session not found"),
                 Err(e) => {
                     eprintln!("chat session lookup error: {e}");
@@ -116,6 +151,11 @@ pub async fn chat_stream(
                 .filter(|m| *m == "seller")
                 .map(|_| "seller")
                 .unwrap_or("consumer");
+            let tool = req
+                .tool
+                .as_deref()
+                .filter(|t| TOOLS.contains(t))
+                .unwrap_or("");
             let title: String = message
                 .chars()
                 .take(60)
@@ -124,12 +164,12 @@ pub async fn chat_stream(
                 .to_string();
             match conn
                 .query_one(
-                    "INSERT INTO chat_sessions (user_id, mode, title) VALUES ($1::text::uuid, $2, $3) RETURNING session_id::text",
-                    &[&uid, &mode, &title],
+                    "INSERT INTO chat_sessions (user_id, mode, tool, title) VALUES ($1::text::uuid, $2, NULLIF($4, ''), $3) RETURNING session_id::text",
+                    &[&uid, &mode, &title, &tool],
                 )
                 .await
             {
-                Ok(r) => (r.get::<_, String>(0), mode.to_string()),
+                Ok(r) => (r.get::<_, String>(0), mode.to_string(), tool.to_string()),
                 Err(e) => {
                     eprintln!("chat session create error: {e}");
                     return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
@@ -151,7 +191,10 @@ pub async fn chat_stream(
         Ok(Some(m)) if !m.is_empty() => m,
         _ => "@cf/meta/llama-4-scout-17b-16e-instruct".to_string(),
     };
-    let system = system_prompt(seller, &context);
+    let mut system = system_prompt(seller, &context);
+    if let Some(t) = tool_system(&tool) {
+        system = format!("{t}\n\n{system}");
+    }
 
     let history = match load_history(&state, &session_id).await {
         Ok(h) => h,
@@ -243,6 +286,79 @@ pub async fn create_session(
         .into_response(),
         Err(e) => {
             eprintln!("chat session create error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
+pub async fn delete_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .execute(
+            "DELETE FROM chat_sessions WHERE session_id::text = $1 AND user_id::text = $2",
+            &[&session_id, &uid],
+        )
+        .await
+    {
+        Ok(0) => json_err(StatusCode::NOT_FOUND, "session not found"),
+        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => {
+            eprintln!("chat session delete error: {e}");
+            json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
+        }
+    }
+}
+
+pub async fn rename_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+    Json(req): Json<RenameSessionRequest>,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    let title = req.title.trim().to_string();
+    if title.is_empty() {
+        return json_err(StatusCode::BAD_REQUEST, "title required");
+    }
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("chat db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    match conn
+        .query_opt(
+            "UPDATE chat_sessions SET title = $1 WHERE session_id::text = $2 AND user_id::text = $3 RETURNING session_id::text, mode, title, updated_at::text",
+            &[&title, &session_id, &uid],
+        )
+        .await
+    {
+        Ok(Some(r)) => Json(SessionOut {
+            session_id: r.get(0),
+            mode: r.get(1),
+            title: r.get(2),
+            updated_at: r.get(3),
+        })
+        .into_response(),
+        Ok(None) => json_err(StatusCode::NOT_FOUND, "session not found"),
+        Err(e) => {
+            eprintln!("chat session rename error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
         }
     }
@@ -585,23 +701,46 @@ pub async fn purge_supermemory(uid: String) {
         Ok(k) if !k.is_empty() => k,
         _ => return,
     };
-    match reqwest::Client::new()
-        .delete("https://api.supermemory.ai/v3/documents/bulk")
-        .bearer_auth(&key)
-        .timeout(Duration::from_secs(30))
-        .json(&serde_json::json!({ "containerTags": [format!("user_{uid}")] }))
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => {
-            let v: serde_json::Value = r.json().await.unwrap_or_default();
-            eprintln!(
-                "supermemory purge user_{uid}: deleted {} docs",
-                v["deletedCount"].as_u64().unwrap_or(0)
-            );
+    let url = format!("https://api.supermemory.ai/v3/container-tags/user_{uid}");
+    let client = reqwest::Client::new();
+    for attempt in 0..3 {
+        match client
+            .delete(&url)
+            .bearer_auth(&key)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+        {
+            // 404 = container already gone
+            Ok(r) if r.status().as_u16() == 404 => {
+                eprintln!("supermemory purge user_{uid}: nothing to delete");
+                return;
+            }
+            Ok(r) if r.status().as_u16() == 429 || r.status().is_server_error() => {
+                eprintln!(
+                    "supermemory purge user_{uid}: status {} (attempt {})",
+                    r.status().as_u16(),
+                    attempt + 1
+                );
+                if attempt < 2 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            }
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("supermemory purge status {}", r.status().as_u16());
+            }
+            Ok(r) => {
+                let v: serde_json::Value = r.json().await.unwrap_or_default();
+                eprintln!(
+                    "supermemory purge user_{uid}: deleted {} docs, {} memories",
+                    v["deletedDocumentsCount"].as_u64().unwrap_or(0),
+                    v["deletedMemoriesCount"].as_u64().unwrap_or(0)
+                );
+            }
+            Err(e) => eprintln!("supermemory purge error: {e}"),
         }
-        Ok(r) => eprintln!("supermemory purge status {}", r.status().as_u16()),
-        Err(e) => eprintln!("supermemory purge error: {e}"),
+        break;
     }
 }
 
@@ -627,7 +766,15 @@ async fn fetch_model(state: &Arc<AppState>, uid: &str) -> Result<Option<String>,
             &[&uid],
         )
         .await?;
-    Ok(row.map(|r| r.get(0)))
+    Ok(row.map(|r| r.get::<_, Option<String>>(0).flatten().map(normalize_model)))
+}
+
+fn normalize_model(m: String) -> String {
+    match m.as_str() {
+        "@cf/meta/llama-3.3-70b-instruct" => "@cf/meta/llama-3.3-70b-instruct-fp8-fast".to_string(),
+        "@cf/meta/llama-3.1-8b-instruct" => "@cf/meta/llama-3.1-8b-instruct-fp8".to_string(),
+        other => other.to_string(),
+    }
 }
 
 async fn build_context(

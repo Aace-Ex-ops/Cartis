@@ -18,7 +18,7 @@ export function WalletCard({ balance, monthlySpend, monthlyBudget }: {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div>
-          <div className="text-2xl font-semibold text-foreground">{fmt(balance)}</div>
+          <div className="text-2xl font-semibold tabular-nums text-foreground">{fmt(balance)}</div>
           <div className="text-[12px] text-muted-foreground">Bank balance</div>
         </div>
         <div className="flex items-center justify-between text-[13px]">
@@ -28,14 +28,14 @@ export function WalletCard({ balance, monthlySpend, monthlyBudget }: {
           </span>
           {monthlyBudget > 0 ? (
             <span className="text-foreground">
-              {fmt(monthlySpend)} <span className="text-muted-foreground">/ {fmt(monthlyBudget)}</span>
+              <span className="tabular-nums">{fmt(monthlySpend)} <span className="text-muted-foreground">/ {fmt(monthlyBudget)}</span></span>
             </span>
           ) : (
             <span className="text-muted-foreground">No budget set</span>
           )}
         </div>
         {monthlyBudget > 0 && (
-          <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+          <div className="h-1.5 overflow-hidden rounded-full bg-foreground/5">
             <div
               className={`h-full rounded-full ${usedPct > 90 ? "bg-destructive" : "bg-primary"}`}
               style={{ width: `${Math.min(usedPct, 100)}%` }}

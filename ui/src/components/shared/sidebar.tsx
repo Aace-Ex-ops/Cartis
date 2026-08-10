@@ -1,20 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 import { Sparkles } from "lucide-react";
-import { MetallicLogo } from "@/components/shared/metallic-logo";
-import LineSidebar from "@/components/shared/line-sidebar";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+import { UserMenu } from "@/components/shared/user-menu";
 
 export type NavItem = {
   id: string;
@@ -28,19 +18,6 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-function Logo() {
-  return (
-    <Link href="/" className="flex items-center gap-3 px-2 py-3 select-none">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-teal-300/40 bg-gradient-to-br from-teal-400/25 via-emerald-500/15 to-black/60 shadow-[0_0_12px_-2px_rgba(45,212,191,0.4)] text-xs font-black text-teal-100 backdrop-blur-sm">
-        C
-      </div>
-      <span className="text-[15px] font-semibold tracking-wide text-foreground">
-        <MetallicLogo className="h-[22px] w-[72px]" />
-      </span>
-    </Link>
-  );
-}
-
 export function Sidebar({
   groups,
   upgrade,
@@ -51,65 +28,67 @@ export function Sidebar({
   user?: { id: string; name: string; email: string; avatar: string };
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-
-  const initials = (user?.name ?? "C")
-    .split(" ")
-    .map((n) => n[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
 
   return (
-    <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-border/50 bg-card/50 p-3">
-      <Logo />
+    <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-border/50 bg-card/50 p-3 font-sans">
+      {user && (
+        <div className="px-0.5 pb-1">
+          <UserMenu
+            user={{ fullName: user.name, email: user.email, avatarUrl: user.avatar, userType: "" }}
+          />
+        </div>
+      )}
 
-      <div className="mt-2 flex flex-1 flex-col gap-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {groups.map((group, i) => {
-          const activeIndex = group.items.findIndex((item) => item.href === pathname);
-          return (
-            <div key={i} className="flex flex-col">
-              {group.heading && (
-                <span className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                  {group.heading}
-                </span>
-              )}
-              <LineSidebar
-                key={`${group.heading ?? i}-${pathname}`}
-                items={group.items.map((item) => item.title)}
-                accentColor="#10b981"
-                textColor="#a1a1aa"
-                markerColor="#52525b"
-                defaultActive={activeIndex >= 0 ? activeIndex : null}
-                showIndex={false}
-                proximityRadius={80}
-                maxShift={16}
-                markerLength={40}
-                tickScale={0.5}
-                itemGap={6}
-                fontSize={0.8}
-                smoothing={90}
-                onItemClick={(index) => {
-                  const href = group.items[index].href;
-                  if (href.startsWith("http")) {
-                    window.location.href = href;
-                  } else {
-                    router.push(href);
-                  }
-                }}
-              />
-            </div>
-          );
-        })}
+      <div className="mt-1 flex flex-1 flex-col gap-4 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {groups.map((group, i) => (
+          <div key={i} className="flex flex-col gap-0.5">
+            {group.heading && (
+              <span className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                {group.heading}
+              </span>
+            )}
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const active = item.href === pathname;
+              return (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  onClick={(e) => {
+                    if (item.href.startsWith("http")) {
+                      e.preventDefault();
+                      window.location.href = item.href;
+                    }
+                  }}
+                  className={`group flex items-center gap-2.5 rounded-[6px] px-2.5 py-[7px] text-[13px] tracking-wide transition-colors ${
+                    active
+                      ? "bg-black/5 font-medium text-foreground dark:bg-white/10"
+                      : "text-muted-foreground hover:bg-black/5 hover:text-foreground/90 dark:hover:bg-white/5"
+                  }`}
+                >
+                  <Icon
+                    className={`h-4 w-4 shrink-0 ${
+                      active
+                        ? "text-foreground"
+                        : "text-muted-foreground/70 group-hover:text-foreground/70"
+                    }`}
+                    strokeWidth={1.5}
+                  />
+                  <span className="truncate">{item.title}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-border/50 pt-4">
-        {upgrade && (
+      {upgrade && (
+        <div className="mt-auto flex flex-col gap-0.5 border-t border-border/50 pt-3">
           <Link
             href={upgrade.href ?? "/dashboard"}
-            className="flex items-center gap-2.5 rounded-md border border-primary/25 bg-primary/10 px-2.5 py-2 text-[13px] text-primary transition-colors hover:bg-primary/15"
+            className="group flex items-center gap-2.5 rounded-[6px] px-2.5 py-[7px] text-[13px] tracking-wide text-primary transition-colors hover:bg-black/5 dark:hover:bg-white/5"
           >
-            <Sparkles className="h-4 w-4" strokeWidth={1.5} />
+            <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground/70 group-hover:text-foreground/70" strokeWidth={1.5} />
             <span className="flex flex-col leading-tight">
               <span className="font-medium">{upgrade.title}</span>
               <span className="text-[11px] text-muted-foreground">
@@ -117,29 +96,8 @@ export function Sidebar({
               </span>
             </span>
           </Link>
-        )}
-        {user && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/50 focus:outline-none cursor-pointer">
-                <Avatar className="h-8 w-8">
-                  <AvatarImage src={user.avatar || undefined} alt={user.name} />
-                  <AvatarFallback className="text-xs bg-elevated text-foreground">{initials}</AvatarFallback>
-                </Avatar>
-                <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span className="truncate text-[13px] font-medium text-foreground">{user.name}</span>
-                  <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
-                </div>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-52">
-              <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/start?provider=google&intent=signin`; }}>
-                Switch account
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+        </div>
+      )}
     </aside>
   );
 }

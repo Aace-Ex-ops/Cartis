@@ -1,0 +1,67 @@
+/* Landing-only design tokens + utilities. Self-contained: nothing here leaks
+   into dashboards. Fonts come from next/font variables on <html>. */
+
+@layer utilities {
+  .font-inclusive {
+    font-family: var(--font-inclusive), system-ui, sans-serif;
+  }
+  .font-gantari {
+    font-family: var(--font-gantari), system-ui, sans-serif;
+  }
+  .font-instrument {
+    font-family: var(--font-instrument), Georgia, serif;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.landing-marquee-mask {
+  mask-image: linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%);
+}
+
+.landing-shine {
+  background-image: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.3) 45%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0.3) 55%,
+    transparent 70%
+  );
+  background-size: 250% 250%;
+  background-position: 200% 0;
+}
+
+.landing-shine:hover {
+  animation: landing-shine-sweep 3.5s linear infinite;
+}
+
+@keyframes landing-shine-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes landing-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.landing-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: landing-marquee 35s linear infinite;
+}

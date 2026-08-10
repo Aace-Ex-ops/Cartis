@@ -34,6 +34,13 @@ fn new_regime_tax(annual: f64) -> f64 {
     tax * 1.04
 }
 
+pub fn normalize_role(role: &str) -> &str {
+    match role {
+        "seller" | "business" => "seller",
+        _ => "consumer",
+    }
+}
+
 pub async fn ai_token() -> Result<String, String> {
     match env::var("CF_AI_TOKEN") {
         Ok(t) if !t.is_empty() => Ok(t),
@@ -91,6 +98,7 @@ impl CoachInsights {
 const DEFAULT_MODEL: &str = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Option<CoachInsights>> {
+    let role = normalize_role(role);
     let conn = state.pg.get().await?;
     let row = conn
         .query_opt(
@@ -125,6 +133,7 @@ pub async fn query(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Optio
 }
 
 pub async fn refresh(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Vec<Insight>> {
+    let role = normalize_role(role);
     eprintln!("insights refresh: generating for uid={uid} role={role}");
     let insights = generate(state, uid, role).await.map_err(|e| {
         eprintln!("insights generate FAILED for uid={uid} role={role}: {e}");
@@ -136,6 +145,7 @@ pub async fn refresh(state: &Arc<AppState>, uid: &str, role: &str) -> Result<Vec
 }
 
 pub async fn save(state: &Arc<AppState>, uid: &str, role: &str, insights: &[Insight]) -> Result<()> {
+    let role = normalize_role(role);
     let json = serde_json::to_value(insights).map_err(|e| e.to_string())?;
     let res = state
         .pg
@@ -486,10 +496,12 @@ pub async fn scheduler(state: Arc<AppState>) {
                 for row in &rows {
                     let uid: String = row.get(0);
                     let ut: Option<String> = row.get(1);
-                    let role = ut.unwrap_or_else(|| "personal".to_string());
-                    if role != "personal" && role != "business" {
-                        continue;
-                    }
+                    let ut = ut.unwrap_or_else(|| "personal".to_string());
+                    // user_type vocabulary (personal/business) -> coach_insights vocabulary (consumer/seller)
+                    let role = match ut.as_str() {
+                        "seller" | "business" => "seller",
+                        _ => "consumer",
+                    };
                     if let Err(e) = refresh(&state, &uid, &role).await {
                         eprintln!("insights scheduler: user {uid} ({role}): {e:?}");
                     }

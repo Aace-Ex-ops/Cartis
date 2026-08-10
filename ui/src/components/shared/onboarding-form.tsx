@@ -63,7 +63,7 @@ export function OnboardingForm() {
     const revenue = Number(business.monthlyRevenue);
     const expenses = Number(business.monthlyExpenses);
     await gql<{ updateUserType: unknown }>(
-      `mutation { updateUserType(userType: "seller"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
+      `mutation { updateUserType(userType: "business"${name ? `, businessName: ${JSON.stringify(name)}` : ""}) { id } }`
     );
     const today = new Date().toISOString().slice(0, 10);
     if (Number.isFinite(revenue) && revenue > 0) {
@@ -86,10 +86,10 @@ export function OnboardingForm() {
     } catch {
       // non-critical — proceed anyway
     }
-    router.push(role === "seller" ? "/seller/dashboard" : "/dashboard");
+    router.push("/dashboard");
   }
 
-  const finishLazy = () => router.push(role === "seller" ? "/seller/dashboard" : "/dashboard");
+  const finishLazy = () => router.push("/dashboard");
 
   return (
     <Stepper
@@ -113,7 +113,7 @@ export function OnboardingForm() {
                 : "border-border/50 bg-background/50 hover:border-border"
             }`}
           >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "consumer" ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground"}`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "consumer" ? "bg-primary text-primary-foreground" : "bg-foreground/5 text-muted-foreground"}`}>
               <User className="h-4 w-4" />
             </span>
             <span>
@@ -130,7 +130,7 @@ export function OnboardingForm() {
                 : "border-border/50 bg-background/50 hover:border-border"
             }`}
           >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "seller" ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground"}`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${role === "seller" ? "bg-primary text-primary-foreground" : "bg-foreground/5 text-muted-foreground"}`}>
               <Store className="h-4 w-4" />
             </span>
             <span>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
+import Image from "next/image";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "@studio-freight/lenis";
@@ -64,18 +65,20 @@ export function ParallaxComponent() {
         <div className="parallax__visuals">
           <div className="parallax__black-line-overflow"></div>
           <div data-parallax-layers className="parallax__layers">
-            <img
+            <Image
               src="https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1600&q=80"
               loading="eager"
               width="800"
+              height="1000"
               data-parallax-layer="1"
               alt=""
               className="parallax__layer-img"
             />
-            <img
+            <Image
               src="https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1600&q=80"
               loading="eager"
               width="800"
+              height="1000"
               data-parallax-layer="2"
               alt=""
               className="parallax__layer-img"
@@ -83,10 +86,11 @@ export function ParallaxComponent() {
             <div data-parallax-layer="3" className="parallax__layer-title">
               <h2 className="parallax__title">Cartis</h2>
             </div>
-            <img
+            <Image
               src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1600&q=80"
               loading="eager"
               width="800"
+              height="1000"
               data-parallax-layer="4"
               alt=""
               className="parallax__layer-img"

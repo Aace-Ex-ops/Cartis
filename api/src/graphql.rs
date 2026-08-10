@@ -26,19 +26,23 @@ fn revoke_gateway_sessions(uid: String) {
     let secret = std::env::var("BACKEND_SECRET").unwrap_or_default();
     if gateway_url.is_empty() || secret.is_empty() { return; }
     tokio::spawn(async move {
-        if let Err(e) = reqwest::Client::new()
+        let res = reqwest::Client::new()
             .post(format!("{gateway_url}/auth/revoke-all"))
             .header("x-cartis-backend-secret", secret)
             .json(&serde_json::json!({ "userId": uid }))
             .send()
-            .await
-        {
-            eprintln!("session revoke failed: {e}");
+            .await;
+        match res {
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("session revoke-all status {}", r.status().as_u16());
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("session revoke failed: {e}"),
         }
     });
 }
 
-const USER_CHILD_TABLES: [&str; 12] = [
+const USER_CHILD_TABLES: [&str; 16] = [
     "sessions",
     "bank_accounts",
     "analysis_log",
@@ -51,6 +55,10 @@ const USER_CHILD_TABLES: [&str; 12] = [
     "budget_suggestions",
     "coach_insights",
     "chat_sessions",
+    "financial_goals",
+    "holdings",
+    "user_actions",
+    "aa_connections",
 ];
 
 #[Object]
@@ -78,7 +86,7 @@ impl QueryRoot {
                         dependents, debt_emis::float8,
                         monthly_tax::float8,
                         ai_model, business_name,
-                        email_notifications
+                        email_notifications, business_type
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -446,6 +454,141 @@ impl QueryRoot {
             .await?;
         Ok(rows.iter().map(AaConnection::from_row).collect())
     }
+
+    async fn financial_goals(&self, ctx: &Context<'_>) -> Result<Vec<FinancialGoal>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text
+                 FROM financial_goals
+                 WHERE user_id::text = $1
+                 ORDER BY created_at DESC",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(FinancialGoal::from_row).collect())
+    }
+
+    async fn portfolio(&self, ctx: &Context<'_>) -> Result<PortfolioSummary> {
+        let Some(uid) = user_id(ctx) else { return Ok(PortfolioSummary::default()) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT asset_type,
+                        COALESCE(SUM(quantity * COALESCE(avg_price, 0)), 0)::float8 AS invested,
+                        COALESCE(SUM(quantity * COALESCE(current_price, avg_price, 0)), 0)::float8 AS current
+                 FROM holdings
+                 WHERE user_id::text = $1
+                 GROUP BY asset_type",
+                &[&uid],
+            )
+            .await?;
+        let mut summary = PortfolioSummary::default();
+        for row in &rows {
+            let asset_type: String = row.get(0);
+            let invested: f64 = row.get(1);
+            let current: f64 = row.get(2);
+            summary.invested += invested;
+            summary.current_value += current;
+            summary.allocations.push(Allocation { asset_type, invested, current_value: current });
+        }
+        Ok(summary)
+    }
+
+    async fn holdings(&self, ctx: &Context<'_>) -> Result<Vec<Holding>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT holding_id::text, asset_type, name, quantity::float8, avg_price::float8, current_price::float8, as_of::text, created_at::text
+                 FROM holdings
+                 WHERE user_id::text = $1
+                 ORDER BY created_at DESC",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(Holding::from_row).collect())
+    }
+
+    async fn user_actions(&self, ctx: &Context<'_>, status: Option<String>) -> Result<Vec<UserAction>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let status_filter = status.unwrap_or_else(|| "suggested".into());
+        let pool = pg(ctx);
+        if status_filter == "suggested" {
+            ensure_suggested_actions(&uid, pool).await?;
+        }
+        let rows = pool.get().await?
+            .query(
+                "SELECT action_id::text, kind, title, detail, cta_label, cta_url, status, created_at::text
+                 FROM user_actions
+                 WHERE user_id::text = $1 AND status = $2
+                 ORDER BY created_at DESC
+                 LIMIT 20",
+                &[&uid, &status_filter],
+            )
+            .await?;
+        Ok(rows.iter().map(UserAction::from_row).collect())
+    }
+}
+
+// Rule-based suggested actions; only inserts kinds the user doesn't already have suggested.
+async fn ensure_suggested_actions(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()> {
+    let client = pool.get().await?;
+    let row = client
+        .query_one(
+            "SELECT u.monthly_tab_limit::float8,
+                    u.monthly_income::float8,
+                    u.monthly_spend::float8,
+                    u.investment_pct::float8,
+                    (SELECT COUNT(*) FROM financial_goals g WHERE g.user_id::text = $1 AND g.goal_type = 'emergency'),
+                    (SELECT COUNT(*) FROM financial_goals g WHERE g.user_id::text = $1 AND g.goal_type = 'retirement'),
+                    (SELECT COALESCE(SUM(g.current_amount), 0)::float8 FROM financial_goals g WHERE g.user_id::text = $1 AND g.goal_type = 'emergency'),
+                    (SELECT COUNT(*) FROM user_actions a WHERE a.user_id::text = $1 AND a.kind = 'goal_setup' AND a.status = 'suggested')
+             FROM users u WHERE u.user_id::text = $1",
+            &[&uid],
+        )
+        .await?;
+    let tab_limit: f64 = row.get(0);
+    let income: Option<f64> = row.get(1);
+    let spend: Option<f64> = row.get(2);
+    let invest_pct: Option<f64> = row.get(3);
+    let emergency_goals: i64 = row.get(4);
+    let retirement_goals: i64 = row.get(5);
+    let emergency_saved: f64 = row.get(6);
+
+    let mut candidates: Vec<(String, String, String, &str, &str)> = vec![];
+    if tab_limit <= 0.0 {
+        candidates.push(("create_budget".into(), "Set a monthly budget".into(), "You haven't set a monthly budget yet — Cartis can suggest one from your spending.".into(), "Suggest budget", "/dashboard/budget"));
+    }
+    if emergency_goals == 0 {
+        let target = spend.unwrap_or(0.0) * 6.0;
+        candidates.push(("goal_setup".into(), "Build your emergency fund".into(), format!("Aim for 6 months of expenses (~₹{target:.0}). Set it as a goal and track progress."), "Set goal", "/dashboard/goals"));
+    } else if let Some(sp) = spend {
+        if emergency_saved < sp * 3.0 {
+            candidates.push(("open_fd".into(), "Park your emergency fund in an FD".into(), format!("Only ₹{emergency_saved:.0} of your 3-month safety target is saved. A liquid FD earns more than a savings account."), "Compare FDs", "/dashboard/tools"));
+        }
+    }
+    if retirement_goals == 0 {
+        candidates.push(("retirement_review".into(), "Check your retirement plan".into(), "Run the retirement calculator to see if your SIP covers your target corpus.".into(), "Calculate", "/dashboard/tools?tab=retirement"));
+    }
+    if let (Some(inc), Some(pct)) = (income, invest_pct) {
+        let invested_annual = inc * 12.0 * pct / 100.0;
+        if invested_annual < 150000.0 {
+            candidates.push(("tax_savings".into(), format!("Save tax: ₹{:.0} of 80C headroom left", 150000.0 - invested_annual), "Investing under Section 80C (PPF, ELSS, EPF) reduces taxable income.".into(), "Check tax", "/dashboard/tools?tab=tax"));
+        }
+    }
+
+    for (kind, title, detail, cta_label, cta_url) in candidates {
+        client
+            .execute(
+                "INSERT INTO user_actions (user_id, kind, title, detail, cta_label, cta_url)
+                 SELECT $1::text::uuid, $2, $3, $4, $5, $6
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM user_actions a WHERE a.user_id::text = $1 AND a.kind = $2::varchar AND a.status = 'suggested'
+                 )",
+                &[&uid, &kind, &title, &detail, &cta_label, &cta_url],
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 fn chrono_since_days(unix_seconds: f64) -> f64 {
@@ -687,7 +830,7 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications",
+                           email_notifications, business_type",
                 &[
                     &uid,
                     &monthly_income.map(|v| v.to_string()),
@@ -717,7 +860,7 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications",
+                           email_notifications, business_type",
                 &[&uid, &model],
             )
             .await?;
@@ -734,11 +877,20 @@ impl MutationRoot {
         &self, ctx: &Context<'_>,
         user_type: String,
         business_name: Option<String>,
+        business_type: Option<String>,
     ) -> Result<User> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        // normalize legacy/aliased values at the write boundary
+        let user_type = match user_type.as_str() {
+            "seller" | "business" => "business",
+            "consumer" | "personal" => "personal",
+            _ => return Err("invalid user type".into()),
+        }
+        .to_string();
         let row = pg(ctx).get().await?
             .query_one(
-                "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name)
+                "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name),
+                                   business_type = COALESCE($4, business_type)
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
                            wallet_balance::float8, monthly_tab_limit::float8,
@@ -748,8 +900,8 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications",
-                &[&uid, &user_type, &business_name],
+                           email_notifications, business_type",
+                &[&uid, &user_type, &business_name, &business_type],
             )
             .await?;
         Ok(User::from_row(row))
@@ -1099,6 +1251,153 @@ impl MutationRoot {
             account_id,
         })
     }
+
+    async fn add_financial_goal(
+        &self,
+        ctx: &Context<'_>,
+        goal_type: String,
+        name: String,
+        target_amount: f64,
+        target_date: Option<String>,
+        current_amount: Option<f64>,
+    ) -> Result<FinancialGoal> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO financial_goals (user_id, goal_type, name, target_amount, current_amount, target_date)
+                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::date)
+                 RETURNING goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text",
+                &[&uid, &goal_type, &name, &target_amount.to_string(), &current_amount.unwrap_or(0.0).to_string(), &target_date],
+            )
+            .await?;
+        Ok(FinancialGoal::from_row(&row))
+    }
+
+    async fn update_financial_goal(
+        &self,
+        ctx: &Context<'_>,
+        goal_id: String,
+        current_amount: Option<f64>,
+        target_amount: Option<f64>,
+        name: Option<String>,
+        target_date: Option<String>,
+    ) -> Result<FinancialGoal> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "UPDATE financial_goals SET
+                    current_amount = COALESCE($3::text::numeric, current_amount),
+                    target_amount = COALESCE($4::text::numeric, target_amount),
+                    name = COALESCE($5, name),
+                    target_date = COALESCE($6::date, target_date),
+                    updated_at = now()
+                 WHERE goal_id::text = $1 AND user_id::text = $2
+                 RETURNING goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text",
+                &[&goal_id, &uid, &current_amount.map(|v| v.to_string()), &target_amount.map(|v| v.to_string()), &name, &target_date],
+            )
+            .await?;
+        Ok(FinancialGoal::from_row(&row))
+    }
+
+    async fn delete_financial_goal(&self, ctx: &Context<'_>, goal_id: String) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let res = pg(ctx).get().await?
+            .execute(
+                "DELETE FROM financial_goals WHERE goal_id::text = $1 AND user_id::text = $2",
+                &[&goal_id, &uid],
+            )
+            .await?;
+        Ok(res > 0)
+    }
+
+    async fn add_holding(
+        &self,
+        ctx: &Context<'_>,
+        asset_type: String,
+        name: String,
+        quantity: f64,
+        avg_price: Option<f64>,
+        current_price: Option<f64>,
+        as_of: Option<String>,
+    ) -> Result<Holding> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO holdings (user_id, asset_type, name, quantity, avg_price, current_price, as_of)
+                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::numeric, $7::date)
+                 RETURNING holding_id::text, asset_type, name, quantity::float8, avg_price::float8, current_price::float8, as_of::text, created_at::text",
+                &[&uid, &asset_type, &name, &quantity.to_string(), &avg_price.map(|v| v.to_string()), &current_price.map(|v| v.to_string()), &as_of],
+            )
+            .await?;
+        Ok(Holding::from_row(&row))
+    }
+
+    async fn update_holding(
+        &self,
+        ctx: &Context<'_>,
+        holding_id: String,
+        current_price: Option<f64>,
+        avg_price: Option<f64>,
+        quantity: Option<f64>,
+    ) -> Result<Holding> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "UPDATE holdings SET
+                    current_price = COALESCE($3::text::numeric, current_price),
+                    avg_price = COALESCE($4::text::numeric, avg_price),
+                    quantity = COALESCE($5::text::numeric, quantity),
+                    updated_at = now()
+                 WHERE holding_id::text = $1 AND user_id::text = $2
+                 RETURNING holding_id::text, asset_type, name, quantity::float8, avg_price::float8, current_price::float8, as_of::text, created_at::text",
+                &[&holding_id, &uid, &current_price.map(|v| v.to_string()), &avg_price.map(|v| v.to_string()), &quantity.map(|v| v.to_string())],
+            )
+            .await?;
+        Ok(Holding::from_row(&row))
+    }
+
+    async fn delete_holding(&self, ctx: &Context<'_>, holding_id: String) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let res = pg(ctx).get().await?
+            .execute(
+                "DELETE FROM holdings WHERE holding_id::text = $1 AND user_id::text = $2",
+                &[&holding_id, &uid],
+            )
+            .await?;
+        Ok(res > 0)
+    }
+
+    async fn add_user_action(
+        &self,
+        ctx: &Context<'_>,
+        kind: String,
+        title: String,
+        detail: Option<String>,
+        cta_label: Option<String>,
+        cta_url: Option<String>,
+    ) -> Result<UserAction> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO user_actions (user_id, kind, title, detail, cta_label, cta_url)
+                 VALUES ($1::text::uuid, $2, $3, $4, $5, $6)
+                 RETURNING action_id::text, kind, title, detail, cta_label, cta_url, status, created_at::text",
+                &[&uid, &kind, &title, &detail, &cta_label, &cta_url],
+            )
+            .await?;
+        Ok(UserAction::from_row(&row))
+    }
+
+    async fn set_user_action_status(&self, ctx: &Context<'_>, action_id: String, status: String) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let res = pg(ctx).get().await?
+            .execute(
+                "UPDATE user_actions SET status = $3 WHERE action_id::text = $1 AND user_id::text = $2",
+                &[&action_id, &uid, &status],
+            )
+            .await?;
+        Ok(res > 0)
+    }
 }
 
 struct User {
@@ -1122,6 +1421,7 @@ struct User {
     ai_model: Option<String>,
     business_name: Option<String>,
     email_notifications: bool,
+    business_type: String,
 }
 
 #[Object]
@@ -1146,6 +1446,7 @@ impl User {
     async fn ai_model(&self) -> Option<&str> { self.ai_model.as_deref() }
     async fn business_name(&self) -> Option<&str> { self.business_name.as_deref() }
     async fn email_notifications(&self) -> bool { self.email_notifications }
+    async fn business_type(&self) -> &str { &self.business_type }
 }
 
 struct AuthUser {
@@ -1195,6 +1496,7 @@ impl User {
             ai_model: r.get(17),
             business_name: r.get(18),
             email_notifications: r.get(19),
+            business_type: r.get(20),
         }
     }
 }
@@ -1542,6 +1844,153 @@ impl SyncResult {
     async fn inserted(&self) -> i32 { self.inserted }
     async fn balance(&self) -> Option<f64> { self.balance }
     async fn account_id(&self) -> Option<&str> { self.account_id.as_deref() }
+}
+
+struct FinancialGoal {
+    goal_id: String,
+    goal_type: String,
+    name: String,
+    target_amount: f64,
+    current_amount: f64,
+    target_date: Option<String>,
+    created_at: String,
+}
+
+#[Object]
+impl FinancialGoal {
+    async fn goal_id(&self) -> &str { &self.goal_id }
+    async fn goal_type(&self) -> &str { &self.goal_type }
+    async fn name(&self) -> &str { &self.name }
+    async fn target_amount(&self) -> f64 { self.target_amount }
+    async fn current_amount(&self) -> f64 { self.current_amount }
+    async fn progress_pct(&self) -> f64 {
+        if self.target_amount <= 0.0 { 0.0 } else { (self.current_amount / self.target_amount * 100.0).min(100.0) }
+    }
+    async fn target_date(&self) -> Option<&str> { self.target_date.as_deref() }
+    async fn created_at(&self) -> &str { &self.created_at }
+}
+
+impl FinancialGoal {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            goal_id: r.get(0),
+            goal_type: r.get(1),
+            name: r.get(2),
+            target_amount: r.get(3),
+            current_amount: r.get(4),
+            target_date: r.get(5),
+            created_at: r.get(6),
+        }
+    }
+}
+
+struct Holding {
+    holding_id: String,
+    asset_type: String,
+    name: String,
+    quantity: f64,
+    avg_price: Option<f64>,
+    current_price: Option<f64>,
+    as_of: Option<String>,
+    created_at: String,
+}
+
+#[Object]
+impl Holding {
+    async fn holding_id(&self) -> &str { &self.holding_id }
+    async fn asset_type(&self) -> &str { &self.asset_type }
+    async fn name(&self) -> &str { &self.name }
+    async fn quantity(&self) -> f64 { self.quantity }
+    async fn avg_price(&self) -> Option<f64> { self.avg_price }
+    async fn current_price(&self) -> Option<f64> { self.current_price }
+    async fn invested(&self) -> f64 { self.quantity * self.avg_price.unwrap_or(0.0) }
+    async fn current_value(&self) -> f64 { self.quantity * self.current_price.unwrap_or(self.avg_price.unwrap_or(0.0)) }
+    async fn as_of(&self) -> Option<&str> { self.as_of.as_deref() }
+    async fn created_at(&self) -> &str { &self.created_at }
+}
+
+impl Holding {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            holding_id: r.get(0),
+            asset_type: r.get(1),
+            name: r.get(2),
+            quantity: r.get(3),
+            avg_price: r.get(4),
+            current_price: r.get(5),
+            as_of: r.get(6),
+            created_at: r.get(7),
+        }
+    }
+}
+
+#[derive(Default)]
+struct PortfolioSummary {
+    invested: f64,
+    current_value: f64,
+    allocations: Vec<Allocation>,
+}
+
+#[Object]
+impl PortfolioSummary {
+    async fn invested(&self) -> f64 { self.invested }
+    async fn current_value(&self) -> f64 { self.current_value }
+    async fn returns(&self) -> f64 { self.current_value - self.invested }
+    async fn return_pct(&self) -> f64 {
+        if self.invested <= 0.0 { 0.0 } else { (self.current_value - self.invested) / self.invested * 100.0 }
+    }
+    async fn allocations(&self) -> &[Allocation] { &self.allocations }
+}
+
+struct Allocation {
+    asset_type: String,
+    invested: f64,
+    current_value: f64,
+}
+
+#[Object]
+impl Allocation {
+    async fn asset_type(&self) -> &str { &self.asset_type }
+    async fn invested(&self) -> f64 { self.invested }
+    async fn current_value(&self) -> f64 { self.current_value }
+}
+
+struct UserAction {
+    action_id: String,
+    kind: String,
+    title: String,
+    detail: Option<String>,
+    cta_label: Option<String>,
+    cta_url: Option<String>,
+    status: String,
+    created_at: String,
+}
+
+#[Object]
+impl UserAction {
+    async fn action_id(&self) -> &str { &self.action_id }
+    async fn kind(&self) -> &str { &self.kind }
+    async fn title(&self) -> &str { &self.title }
+    async fn detail(&self) -> Option<&str> { self.detail.as_deref() }
+    async fn cta_label(&self) -> Option<&str> { self.cta_label.as_deref() }
+    async fn cta_url(&self) -> Option<&str> { self.cta_url.as_deref() }
+    async fn status(&self) -> &str { &self.status }
+    async fn created_at(&self) -> &str { &self.created_at }
+}
+
+impl UserAction {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            action_id: r.get(0),
+            kind: r.get(1),
+            title: r.get(2),
+            detail: r.get(3),
+            cta_label: r.get(4),
+            cta_url: r.get(5),
+            status: r.get(6),
+            created_at: r.get(7),
+        }
+    }
 }
 
 struct FinanceEntry {

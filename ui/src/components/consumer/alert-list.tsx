@@ -9,7 +9,7 @@ const SEVERITY_ICON = {
 
 const SEVERITY_COLOR = {
   high: "text-destructive",
-  medium: "text-amber-400",
+  medium: "text-amber-600",
   low: "text-primary",
 } as const;
 

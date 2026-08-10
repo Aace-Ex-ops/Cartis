@@ -21,10 +21,10 @@ export function CategoryBreakdown({ categories }: {
                 {c.name}
               </span>
               <span className="text-muted-foreground">
-                {fmt(c.spent)} · {Math.round((c.spent / total) * 100)}%
+                <span className="tabular-nums">{fmt(c.spent)}</span> · {Math.round((c.spent / total) * 100)}%
               </span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+            <div className="h-1.5 overflow-hidden rounded-full bg-foreground/5">
               <div className="h-full rounded-full" style={{ width: `${(c.spent / total) * 100}%`, background: c.color }} />
             </div>
           </div>
