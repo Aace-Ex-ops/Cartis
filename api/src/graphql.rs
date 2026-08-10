@@ -712,6 +712,15 @@ impl MutationRoot {
                 &[&email, &full_name, &avatar_url],
             )
             .await?;
+        if let Some(r) = &row {
+            if r.get::<_, bool>(1) {
+                crate::email::send_email(
+                    &email,
+                    "Welcome to Cartis!",
+                    &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
+                ).await;
+            }
+        }
         Ok(row.map(|r| UpsertedUser { user_id: r.get(0), created: r.get(1) }))
     }
 
