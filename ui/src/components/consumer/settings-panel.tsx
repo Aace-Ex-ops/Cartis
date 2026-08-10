@@ -248,7 +248,7 @@ export function SettingsPanel() {
   const [section, setSection] = useState<(typeof SECTIONS)[number]["id"]>("settings");
 
   return (
-    <div className="flex h-full gap-6">
+    <div className="flex min-h-0 flex-1 gap-6">
       <nav className="flex w-44 shrink-0 flex-col gap-1">
         {SECTIONS.map((s) => (
           <button
@@ -264,7 +264,7 @@ export function SettingsPanel() {
           </button>
         ))}
       </nav>
-      <div className="min-w-0 flex-1 overflow-y-auto pr-2">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-2">
         {section === "settings" && <SettingsSection />}
         {section === "profile" && <ProfilePanel />}
         {section === "support" && <SupportPanel />}
