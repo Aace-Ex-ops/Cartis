@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
+import { SupportPanel } from "@/components/consumer/support-panel";
+import { TermsPanel } from "@/components/consumer/terms-panel";
 import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
@@ -27,11 +29,13 @@ type User = {
   userType: string;
 };
 
-type PanelKey = "subscription" | "settings";
+type PanelKey = "subscription" | "settings" | "support" | "terms";
 
 const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = {
   subscription: { label: "Subscription", panel: SubscriptionPanel },
   settings: { label: "Settings", panel: SettingsPanel },
+  support: { label: "Support", panel: SupportPanel },
+  terms: { label: "Terms & Policies", panel: TermsPanel },
 };
 
 export function UserMenu({ user }: { user: User }) {
@@ -101,11 +105,19 @@ export function UserMenu({ user }: { user: User }) {
             </span>
           </div>
           <DropdownMenuSeparator />
-          {(Object.keys(PANELS) as PanelKey[]).map((key) => (
-            <DropdownMenuItem key={key} onClick={() => setOpenPanel(key)} className="cursor-pointer">
-              {PANELS[key].label}
-            </DropdownMenuItem>
-          ))}
+          <DropdownMenuItem onClick={() => setOpenPanel("subscription")} className="cursor-pointer">
+            Subscription
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setOpenPanel("settings")} className="cursor-pointer">
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setOpenPanel("support")} className="cursor-pointer">
+            Support
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setOpenPanel("terms")} className="cursor-pointer">
+            Terms & Policies
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => void switchType(isBusiness ? "personal" : "business")}

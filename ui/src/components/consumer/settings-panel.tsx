@@ -6,19 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { ProfilePanel } from "@/components/consumer/profile-panel";
-import { SupportPanel } from "@/components/consumer/support-panel";
-import { TermsPanel } from "@/components/consumer/terms-panel";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
-
-const SECTIONS = [
-  { id: "settings", label: "Settings" },
-  { id: "profile", label: "Profile" },
-  { id: "support", label: "Support" },
-  { id: "terms", label: "Terms & Policies" },
-] as const;
 
 function SettingToggle({ title, desc, defaultOn, onCheckedChange }: { title: string; desc: string; defaultOn: boolean; onCheckedChange?: (v: boolean) => void }) {
   const [on, setOn] = useState(defaultOn);
@@ -37,6 +28,8 @@ type SettingsData = {
   me: {
     fullName: string;
     email: string;
+    avatarUrl: string | null;
+    userType: string;
     monthlyIncome: number | null;
     monthlySpend: number | null;
     investmentPct: number | null;
@@ -49,7 +42,7 @@ type SettingsData = {
   monthlyTab: { limit: number };
 };
 
-function SettingsSection() {
+export function SettingsPanel() {
   const [data, setData] = useState<SettingsData | null>(null);
   const [budget, setBudget] = useState("");
   const [saved, setSaved] = useState(false);
@@ -65,10 +58,13 @@ function SettingsSection() {
   });
   const [profileSaved, setProfileSaved] = useState(false);
 
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     void gql<SettingsData>(
-      `{ me { fullName email monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax emailNotifications } monthlyTab { limit } }`
+      `{ me { fullName email avatarUrl userType monthlyIncome monthlySpend investmentPct housingCost dependents debtEmis monthlyTax emailNotifications } monthlyTab { limit } }`
     )
       .then((d) => {
         if (cancelled) return;
@@ -85,12 +81,15 @@ function SettingsSection() {
         });
       })
       .catch(() => {
-        if (!cancelled) setData({ me: { fullName: "", email: "", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null, emailNotifications: true }, monthlyTab: { limit: 0 } });
+        if (!cancelled) setData({ me: { fullName: "", email: "", avatarUrl: null, userType: "personal", monthlyIncome: null, monthlySpend: null, investmentPct: null, housingCost: null, dependents: null, debtEmis: null, monthlyTax: null, emailNotifications: true }, monthlyTab: { limit: 0 } });
       });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const me = data?.me;
+  const initials = me?.fullName?.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase() ?? "…";
 
   async function saveBudget() {
     const limit = Number(budget);
@@ -129,22 +128,45 @@ function SettingsSection() {
     }
   }
 
+  async function deleteAccount() {
+    setDeleting(true);
+    try {
+      await gql(`mutation { deleteUser }`);
+    } catch {
+      // user may already be gone — proceed with logout anyway
+    }
+    try {
+      await fetch(`${GATEWAY}/auth/logout`, { redirect: "manual" });
+    } catch {
+      // fall through — clear the cookie below regardless
+    }
+    document.cookie = "session=; Max-Age=0; Path=/; Secure; SameSite=Strict";
+    window.location.href = "/";
+  }
+
   return (
-    <div className="flex flex-col gap-6">
+    <div data-lenis-prevent className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto pr-2">
       <div>
         <h2 className="text-base font-semibold text-foreground">Settings</h2>
-        <p className="mt-0.5 text-[13px] text-muted-foreground">Your preferences, your alerts.</p>
+        <p className="mt-0.5 text-[13px] text-muted-foreground">Your account and preferences.</p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Account</CardTitle>
-          <CardDescription>Signed in with Google</CardDescription>
+          <CardDescription>Personal details</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex items-center gap-4">
+          <Avatar className="h-14 w-14 shrink-0 rounded-full bg-elevated text-lg font-semibold text-foreground">
+            <AvatarImage src={me?.avatarUrl ?? undefined} alt={me?.fullName} />
+            <AvatarFallback className="bg-elevated text-lg font-semibold text-foreground">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
           <div className="flex flex-col">
-            <span className="text-[14px] font-medium text-foreground">{data?.me.fullName ?? "…"}</span>
-            <span className="text-[12px] text-muted-foreground">{data?.me.email ?? ""}</span>
+            <span className="text-[15px] font-medium text-foreground">{me?.fullName ?? "…"}</span>
+            <span className="text-[13px] text-muted-foreground">{me?.email ?? ""}</span>
+            <span className="mt-0.5 text-[11px] text-muted-foreground/60 capitalize">{me?.userType ?? ""}</span>
           </div>
         </CardContent>
       </Card>
@@ -201,7 +223,7 @@ function SettingsSection() {
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-debt" className="text-xs text-muted-foreground">Total loans (₹)</Label>
-              <Input id="sp-debt" type="number" placeholder="e.g. 10000" value={profile.debtEmis} onChange={(e) => { setProfile((p) => ({ ...p, debtEmis: e.target.value })); setProfileSaved(false); }} />
+              <Input id="sp-debt" type="number" placeholder="e.g. 100000" value={profile.debtEmis} onChange={(e) => { setProfile((p) => ({ ...p, debtEmis: e.target.value })); setProfileSaved(false); }} />
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="sp-tax" className="text-xs text-muted-foreground">Monthly tax deducted (₹)</Label>
@@ -234,42 +256,39 @@ function SettingsSection() {
         </CardHeader>
         <CardContent className="flex flex-col divide-y divide-border/50">
           <SettingToggle title="WhatsApp" desc="Send verdicts and alerts over WhatsApp" defaultOn />
-          <SettingToggle title="Email" desc="Weekly digest with spending summary" defaultOn={data?.me.emailNotifications ?? true}
+          <SettingToggle title="Email" desc="Weekly digest with spending summary" defaultOn={me?.emailNotifications ?? true}
             onCheckedChange={async (v) => {
               try { await gql<unknown>(`mutation { updateFinancialProfile(emailNotifications: ${v}) { id } }`); } catch {}
             }} />
         </CardContent>
       </Card>
-    </div>
-  );
-}
 
-export function SettingsPanel() {
-  const [section, setSection] = useState<(typeof SECTIONS)[number]["id"]>("settings");
-
-  return (
-    <div className="flex min-h-0 flex-1 gap-6">
-      <nav className="flex w-44 shrink-0 flex-col gap-1">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSection(s.id)}
-            className={`rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors ${
-              section === s.id
-                ? "bg-primary/10 text-foreground"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </nav>
-      <div data-lenis-prevent className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-2">
-        {section === "settings" && <SettingsSection />}
-        {section === "profile" && <ProfilePanel />}
-        {section === "support" && <SupportPanel />}
-        {section === "terms" && <TermsPanel />}
-      </div>
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-destructive">Danger zone</CardTitle>
+          <CardDescription>
+            {confirming
+              ? "This permanently deletes your account, all data, and your AI memory. This cannot be undone."
+              : "Permanently delete your account and all associated data."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          {confirming ? (
+            <>
+              <Button variant="outline" onClick={() => setConfirming(false)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void deleteAccount()} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete my account"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" className="text-destructive" onClick={() => setConfirming(true)}>
+              Delete account
+            </Button>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
