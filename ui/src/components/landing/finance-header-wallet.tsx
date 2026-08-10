@@ -144,7 +144,7 @@ export function FinanceHeaderWallet() {
 
   return (
     <>
-      <link rel="preload" as="video" href={HEADER_BG_URL} />
+      <link rel="preload" as="fetch" type="video/mp4" href={HEADER_BG_URL} />
       <div
         id="scroll-container-wrapper"
         className="relative w-full h-[250vh] max-md:h-[200vh] bg-black select-none text-white"
