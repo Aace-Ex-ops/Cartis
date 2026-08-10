@@ -15,11 +15,13 @@ export function Preloader() {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     document.body.style.overflow = "hidden";
     const raf = requestAnimationFrame(() => setMounted(true));
-    const t = setTimeout(() => setDone(true), TOTAL);
+    const t = setTimeout(() => {
+      document.body.style.overflow = "";
+      setDone(true);
+    }, TOTAL);
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(t);
-      document.body.style.overflow = "";
     };
   }, []);
 

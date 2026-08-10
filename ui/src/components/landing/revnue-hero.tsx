@@ -27,18 +27,28 @@ export function RevnueHero() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    const onScroll = () => {
+    let rafId = 0;
+    let lastE = -1;
+    const update = () => {
+      rafId = 0;
       const el = document.getElementById("header-root-container");
       if (!el) return;
       const top = -el.getBoundingClientRect().top;
       const denom = 0.8 * (el.offsetHeight - window.innerHeight);
-      setE(denom > 0 ? Math.min(Math.max(top / denom, 0), 1) : 0);
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const ratio = 16 / 9;
-      const contain = w / h >= ratio;
-      setFit(contain ? "contain" : "cover");
-      setO(contain ? (w / ratio - h) * (0.6222 - 0.5) : 0);
+      const newE = denom > 0 ? Math.min(Math.max(top / denom, 0), 1) : 0;
+      if (Math.abs(newE - lastE) > 0.001) {
+        lastE = newE;
+        setE(newE);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const ratio = 16 / 9;
+        const contain = w / h >= ratio;
+        setFit(contain ? "contain" : "cover");
+        setO(contain ? (w / ratio - h) * (0.6222 - 0.5) : 0);
+      }
+    };
+    const onScroll = () => {
+      if (!rafId) rafId = requestAnimationFrame(update);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
@@ -46,6 +56,7 @@ export function RevnueHero() {
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
     };
   }, []);
 
@@ -67,7 +78,7 @@ export function RevnueHero() {
               src={HEADER_BG_URL}
               poster="/landing/posters/header-bg.jpg"
             />
-            <div className="absolute inset-0 bg-white/10 backdrop-blur-[1px]" />
+            <div className="absolute inset-0 bg-white/10" />
           </div>
         )}
 
@@ -90,7 +101,7 @@ export function RevnueHero() {
           </div>
         )}
 
-        <div className="relative z-20 w-full text-center bg-black/25 backdrop-blur-[1px] rounded-[32px] py-10 md:py-12 px-4 sm:px-8 md:px-12 xl:px-16">
+        <div className="relative z-20 w-full text-center bg-black/25 rounded-[32px] py-10 md:py-12 px-4 sm:px-8 md:px-12 xl:px-16">
           <div className="overflow-hidden py-4">
             <motion.h1
               initial={{ y: 150, opacity: 0 }}

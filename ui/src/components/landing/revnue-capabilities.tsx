@@ -64,8 +64,9 @@ function CardIcon({ title }: { title: string }) {
   );
 }
 
-function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: string; subtitle: string }) {
+function CapabilityCard({ tags, title, subtitle, inView }: { tags: string[]; title: string; subtitle: string; inView: boolean }) {
   const isMobile = useIsMobile();
+  const animatePerpetual = !isMobile && inView;
   return (
     <motion.div
       className="relative flex flex-col justify-between items-center w-full lg:w-[calc(33.333%-16px)] h-[380px] lg:h-[480px] p-5 sm:p-8 rounded-2xl border overflow-hidden cursor-default group"
@@ -88,9 +89,9 @@ function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: stri
             backgroundSize: "200% 100%",
           }}
           variants={{ initial: { opacity: 0 }, visible: { opacity: 0 }, hover: { opacity: 1 } }}
-          animate={isMobile ? {} : { backgroundPosition: ["200% 0", "-200% 0"] }}
+          animate={animatePerpetual ? { backgroundPosition: ["200% 0", "-200% 0"] } : {}}
           transition={{
-            backgroundPosition: { duration: 3.5, repeat: isMobile ? 0 : Infinity, ease: "linear" },
+            backgroundPosition: { duration: 3.5, repeat: animatePerpetual ? Infinity : 0, ease: "linear" },
             opacity: { duration: 0.3 },
           }}
         />
@@ -98,8 +99,8 @@ function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: stri
       <div className="relative z-10 flex justify-between items-start gap-8 w-full">
         <motion.div
           className="flex items-center justify-center w-12 h-12 rounded-xl bg-[#0C0C0C] text-white select-none shrink-0"
-          animate={isMobile ? {} : { rotateY: [-20, 20, -20], rotate: [-6, 6, -6] }}
-          transition={{ duration: 5, repeat: isMobile ? 0 : Infinity, ease: "easeInOut" }}
+          animate={animatePerpetual ? { rotateY: [-20, 20, -20], rotate: [-6, 6, -6] } : {}}
+          transition={{ duration: 5, repeat: animatePerpetual ? Infinity : 0, ease: "easeInOut" }}
         >
           <motion.div
             className="flex items-center justify-center w-full h-full"
@@ -142,6 +143,8 @@ function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: stri
 
 export function RevnueCapabilities() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+  const [cardsInView, setCardsInView] = useState(false);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = 0.8;
@@ -161,8 +164,20 @@ export function RevnueCapabilities() {
     return () => io.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = sectionRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setCardsInView(entry.isIntersecting),
+      { rootMargin: "100px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   return (
     <section
+      ref={sectionRef}
       id="features"
       className="relative w-full overflow-hidden px-6 md:px-12 min-[1440px]:px-12 min-[1441px]:px-16"
       style={{ paddingTop: 96, paddingBottom: 96 }}
@@ -213,7 +228,7 @@ export function RevnueCapabilities() {
         </div>
         <div className="flex flex-col lg:flex-row items-center justify-between gap-6 w-full">
           {CARDS.map((c, i) => (
-            <CapabilityCard key={i} tags={c.tags} title={c.title} subtitle={c.subtitle} />
+            <CapabilityCard key={i} tags={c.tags} title={c.title} subtitle={c.subtitle} inView={cardsInView} />
           ))}
         </div>
       </div>

@@ -47,10 +47,12 @@ export function FinanceHeaderWallet() {
     const apply = () => {
       rafId = 0;
       const progress = getProgress();
-      setScrollProgress(progress);
+      if (Math.abs(progress - last) > 0.0005) {
+        last = progress;
+        setScrollProgress(progress);
+      }
       const video = videoRef.current;
       if (video && Math.abs(progress - last) > 0.0005) {
-        last = progress;
         if (progress >= 0.95) {
           if (video.paused) {
             video.loop = false;
@@ -229,7 +231,7 @@ export function FinanceHeaderWallet() {
               style={{
                 opacity: rightTextOpacity,
                 transform: `translateX(${rightTextShift}px)`,
-                transition: "transform 0.15s ease-out, opacity 0.15s ease-out",
+
               }}
               className="absolute right-6 md:right-[80px] bottom-12 md:bottom-[90px] text-right z-20"
             >
