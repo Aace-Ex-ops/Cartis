@@ -50,7 +50,7 @@ export function RevnueHero() {
   }, []);
 
   return (
-    <div id="header-root-container" className="relative w-full min-h-[220vh] bg-white">
+    <div id="header-root-container" className="relative w-full min-h-[220vh] max-md:min-h-[150vh] bg-white">
       <section
         id="header-section"
         className="sticky top-0 w-full h-screen overflow-hidden flex flex-col justify-center"
@@ -77,15 +77,15 @@ export function RevnueHero() {
               src={CHAIR_URL}
               alt="Astronaut sitting on a hill"
               onError={() => setImgOk(false)}
-              initial={{ scale: 4.2, opacity: 0 }}
-              animate={{ scale: 4 - 3 * e, y: o * e, opacity: 1 }}
+              initial={{ scale: isMobile ? 2.5 : 4.2, opacity: 0 }}
+              animate={{ scale: isMobile ? 2.5 - 1.5 * e : 4 - 3 * e, y: o * e, opacity: 1 }}
               transition={{
                 scale: { duration: 0.1, ease: "easeOut" },
                 y: { duration: 0.1, ease: "easeOut" },
                 opacity: { duration: 1.5, ease: "easeOut" },
               }}
               style={{ objectFit: fit }}
-              className="w-full h-full select-none"
+              className="w-full h-full select-none max-w-none"
             />
           </div>
         )}
@@ -96,7 +96,7 @@ export function RevnueHero() {
               initial={{ y: 150, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1], delay: 0.3 }}
-              className="relative select-none text-white text-center font-inclusive text-[40px] sm:text-[52px] md:text-[72px] lg:text-[96px] font-medium leading-[114%] tracking-[-2px] sm:tracking-[-4px] md:tracking-[-6px] lg:tracking-[-8px] drop-shadow-[0_4px_24px_rgba(0,0,0,0.45)]"
+              className="relative select-none text-white text-center font-inclusive text-[32px] sm:text-[52px] md:text-[72px] lg:text-[96px] font-medium leading-[114%] tracking-[-1.5px] sm:tracking-[-4px] md:tracking-[-6px] lg:tracking-[-8px] drop-shadow-[0_4px_24px_rgba(0,0,0,0.45)]"
             >
               <motion.span
                 className="inline-block"

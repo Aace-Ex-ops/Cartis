@@ -108,7 +108,7 @@ export function FinanceHeaderWallet() {
     <>
       <div
         id="scroll-container-wrapper"
-        className="relative w-full h-[250vh] bg-black select-none text-white"
+        className="relative w-full h-[250vh] max-md:h-[200vh] bg-black select-none text-white"
       >
         <div id="hero-sticky-viewport" className="sticky top-0 left-0 w-full h-screen overflow-hidden">
           <video
@@ -184,7 +184,7 @@ export function FinanceHeaderWallet() {
                   background: "#FFF",
                   cursor: "pointer",
                 }}
-                className="hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(255,255,255,0.15)] hover:shadow-[0_8px_30px_rgba(255,255,255,0.25)] transition-all duration-300"
+                className="min-h-[44px] hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(255,255,255,0.15)] hover:shadow-[0_8px_30px_rgba(255,255,255,0.25)] transition-all duration-300"
               >
                 <span
                   style={{

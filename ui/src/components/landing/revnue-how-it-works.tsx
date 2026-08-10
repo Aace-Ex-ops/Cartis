@@ -63,7 +63,7 @@ function StepCard({
       onClick={onInteract}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="relative flex flex-col justify-between items-start flex-1 p-6 sm:p-8 rounded-2xl bg-[#F3F3F3] select-none cursor-pointer overflow-hidden transition-all duration-500 h-[460px] sm:h-[500px] lg:h-full"
+      className="relative flex flex-col justify-between items-start flex-1 p-5 sm:p-8 rounded-2xl bg-[#F3F3F3] select-none cursor-pointer overflow-hidden transition-all duration-500 h-[380px] sm:h-[460px] lg:h-full"
       style={{ alignSelf: "stretch" }}
       initial={{ opacity: 0, x: 150 }}
       animate={{ opacity: 1, x: 0 }}
@@ -303,7 +303,7 @@ export function RevnueHowItWorks() {
                 How it works
               </motion.span>
               <motion.h2
-                className="font-inclusive text-[40px] sm:text-[60px] lg:text-[76px] font-medium leading-[96%] tracking-[-2px] sm:tracking-[-5px] w-full max-w-[600px] text-[#0C0C0C] mb-4"
+                className="font-inclusive text-[32px] sm:text-[60px] lg:text-[76px] font-medium leading-[96%] tracking-[-1.5px] sm:tracking-[-5px] w-full max-w-[600px] text-[#0C0C0C] mb-4"
                 initial={{ opacity: 0, x: -70 }}
                 whileInView={{ opacity: 1, x: 0 }}
                 viewport={{ once: false, amount: 0.2 }}

@@ -68,7 +68,7 @@ function CapabilityCard({ tags, title, subtitle }: { tags: string[]; title: stri
   const isMobile = useIsMobile();
   return (
     <motion.div
-      className="relative flex flex-col justify-between items-center w-full lg:w-[calc(33.333%-16px)] h-[480px] p-8 rounded-2xl border overflow-hidden cursor-default group"
+      className="relative flex flex-col justify-between items-center w-full lg:w-[calc(33.333%-16px)] h-[380px] lg:h-[480px] p-5 sm:p-8 rounded-2xl border overflow-hidden cursor-default group"
       initial="initial"
       whileInView="visible"
       whileHover="hover"
@@ -194,7 +194,7 @@ export function RevnueCapabilities() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 1, delay: 0.1, ease: "easeOut" }}
-            className="text-[#0C0C0C] font-inclusive text-5xl sm:text-7xl lg:text-[100px] font-medium leading-[96%] tracking-[-3px] sm:tracking-[-6px] lg:tracking-[-8px]"
+            className="text-[#0C0C0C] font-inclusive text-[36px] sm:text-7xl lg:text-[100px] font-medium leading-[96%] tracking-[-2px] sm:tracking-[-6px] lg:tracking-[-8px]"
           >
             Finance
             <br />
