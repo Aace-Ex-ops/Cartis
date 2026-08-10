@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Repeat, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -38,7 +37,6 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [userType, setUserType] = useState(user.userType);
-  const router = useRouter();
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +51,15 @@ export function UserMenu({ user }: { user: User }) {
   }, []);
 
   const isBusiness = userType === "business" || userType === "seller";
+
+  async function switchType(next: "personal" | "business") {
+    try {
+      await gql<unknown>(`mutation { updateUserType(userType: "${next}") { id } }`);
+      window.location.reload();
+    } catch {
+      // keep current state; retry next open
+    }
+  }
 
   const initials = user.fullName
     ?.split(" ")
@@ -100,12 +107,13 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          {isBusiness && (
-            <DropdownMenuItem onClick={() => router.push("/dashboard")} className="cursor-pointer">
-              <Repeat className="mr-2 h-4 w-4" />
-              Switch to Personal finance
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem
+            onClick={() => void switchType(isBusiness ? "personal" : "business")}
+            className="cursor-pointer"
+          >
+            <Repeat className="mr-2 h-4 w-4" />
+            {isBusiness ? "Switch to Personal finance" : "Switch to Business"}
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>
