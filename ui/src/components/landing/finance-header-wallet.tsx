@@ -37,6 +37,7 @@ export function FinanceHeaderWallet() {
   useEffect(() => {
     let rafId = 0;
     let last = -1;
+    let watchdogId: ReturnType<typeof setInterval> | null = null;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -89,6 +90,10 @@ export function FinanceHeaderWallet() {
       if (!video) return;
       const progress = getProgress();
       syncVideo(progress);
+      if (watchdogId) {
+        clearInterval(watchdogId);
+        watchdogId = null;
+      }
       if (!rafId) rafId = requestAnimationFrame(apply);
     };
 
@@ -102,12 +107,25 @@ export function FinanceHeaderWallet() {
       video.addEventListener("seeked", onVideoReady);
       video.addEventListener("timeupdate", onTimeUpdate);
       video.addEventListener("ended", onTimeUpdate);
-      if (video.readyState >= 2) onVideoReady();
+      if (video.readyState >= 2) {
+        onVideoReady();
+      } else {
+        watchdogId = setInterval(() => {
+          const v = videoRef.current;
+          if (!v) return;
+          syncVideo(getProgress());
+          if (v.readyState >= 2 && watchdogId) {
+            clearInterval(watchdogId);
+            watchdogId = null;
+          }
+        }, 500);
+      }
     }
     const initialTimeout = setTimeout(onScroll, 100);
     return () => {
       clearTimeout(initialTimeout);
       if (rafId) cancelAnimationFrame(rafId);
+      if (watchdogId) clearInterval(watchdogId);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       if (video) {
@@ -126,6 +144,7 @@ export function FinanceHeaderWallet() {
 
   return (
     <>
+      <link rel="preload" as="video" href={HEADER_BG_URL} />
       <div
         id="scroll-container-wrapper"
         className="relative w-full h-[250vh] max-md:h-[200vh] bg-black select-none text-white"
