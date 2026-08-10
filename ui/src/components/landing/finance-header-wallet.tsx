@@ -6,7 +6,7 @@ import { Menu, Check, X, ArrowUpRight, Send, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
 
-const HEADER_BG_URL = "https://cdn.jiro.build/Wallet/Astro.mp4";
+const HEADER_BG_URL = "/landing/videos/astro.mp4";
 
 const NAV_ITEMS = [
   { label: "Sign in", desc: "Back to your dashboard", href: "/signin" },

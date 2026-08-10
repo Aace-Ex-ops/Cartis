@@ -3,8 +3,7 @@
 import { useEffect, useRef } from "react";
 import { motion } from "motion/react";
 
-const BG_VIDEO =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/Capabilities%20section%20bg.mp4";
+const BG_VIDEO = "/landing/videos/capabilities-bg.mp4";
 
 const CARDS = [
   {

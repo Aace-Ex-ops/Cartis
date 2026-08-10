@@ -4,9 +4,8 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import Image from "next/image";
 
-const BG_VIDEO =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/Overview%20section%20BG.mp4";
-const ARROW = "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/right%20arrow.svg";
+const BG_VIDEO = "/landing/videos/overview-bg.mp4";
+const ARROW = "/landing/svg/right-arrow.svg";
 
 const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
 

@@ -4,10 +4,8 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { AuthAwareLink } from "@/components/shared/auth-aware-link";
 
-const CHAIR_URL =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/chair.png";
-const HEADER_BG_URL =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/header%20bg%20revnue.mp4";
+const CHAIR_URL = "/landing/images/chair.png";
+const HEADER_BG_URL = "/landing/videos/header-bg.mp4";
 
 export function RevnueHero() {
   const [e, setE] = useState(0);

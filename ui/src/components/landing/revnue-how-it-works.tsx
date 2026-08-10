@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import Image from "next/image";
 
-const ARROW_RIGHT = "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/arrow%20right.svg";
-const ARROW_RIGHT_UP =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/arrow%20right%20up.svg";
+const ARROW_RIGHT = "/landing/svg/arrow-right.svg";
+const ARROW_RIGHT_UP = "/landing/svg/arrow-right-up.svg";
 
 const STEPS = [
   {
@@ -14,36 +13,36 @@ const STEPS = [
     cardTitle: "Install & connect",
     cardSubtitle:
       "Install the extension or sign in, then connect your bank or add your ledger. Cartis meets your money where it is.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2001.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2001.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2001.svg",
+    bgImage: "/landing/images/card-bg-01.png",
+    numberSvg: "/landing/svg/number-01.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-01.svg",
   },
   {
     id: "02",
     cardTitle: "Shop & track",
     cardSubtitle:
       "Browse like normal. Cartis checks price, budget, and urgency against your real money in the background.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2002.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2002.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2002.svg",
+    bgImage: "/landing/images/card-bg-02.png",
+    numberSvg: "/landing/svg/number-02.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-02.svg",
   },
   {
     id: "03",
     cardTitle: "Get honest verdicts",
     cardSubtitle:
       "Buy, wait, or avoid — with a plain-English reason tied to your actual budget and wallet.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2003.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2003.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2001.svg",
+    bgImage: "/landing/images/card-bg-03.png",
+    numberSvg: "/landing/svg/number-03.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-01.svg",
   },
   {
     id: "04",
     cardTitle: "Grow & optimize",
     cardSubtitle:
       "Financial advisor, goals, tools, and reports that turn your numbers into a plan you can act on.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2004.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2004.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2001.svg",
+    bgImage: "/landing/images/card-bg-04.png",
+    numberSvg: "/landing/svg/number-04.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-01.svg",
   },
 ];
 
