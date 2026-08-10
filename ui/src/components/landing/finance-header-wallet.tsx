@@ -77,12 +77,23 @@ export function FinanceHeaderWallet() {
       }
     };
 
+    const onVideoReady = () => {
+      const video = videoRef.current;
+      if (!video) return;
+      const progress = getProgress();
+      if (progress < 0.95) {
+        if (!video.paused) video.pause();
+        video.currentTime = 4 * progress;
+      }
+      if (!rafId) rafId = requestAnimationFrame(apply);
+    };
+
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
     const video = videoRef.current;
     if (video) {
-      video.addEventListener("loadedmetadata", onScroll);
-      video.addEventListener("loadeddata", onScroll);
+      video.addEventListener("loadedmetadata", onVideoReady);
+      video.addEventListener("loadeddata", onVideoReady);
       video.addEventListener("timeupdate", onTimeUpdate);
       video.addEventListener("ended", onTimeUpdate);
     }
@@ -93,8 +104,8 @@ export function FinanceHeaderWallet() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       if (video) {
-        video.removeEventListener("loadedmetadata", onScroll);
-        video.removeEventListener("loadeddata", onScroll);
+        video.removeEventListener("loadedmetadata", onVideoReady);
+        video.removeEventListener("loadeddata", onVideoReady);
         video.removeEventListener("timeupdate", onTimeUpdate);
         video.removeEventListener("ended", onTimeUpdate);
       }
