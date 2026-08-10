@@ -37,6 +37,7 @@ export function FinanceHeaderWallet() {
   useEffect(() => {
     let rafId = 0;
     let last = -1;
+    let lastSeekTarget = -1;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -44,23 +45,31 @@ export function FinanceHeaderWallet() {
       if (travel <= 0) return 0;
       return Math.min(Math.max(-el.getBoundingClientRect().top / travel, 0), 1);
     };
+    const syncVideo = (progress: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (progress >= 0.95) {
+        if (video.paused) {
+          video.loop = false;
+          if (video.currentTime < 4) video.currentTime = 4;
+          video.play().catch(() => {});
+        }
+      } else {
+        if (!video.paused) video.pause();
+        const target = Math.round(4 * progress * 10) / 10;
+        if (Math.abs(target - lastSeekTarget) > 0.2) {
+          lastSeekTarget = target;
+          video.currentTime = target;
+        }
+      }
+    };
     const apply = () => {
       rafId = 0;
       const progress = getProgress();
       setScrollProgress(progress);
-      const video = videoRef.current;
-      if (video && Math.abs(progress - last) > 0.0005) {
+      if (Math.abs(progress - last) > 0.0005) {
         last = progress;
-        if (progress >= 0.95) {
-          if (video.paused) {
-            video.loop = false;
-            if (video.currentTime < 4) video.currentTime = 4;
-            video.play().catch(() => {});
-          }
-        } else {
-          if (!video.paused) video.pause();
-          video.currentTime = 4 * progress;
-        }
+        syncVideo(progress);
       }
     };
     const onScroll = () => {
@@ -81,10 +90,8 @@ export function FinanceHeaderWallet() {
       const video = videoRef.current;
       if (!video) return;
       const progress = getProgress();
-      if (progress < 0.95) {
-        if (!video.paused) video.pause();
-        video.currentTime = 4 * progress;
-      }
+      lastSeekTarget = -1;
+      syncVideo(progress);
       if (!rafId) rafId = requestAnimationFrame(apply);
     };
 
