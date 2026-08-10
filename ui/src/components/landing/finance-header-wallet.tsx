@@ -6,7 +6,7 @@ import { Menu, Check, X, ArrowUpRight, Send, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
 
-const HEADER_BG_URL = "/landing/videos/astro.mp4";
+const HEADER_BG_URL = "/landing/videos/astro-v4.mp4";
 
 const NAV_ITEMS = [
   { label: "Sign in", desc: "Back to your dashboard", href: "/signin" },
@@ -23,7 +23,26 @@ export function FinanceHeaderWallet() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    fetch(HEADER_BG_URL)
+      .then((r) => r.blob())
+      .then((b) => {
+        if (!cancelled) {
+          url = URL.createObjectURL(b);
+          setVideoSrc(url);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, []);
 
   useEffect(() => {
     const check = () => {
@@ -144,7 +163,6 @@ export function FinanceHeaderWallet() {
 
   return (
     <>
-      <link rel="preload" as="fetch" type="video/mp4" href={HEADER_BG_URL} />
       <div
         id="scroll-container-wrapper"
         className="relative w-full h-[250vh] max-md:h-[200vh] bg-black select-none text-white"
@@ -154,7 +172,7 @@ export function FinanceHeaderWallet() {
             ref={videoRef}
             id="bg-video-element"
             className="absolute inset-0 w-full h-full object-cover z-0 opacity-90 transition-opacity duration-1000"
-            src={HEADER_BG_URL}
+            src={videoSrc ?? undefined}
             poster="/landing/posters/astro.jpg"
             muted
             playsInline

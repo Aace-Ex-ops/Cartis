@@ -26,6 +26,7 @@ type Env = {
   YODLEE_TEST_LOGIN: string
   YODLEE_BASE_URL: string
   YODLEE_FASTLINK_URL: string
+  YODLEE_CONFIG_NAME?: string
 }
 
 type Session = {
@@ -1014,30 +1015,33 @@ app.post('/webhooks/polar', async (c) => {
 // ── Account linking (Yodlee FastLink) routes ───────────────────────────────
 
 // FastLink launch page: mints a user token server-side and opens the hosted
-// link UI. Callback URL (UI page with ?linked=1) is passed as cb.
+// link UI (FastLink 4). Callback URL (UI page with ?linked=1) is passed as cb.
 app.get('/aa/link', async (c) => {
   const cb = c.req.query('cb') ?? ''
   try {
     const token = await yodleeToken(c, c.env.YODLEE_TEST_LOGIN)
     const fl = c.env.YODLEE_FASTLINK_URL
-    const jsUrl = new URL('/fastlink/js/fastlink.js', fl).toString()
-    const paramsJson = JSON.stringify(cb ? { callbackURL: cb } : {})
+    const paramsJson = JSON.stringify({
+      ...(c.env.YODLEE_CONFIG_NAME ? { configName: c.env.YODLEE_CONFIG_NAME } : {}),
+      ...(cb ? { callback: cb, callbackLocation: 'top' } : {}),
+    })
     return c.html(`<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Link your bank</title><script src="${jsUrl}"></script>
+<title>Link your bank</title><script src="https://cdn.yodlee.com/fastlink/v4/initialize.js"></script>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#334155}div{text-align:center}p{opacity:.7;font-size:14px}</style>
-</head><body><div><p>Opening secure bank link…</p></div>
+</head><body><div id="container-fastlink"><p>Opening secure bank link…</p></div>
 <script>
   var params = ${paramsJson};
   try {
-    fastlink.open({ fastLinkURL: ${JSON.stringify(fl)}, jwtToken: ${JSON.stringify(token)}, params: params });
-    fastlink.on('success', function (data) {
-      if (data && data.providerAccount) {
-        fetch('/aa/success', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ providerAccountId: data.providerAccount.providerAccountId, sessionId: data.sessionId || null }) }).catch(function () {});
-      }
-    });
-    fastlink.on('close', function () { if (params.callbackURL) { window.location.href = params.callbackURL; } });
+    fastlink.open({ fastLinkURL: ${JSON.stringify(fl)}, accessToken: 'Bearer ' + ${JSON.stringify(token)}, params: params,
+      onSuccess: function (data) {
+        if (data && data.providerAccount) {
+          fetch('/aa/success', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ providerAccountId: data.providerAccount.providerAccountId, sessionId: data.sessionId || null }) }).catch(function () {});
+        }
+      },
+      onClose: function () { if (params.callback) { window.location.href = params.callback; } }
+    }, 'container-fastlink');
   } catch (e) { document.body.innerHTML = '<p>FastLink failed to start: ' + e.message + '</p>'; }
 </script></body></html>`)
   } catch (e) {
@@ -1486,8 +1490,38 @@ app.get('/api/advisor/entitlement', auth, async (c) => {
 
 app.all('*', async (c) => {
   const res = await c.env.ASSETS.fetch(c.req.raw)
-  if (!res.headers.get('content-type')?.includes('text/html')) return res
-  return new Response(res.body, { status: res.status, headers: { ...res.headers, 'Cache-Control': 'no-store' } })
+  const isHtml = (res.headers.get('content-type') ?? '').includes('text/html')
+  const range = c.req.raw.method === 'GET' ? c.req.header('Range') : null
+  if (isHtml || !range) {
+    if (isHtml) return new Response(res.body, { status: res.status, headers: { ...res.headers, 'Cache-Control': 'no-store' } })
+    const headers: Record<string, string> = { ...res.headers, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' }
+    const total = Number(res.headers.get('content-length') ?? 0)
+    if (c.req.raw.method === 'GET' && total > 0 && /\.(mp4|webm|mp3|m4v)$/.test(new URL(c.req.raw.url).pathname)) {
+      headers['Content-Range'] = `bytes 0-${total - 1}/${total}`
+      return new Response(res.body, { status: 206, headers })
+    }
+    return new Response(res.body, { status: res.status, headers })
+  }
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range)
+  const total = Number(res.headers.get('content-length') ?? 0)
+  if (!m || total <= 0) return res
+  const start = m[1] ? Number(m[1]) : total - Number(m[2])
+  const end = m[2] ? Number(m[2]) : total - 1
+  if (start > end || start >= total) {
+    return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${total}` } })
+  }
+  const body = await res.arrayBuffer()
+  return new Response(body.slice(start, end + 1), {
+    status: 206,
+    headers: {
+      'Content-Type': res.headers.get('content-type') ?? 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Content-Length': String(end - start + 1),
+      'Accept-Ranges': 'bytes',
+      'ETag': res.headers.get('etag') ?? '',
+      'Cache-Control': 'private, max-age=31536000, immutable',
+    },
+  })
 })
 
 export default app
