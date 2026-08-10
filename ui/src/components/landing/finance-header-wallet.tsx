@@ -22,9 +22,8 @@ export function FinanceHeaderWallet() {
   const [formData, setFormData] = useState({ name: "", email: "", message: "" });
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [showScrollIndicator, setShowScrollIndicator] = useState(true);
+  const [scrollProgress, setScrollProgress] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const rightTextRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const check = () => {
@@ -37,8 +36,7 @@ export function FinanceHeaderWallet() {
 
   useEffect(() => {
     let rafId = 0;
-    let lastProgress = -1;
-    let lastShowIndicator = true;
+    let last = -1;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -49,36 +47,19 @@ export function FinanceHeaderWallet() {
     const apply = () => {
       rafId = 0;
       const progress = getProgress();
-      if (Math.abs(progress - lastProgress) > 0.002) {
-        lastProgress = progress;
-        const rightEl = rightTextRef.current;
-        if (rightEl) {
-          const opacity = Math.min(Math.max((progress - 0.1) / 0.8, 0), 1);
-          const isW = window.innerWidth < 768;
-          const shift = (1 - opacity) * (isW ? 30 : 120);
-          rightEl.style.opacity = String(opacity);
-          rightEl.style.transform = `translateX(${shift}px)`;
-        }
-        const shouldShow = progress < 0.92;
-        if (shouldShow !== lastShowIndicator) {
-          lastShowIndicator = shouldShow;
-          setShowScrollIndicator(shouldShow);
-        }
-        const video = videoRef.current;
-        if (video) {
-          if (progress >= 0.95) {
-            if (video.paused) {
-              video.loop = false;
-              if (video.currentTime < 4) video.currentTime = 4;
-              video.play().catch(() => {});
-            }
-          } else {
-            if (!video.paused) video.pause();
-            const target = 4 * progress;
-            if (Math.abs(video.currentTime - target) > 0.1) {
-              video.currentTime = target;
-            }
+      setScrollProgress(progress);
+      const video = videoRef.current;
+      if (video && Math.abs(progress - last) > 0.0005) {
+        last = progress;
+        if (progress >= 0.95) {
+          if (video.paused) {
+            video.loop = false;
+            if (video.currentTime < 4) video.currentTime = 4;
+            video.play().catch(() => {});
           }
+        } else {
+          if (!video.paused) video.pause();
+          video.currentTime = 4 * progress;
         }
       }
     };
@@ -119,6 +100,9 @@ export function FinanceHeaderWallet() {
       }
     };
   }, []);
+
+  const rightTextOpacity = Math.min(Math.max((scrollProgress - 0.1) / 0.8, 0), 1);
+  const rightTextShift = (1 - rightTextOpacity) * (isMobile ? 30 : 120);
 
   return (
     <>
@@ -222,9 +206,11 @@ export function FinanceHeaderWallet() {
               </div>
             </motion.div>
             <div
-              ref={rightTextRef}
               id="right-text-block"
-              style={{ opacity: 0, transform: "translateX(120px)" }}
+              style={{
+                opacity: rightTextOpacity,
+                transform: `translateX(${rightTextShift}px)`,
+              }}
               className="absolute right-6 md:right-[80px] bottom-12 md:bottom-[90px] text-right z-20"
             >
               <h1
@@ -241,7 +227,7 @@ export function FinanceHeaderWallet() {
               </h1>
             </div>
             <AnimatePresence>
-              {showScrollIndicator && (
+              {!(scrollProgress >= 0.92) && (
                 <motion.div
                   key="scroll-indicator"
                   initial={{ opacity: 0, y: 10 }}
