@@ -65,6 +65,7 @@ export function RevnueHero() {
               onError={() => setVideoOk(false)}
               className="w-full h-full object-cover select-none"
               src={HEADER_BG_URL}
+              poster="/landing/posters/header-bg.jpg"
             />
             <div className="absolute inset-0 bg-white/10 backdrop-blur-[1px]" />
           </div>

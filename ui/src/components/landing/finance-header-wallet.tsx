@@ -116,6 +116,7 @@ export function FinanceHeaderWallet() {
             id="bg-video-element"
             className="absolute inset-0 w-full h-full object-cover z-0 opacity-90 transition-opacity duration-1000"
             src={HEADER_BG_URL}
+            poster="/landing/posters/astro.jpg"
             muted
             playsInline
             loop

@@ -46,6 +46,7 @@ export function RevnueOverview() {
           playsInline
           className="w-full h-full object-cover select-none pointer-events-none"
           src={BG_VIDEO}
+          poster="/landing/posters/overview-bg.jpg"
         />
         <div className="absolute inset-0 bg-white/5" />
       </div>

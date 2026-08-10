@@ -175,6 +175,7 @@ export function RevnueCapabilities() {
           playsInline
           className="w-full h-full object-cover object-center select-none"
           src={BG_VIDEO}
+          poster="/landing/posters/capabilities-bg.jpg"
         />
       </div>
       <div className="relative z-10 w-full flex flex-col gap-16">
