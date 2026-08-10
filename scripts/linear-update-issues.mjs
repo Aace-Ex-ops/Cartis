@@ -32,13 +32,14 @@ E2E (Samsung Galaxy S24 Ultra @ ₹1,09,999): flipkart ₹79,999 · reliancedigi
   {
     identifier: "CARTIS-104",
     state: "InProgress",
-    comment: `**Code shipped + verified live** (commit \`3d3e7c6\`, gateway \`fc946bd1\`, backend rebuilt+restarted).
+    comment: `**Aug 10: Resend replaced with Amazon SES** (domain \`cartis.dpdns.org\`, region ap-south-2). Gateway \`/api/email\` now signs SigV4 via \`aws4fetch\` → SES SendEmail. Secrets: \`AWS_ACCESS_KEY_ID/SECRET\` (IAM \`cartis-worker-email\`, email-only policy), \`AWS_REGION\`, \`EMAIL_FROM=Cartis <no-reply@cartis.dpdns.org>\`. Resend domain + \`RESEND_API_KEY\` secret deleted. Backend unchanged.
 
-Backend \`send_email\` now POSTs to gateway \`/api/email\` (x-cartis-backend-secret) → Resend with the **worker's valid send-only key** (instance key is dead). Dropped \`lettre\`. Same pattern as \`revoke_gateway_sessions\`.
+- Domain moved to Cloudflare DNS; \`https://cartis.dpdns.org\` serves the gateway (custom domain, live).
+- SES domain identity: 3 Easy-DKIM CNAMEs in DNS (verified at the authoritative nameservers) — status **PENDING → SUCCESS** (AWS polls; up to 24h).
+- Gmail recipient verified for sandbox test; production access requested.
+- SigV4 verified live (SES accepts the signature; rejects only the unverified From until DKIM resolves).
 
-Verified: proxy returns \`{"ok":true}\` to key owner \`dsjzcjmsh6@privaterelay.appleid.com\`.
-
-Remaining user action: **verify a domain in Resend** (resend.com/domains — can be \`cartis.dpdns.org\` once digiplat zone is live, or any domain you own). Then set \`EMAIL_FROM=Cartis <no-reply@yourdomain>\` var on the gateway. Until then, sends to non-owner addresses return 403 (test-sender restriction).`,
+Remaining: DKIM → SUCCESS, live send test to \`kyahifarakpdtahein@gmail.com\`, production-access decision → then Done.`,
   },
   {
     identifier: "CARTIS-105",
