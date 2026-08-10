@@ -22,8 +22,9 @@ export function FinanceHeaderWallet() {
   const [formData, setFormData] = useState({ name: "", email: "", message: "" });
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [scrollProgress, setScrollProgress] = useState(0);
+  const [showScrollIndicator, setShowScrollIndicator] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const rightTextRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const check = () => {
@@ -36,7 +37,7 @@ export function FinanceHeaderWallet() {
 
   useEffect(() => {
     let rafId = 0;
-    let last = -1;
+    let lastProgress = -1;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -47,8 +48,17 @@ export function FinanceHeaderWallet() {
     const apply = () => {
       rafId = 0;
       const progress = getProgress();
-      if (Math.abs(progress - last) > 0.002) {
-        setScrollProgress(progress);
+      if (Math.abs(progress - lastProgress) > 0.002) {
+        lastProgress = progress;
+        const rightEl = rightTextRef.current;
+        if (rightEl) {
+          const opacity = Math.min(Math.max((progress - 0.1) / 0.8, 0), 1);
+          const isW = window.innerWidth < 768;
+          const shift = (1 - opacity) * (isW ? 30 : 120);
+          rightEl.style.opacity = String(opacity);
+          rightEl.style.transform = `translateX(${shift}px)`;
+        }
+        setShowScrollIndicator(progress < 0.92);
         const video = videoRef.current;
         if (video) {
           if (progress >= 0.95) {
@@ -59,10 +69,12 @@ export function FinanceHeaderWallet() {
             }
           } else {
             if (!video.paused) video.pause();
-            video.currentTime = 4 * progress;
+            const target = 4 * progress;
+            if (Math.abs(video.currentTime - target) > 0.1) {
+              video.currentTime = target;
+            }
           }
         }
-        last = progress;
       }
     };
     const onScroll = () => {
@@ -103,9 +115,6 @@ export function FinanceHeaderWallet() {
     };
   }, []);
 
-  const rightTextOpacity = Math.min(Math.max((scrollProgress - 0.1) / 0.8, 0), 1);
-  const rightTextShift = (1 - rightTextOpacity) * (isMobile ? 30 : 120);
-
   return (
     <>
       <div
@@ -122,29 +131,10 @@ export function FinanceHeaderWallet() {
             muted
             playsInline
             loop
+            preload="auto"
           />
           <div className="absolute inset-0 bg-black/35 z-10 pointer-events-none" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/60 z-10 pointer-events-none" />
-          <style>{`
-            @media (min-width: 1024px) {
-              .anybody-heading {
-                font-size: 70px !important;
-                line-height: 1.1 !important;
-              }
-            }
-            @media (min-width: 768px) and (max-width: 1023px) {
-              .anybody-heading {
-                font-size: 52px !important;
-                line-height: 1.1 !important;
-              }
-            }
-            @media (max-width: 767px) {
-              .anybody-heading {
-                font-size: 34px !important;
-                line-height: 1.2 !important;
-              }
-            }
-          `}</style>
           <header
             id="top-nav-bar"
             className="absolute top-0 left-0 right-0 z-30 flex justify-between items-center px-4 md:px-[80px] py-6 md:py-12"
@@ -227,12 +217,9 @@ export function FinanceHeaderWallet() {
               </div>
             </motion.div>
             <div
+              ref={rightTextRef}
               id="right-text-block"
-              style={{
-                opacity: rightTextOpacity,
-                transform: `translateX(${rightTextShift}px)`,
-
-              }}
+              style={{ opacity: 0, transform: "translateX(120px)" }}
               className="absolute right-6 md:right-[80px] bottom-12 md:bottom-[90px] text-right z-20"
             >
               <h1
@@ -249,7 +236,7 @@ export function FinanceHeaderWallet() {
               </h1>
             </div>
             <AnimatePresence>
-              {!(scrollProgress >= 0.92) && (
+              {showScrollIndicator && (
                 <motion.div
                   key="scroll-indicator"
                   initial={{ opacity: 0, y: 10 }}
