@@ -122,7 +122,9 @@ export function UserMenu({ user }: { user: User }) {
 
       <Dialog open={openPanel !== null} onOpenChange={(v) => { if (!v) setOpenPanel(null); }}>
         <DialogContent className="max-w-3xl h-[min(640px,calc(100vh-3rem))] flex flex-col overflow-hidden">
-          {ActivePanel && <ActivePanel />}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {ActivePanel && <ActivePanel />}
+          </div>
         </DialogContent>
       </Dialog>
     </>
