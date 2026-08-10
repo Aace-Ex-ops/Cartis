@@ -47,22 +47,22 @@ export function FinanceHeaderWallet() {
     const apply = () => {
       rafId = 0;
       const progress = getProgress();
-      if (Math.abs(progress - last) > 0.0005) {
-        last = progress;
+      if (Math.abs(progress - last) > 0.002) {
         setScrollProgress(progress);
-      }
-      const video = videoRef.current;
-      if (video && Math.abs(progress - last) > 0.0005) {
-        if (progress >= 0.95) {
-          if (video.paused) {
-            video.loop = false;
-            if (video.currentTime < 4) video.currentTime = 4;
-            video.play().catch(() => {});
+        const video = videoRef.current;
+        if (video) {
+          if (progress >= 0.95) {
+            if (video.paused) {
+              video.loop = false;
+              if (video.currentTime < 4) video.currentTime = 4;
+              video.play().catch(() => {});
+            }
+          } else {
+            if (!video.paused) video.pause();
+            video.currentTime = 4 * progress;
           }
-        } else {
-          if (!video.paused) video.pause();
-          video.currentTime = 4 * progress;
         }
+        last = progress;
       }
     };
     const onScroll = () => {
