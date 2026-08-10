@@ -38,6 +38,7 @@ export function FinanceHeaderWallet() {
   useEffect(() => {
     let rafId = 0;
     let lastProgress = -1;
+    let lastShowIndicator = true;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -58,7 +59,11 @@ export function FinanceHeaderWallet() {
           rightEl.style.opacity = String(opacity);
           rightEl.style.transform = `translateX(${shift}px)`;
         }
-        setShowScrollIndicator(progress < 0.92);
+        const shouldShow = progress < 0.92;
+        if (shouldShow !== lastShowIndicator) {
+          lastShowIndicator = shouldShow;
+          setShowScrollIndicator(shouldShow);
+        }
         const video = videoRef.current;
         if (video) {
           if (progress >= 0.95) {
