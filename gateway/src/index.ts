@@ -1,6 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { AwsClient } from 'aws4fetch'
 import { analyzeProduct, type ScrapedProduct } from './coach'
 
 type Env = {
@@ -19,9 +18,7 @@ type Env = {
   SETU_CLIENT_SECRET: string
   SETU_PRODUCT_INSTANCE_ID: string
   EXA_API_KEY?: string
-  AWS_ACCESS_KEY_ID: string
-  AWS_SECRET_ACCESS_KEY: string
-  AWS_REGION: string
+  RESEND_API_KEY?: string
   EMAIL_FROM?: string
   YODLEE_CLIENT_ID: string
   YODLEE_SECRET: string
@@ -588,37 +585,20 @@ app.post('/auth/revoke-all', async (c) => {
 app.post('/api/email', async (c) => {
   const secret = c.req.header('x-cartis-backend-secret')
   if (!secret || secret !== c.env.BACKEND_SECRET) return c.json({ error: 'unauthorized' }, 401)
-  if (!c.env.AWS_ACCESS_KEY_ID || !c.env.AWS_SECRET_ACCESS_KEY || !c.env.AWS_REGION) {
-    return c.json({ error: 'SES not configured' }, 503)
-  }
+  if (!c.env.RESEND_API_KEY) return c.json({ error: 'no RESEND_API_KEY' }, 503)
   const { to, subject, html } = (await c.req.json().catch(() => ({}))) as { to?: string; subject?: string; html?: string }
   if (!to || !subject || !html) return c.json({ error: 'to, subject, html required' }, 400)
-  const from = c.env.EMAIL_FROM ?? 'Cartis <no-reply@cartis.dpdns.org>'
-  const aws = new AwsClient({
-    accessKeyId: c.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: c.env.AWS_SECRET_ACCESS_KEY,
-    region: c.env.AWS_REGION,
-    service: 'ses',
-  })
-  const res = await aws.fetch(`https://email.${c.env.AWS_REGION}.amazonaws.com/v2/email/outbound-emails`, {
+  const from = c.env.EMAIL_FROM ?? 'Cartis <onboarding@resend.dev>'
+  const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      FromEmailAddress: from,
-      Destination: { ToAddresses: [to] },
-      Content: {
-        Simple: {
-          Subject: { Data: subject },
-          Body: { Html: { Data: html } },
-        },
-      },
-    }),
+    headers: { Authorization: `Bearer ${c.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to, subject, html }),
   })
   const ok = res.ok
   if (!ok) {
     const body = await res.text().catch(() => '')
     c.env.SESSIONS.put(`email:fail:${Date.now()}`, body.slice(0, 500), { expirationTtl: 86400 })
-    return c.json({ error: `ses ${res.status}`, detail: body.slice(0, 300) }, 502)
+    return c.json({ error: `resend ${res.status}`, detail: body.slice(0, 300) }, 502)
   }
   return c.json({ ok: true })
 })
