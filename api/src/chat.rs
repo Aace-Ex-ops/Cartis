@@ -766,7 +766,15 @@ async fn fetch_model(state: &Arc<AppState>, uid: &str) -> Result<Option<String>,
             &[&uid],
         )
         .await?;
-    Ok(row.map(|r| r.get(0)))
+    Ok(row.map(|r| r.get::<_, Option<String>>(0).flatten().map(normalize_model)))
+}
+
+fn normalize_model(m: String) -> String {
+    match m.as_str() {
+        "@cf/meta/llama-3.3-70b-instruct" => "@cf/meta/llama-3.3-70b-instruct-fp8-fast".to_string(),
+        "@cf/meta/llama-3.1-8b-instruct" => "@cf/meta/llama-3.1-8b-instruct-fp8".to_string(),
+        other => other.to_string(),
+    }
 }
 
 async fn build_context(

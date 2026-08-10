@@ -16,11 +16,11 @@ const MODELS = [
     name: "Llama 4 Scout",
   },
   {
-    id: "@cf/meta/llama-3.3-70b-instruct",
+    id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     name: "Llama 3.3 70B",
   },
   {
-    id: "@cf/meta/llama-3.1-8b-instruct",
+    id: "@cf/meta/llama-3.1-8b-instruct-fp8",
     name: "Llama 3.1 8B",
   },
 ];
