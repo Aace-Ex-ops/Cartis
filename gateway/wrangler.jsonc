@@ -23,7 +23,7 @@
     "YODLEE_FASTLINK_URL": "https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink"
   },
   "routes": [
-    { "pattern": "cartis.dpdns.org", "custom_domain": true }
+    { "pattern": "cartis.dpdns.org/*", "zone_id": "12c93c063d628e35c8800043a1af33f6" }
   ],
   "workers_dev": true,
   "observability": {
