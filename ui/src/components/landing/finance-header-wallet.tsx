@@ -37,7 +37,6 @@ export function FinanceHeaderWallet() {
   useEffect(() => {
     let rafId = 0;
     let last = -1;
-    let lastSeekTarget = -1;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -56,9 +55,8 @@ export function FinanceHeaderWallet() {
         }
       } else {
         if (!video.paused) video.pause();
-        const target = Math.round(4 * progress * 10) / 10;
-        if (Math.abs(target - lastSeekTarget) > 0.2) {
-          lastSeekTarget = target;
+        const target = 4 * progress;
+        if (video.readyState >= 2 && Math.abs(target - video.currentTime) > 0.02) {
           video.currentTime = target;
         }
       }
@@ -90,7 +88,6 @@ export function FinanceHeaderWallet() {
       const video = videoRef.current;
       if (!video) return;
       const progress = getProgress();
-      lastSeekTarget = -1;
       syncVideo(progress);
       if (!rafId) rafId = requestAnimationFrame(apply);
     };
@@ -101,8 +98,11 @@ export function FinanceHeaderWallet() {
     if (video) {
       video.addEventListener("loadedmetadata", onVideoReady);
       video.addEventListener("loadeddata", onVideoReady);
+      video.addEventListener("canplay", onVideoReady);
+      video.addEventListener("seeked", onVideoReady);
       video.addEventListener("timeupdate", onTimeUpdate);
       video.addEventListener("ended", onTimeUpdate);
+      if (video.readyState >= 2) onVideoReady();
     }
     const initialTimeout = setTimeout(onScroll, 100);
     return () => {
@@ -113,6 +113,8 @@ export function FinanceHeaderWallet() {
       if (video) {
         video.removeEventListener("loadedmetadata", onVideoReady);
         video.removeEventListener("loadeddata", onVideoReady);
+        video.removeEventListener("canplay", onVideoReady);
+        video.removeEventListener("seeked", onVideoReady);
         video.removeEventListener("timeupdate", onTimeUpdate);
         video.removeEventListener("ended", onTimeUpdate);
       }
