@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Repeat, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useLenis } from "@/components/providers/smooth-scroll-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,7 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [userType, setUserType] = useState(user.userType);
+  const lenis = useLenis();
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +51,15 @@ export function UserMenu({ user }: { user: User }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!lenis) return;
+    if (openPanel) {
+      lenis.stop();
+    } else {
+      lenis.start();
+    }
+  }, [openPanel, lenis]);
 
   const isBusiness = userType === "business" || userType === "seller";
 
