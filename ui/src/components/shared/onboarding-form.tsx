@@ -101,7 +101,7 @@ export function OnboardingForm() {
       <Step>
         <StepHeading
           title="Step 1 · Who are you?"
-          body="Personal finance, or run a business too? You can switch anytime."
+          body="Personal finance, or run a business too? Business starts with a free 7-day trial."
         />
         <div className="grid grid-cols-2 gap-3">
           <button

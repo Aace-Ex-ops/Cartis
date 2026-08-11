@@ -86,7 +86,9 @@ impl QueryRoot {
                         dependents, debt_emis::float8,
                         monthly_tax::float8,
                         ai_model, business_name,
-                        email_notifications, business_type
+                        email_notifications, business_type,
+                        plan, trial_ends_at::text,
+                        COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -872,7 +874,9 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications, business_type",
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
                 &[
                     &uid,
                     &monthly_income.map(|v| v.to_string()),
@@ -902,7 +906,9 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications, business_type",
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
                 &[&uid, &model],
             )
             .await?;
@@ -932,7 +938,9 @@ impl MutationRoot {
         let row = pg(ctx).get().await?
             .query_one(
                 "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name),
-                                   business_type = COALESCE($4, business_type)
+                                   business_type = COALESCE($4, business_type),
+                                   plan = CASE WHEN $2::varchar = 'business' AND COALESCE(plan, 'free') = 'free' THEN 'trial' ELSE plan END,
+                                   trial_ends_at = CASE WHEN $2::varchar = 'business' AND COALESCE(plan, 'free') = 'free' THEN now() + interval '7 days' ELSE trial_ends_at END
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
                            wallet_balance::float8, monthly_tab_limit::float8,
@@ -942,8 +950,37 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications, business_type",
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
                 &[&uid, &user_type, &business_name, &business_type],
+            )
+            .await?;
+        Ok(User::from_row(row))
+    }
+
+    async fn set_plan(&self, ctx: &Context<'_>, plan: String) -> Result<User> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        // enterprise has no self-serve checkout — owner sets it directly
+        let plan = match plan.as_str() {
+            "enterprise" => "enterprise",
+            _ => return Err("only the enterprise plan can be self-activated".into()),
+        };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "UPDATE users SET plan = $2, trial_ends_at = NULL WHERE user_id::text = $1
+                 RETURNING user_id::text, email, full_name, avatar_url, user_type,
+                           wallet_balance::float8, monthly_tab_limit::float8,
+                           annual_deferred_limit::float8, financial_health_score,
+                           coach_adherence_score::float8,
+                           monthly_income::float8, monthly_spend::float8,
+                           investment_pct::float8, housing_cost::float8,
+                           dependents, debt_emis::float8,
+                           monthly_tax::float8, ai_model, business_name,
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
+                &[&uid, &plan],
             )
             .await?;
         Ok(User::from_row(row))
@@ -1340,7 +1377,7 @@ impl MutationRoot {
         let row = pg(ctx).get().await?
             .query_one(
                 "INSERT INTO financial_goals (user_id, goal_type, name, target_amount, current_amount, target_date)
-                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::date)
+                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::date)
                  RETURNING goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text",
                 &[&uid, &goal_type, &name, &target_amount.to_string(), &current_amount.unwrap_or(0.0).to_string(), &target_date],
             )
@@ -1364,7 +1401,7 @@ impl MutationRoot {
                     current_amount = COALESCE($3::text::numeric, current_amount),
                     target_amount = COALESCE($4::text::numeric, target_amount),
                     name = COALESCE($5, name),
-                    target_date = COALESCE($6::date, target_date),
+                    target_date = COALESCE($6::text::date, target_date),
                     updated_at = now()
                  WHERE goal_id::text = $1 AND user_id::text = $2
                  RETURNING goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text",
@@ -1497,6 +1534,9 @@ struct User {
     business_name: Option<String>,
     email_notifications: bool,
     business_type: String,
+    plan: String,
+    trial_ends_at: Option<String>,
+    effective_plan: String,
 }
 
 #[Object]
@@ -1522,6 +1562,9 @@ impl User {
     async fn business_name(&self) -> Option<&str> { self.business_name.as_deref() }
     async fn email_notifications(&self) -> bool { self.email_notifications }
     async fn business_type(&self) -> &str { &self.business_type }
+    async fn plan(&self) -> &str { &self.plan }
+    async fn trial_ends_at(&self) -> Option<&str> { self.trial_ends_at.as_deref() }
+    async fn effective_plan(&self) -> &str { &self.effective_plan }
 }
 
 struct AuthUser {
@@ -1572,6 +1615,9 @@ impl User {
             business_name: r.get(18),
             email_notifications: r.get(19),
             business_type: r.get(20),
+            plan: r.get(21),
+            trial_ends_at: r.get(22),
+            effective_plan: r.get(23),
         }
     }
 }

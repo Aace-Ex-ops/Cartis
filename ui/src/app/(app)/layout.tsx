@@ -52,12 +52,18 @@ const BUSINESS_NAV = [
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [userType, setUserType] = useState<string | null>(null);
+  const [effectivePlan, setEffectivePlan] = useState<string>("free");
 
   useEffect(() => {
     let cancelled = false;
-    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
+    void gql<{ me?: { userType?: string; effectivePlan?: string } | null }>(
+      "{ me { userType effectivePlan } }"
+    )
       .then((d) => {
-        if (!cancelled) setUserType(d.me?.userType ?? "personal");
+        if (!cancelled) {
+          setUserType(d.me?.userType ?? "personal");
+          setEffectivePlan(d.me?.effectivePlan ?? "free");
+        }
       })
       .catch(() => {
         if (!cancelled) setUserType("personal");
@@ -68,13 +74,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isBusiness = userType === "business" || userType === "seller";
+  const isEnterprise = effectivePlan === "enterprise";
+  const groups = isEnterprise
+    ? [...PERSONAL_NAV, ...BUSINESS_NAV]
+    : isBusiness
+      ? BUSINESS_NAV
+      : PERSONAL_NAV;
 
   return (
     <DashboardShell
-      groups={isBusiness ? BUSINESS_NAV : PERSONAL_NAV}
+      groups={groups}
       upgrade={
-        isBusiness
-          ? { title: "Business", subtitle: "SMB plan", href: "/dashboard" }
+        isBusiness && !isEnterprise
+          ? { title: effectivePlan === "trial" ? "Trial" : "Business", subtitle: "Team plan", href: "/dashboard" }
           : undefined
       }
     >
