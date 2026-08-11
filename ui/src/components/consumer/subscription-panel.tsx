@@ -31,7 +31,7 @@ const PERSONAL_PLANS: Plan[] = [
     price: `${CURRENCY}499/mo`,
     desc: "Everything in Free, plus unlimited AI coaching and insights.",
     cta: "Upgrade to Pro",
-    productId: "9afd6c39-4e44-47f8-bd76-38c5b8166324",
+    productId: "57780d49-cca0-43eb-91fd-6a538e261f67",
   },
   {
     plan: "max",
@@ -39,7 +39,7 @@ const PERSONAL_PLANS: Plan[] = [
     price: `${CURRENCY}1,499/mo`,
     desc: "Everything in Pro, plus priority support and advanced analytics.",
     cta: "Upgrade to Max",
-    productId: "78bc8c82-a1b1-4fc6-a7a0-680b55fa63f8",
+    productId: "c70e8ce4-7151-4705-adbf-7c828a1cb7fe",
   },
 ];
 
@@ -50,7 +50,7 @@ const BUSINESS_PLANS: Plan[] = [
     price: `${CURRENCY}4,999/mo`,
     desc: "SMB essentials — P&L, cash flow, GST & tax, inventory, advisor.",
     cta: "Start Team",
-    productId: "cc1b8227-db5b-4909-9b7a-12b24a8e8ff4",
+    productId: "4caad456-f357-4934-8afe-b73af5b0872f",
   },
   {
     plan: "team_premium",
@@ -58,7 +58,7 @@ const BUSINESS_PLANS: Plan[] = [
     price: `${CURRENCY}9,999/mo`,
     desc: "Everything in Standard, plus premium seats and advanced tools.",
     cta: "Go Premium",
-    productId: "b67bf07d-9007-4880-86ab-b982f85f7119",
+    productId: "b5ca8384-87d0-4a59-9229-95c2be263df8",
   },
   {
     plan: "enterprise",
