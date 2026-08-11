@@ -164,7 +164,7 @@ impl QueryRoot {
             .query(
                 "SELECT transaction_type, amount::float8, description, transaction_date::text, created_at::text
                  FROM ledger_entries WHERE user_id::text = $1
-                 ORDER BY created_at DESC LIMIT $2",
+                 ORDER BY created_at DESC LIMIT $2::int4",
                 &[&uid, &limit.unwrap_or(10)],
             )
             .await?;
