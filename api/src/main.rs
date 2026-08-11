@@ -24,14 +24,12 @@ mod insights;
 
 pub struct AppState {
     pub pg: deadpool_postgres::Pool,
-    pub redis: Option<redis::Client>,
     pub admin_tokens: Mutex<HashSet<String>>,
 }
 
 #[tokio::main]
 async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL required");
-    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let port = env::var("PORT").unwrap_or_else(|_| "8000".into());
     let backend_secret = env::var("BACKEND_SECRET").unwrap_or_default();
 
@@ -41,23 +39,8 @@ async fn main() {
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
         .expect("postgres pool creation failed");
 
-    let redis = match redis::Client::open(redis_url) {
-        Ok(c) => match c.get_async_connection().await {
-            Ok(_) => Some(c),
-            Err(e) => {
-                eprintln!("redis unavailable, continuing without cache: {e}");
-                None
-            }
-        },
-        Err(e) => {
-            eprintln!("redis misconfigured, continuing without cache: {e}");
-            None
-        }
-    };
-
     let state = Arc::new(AppState {
         pg,
-        redis,
         admin_tokens: Mutex::new(HashSet::new()),
     });
     bootstrap_admin(&state).await;
@@ -81,7 +64,6 @@ async fn main() {
             "/chat/sessions/{session_id}",
             patch(chat::rename_session).delete(chat::delete_session),
         )
-        .route("/api/email", post(api_email))
         .route("/api/admin/login", post(admin::login))
         .route("/api/admin/admins", post(admin::add_admin))
         .route("/api/admin/users", axum::routing::get(admin::users))
@@ -89,6 +71,7 @@ async fn main() {
         .route("/api/admin/emails", axum::routing::get(admin::emails))
         .route("/api/admin/logins", axum::routing::get(admin::logins))
         .route("/setu-proxy", post(setu_proxy))
+        .route("/plan/update", post(plan_update))
         .with_state(state.clone())
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(
@@ -171,18 +154,35 @@ async fn setu_proxy(
 }
 
 #[derive(Deserialize)]
-struct EmailReq {
-    to: String,
-    subject: String,
-    html: String,
+struct PlanUpdateReq {
+    user_id: String,
+    plan: String,
 }
 
-async fn api_email(
+// Called by the gateway (Polar webhook) with a valid BACKEND_SECRET.
+async fn plan_update(
     State(state): State<Arc<AppState>>,
-    axum::extract::Json(body): axum::extract::Json<EmailReq>,
-) -> Result<StatusCode, StatusCode> {
-    email::send_email(&state.pg, &body.to, &body.subject, &body.html).await;
-    Ok(StatusCode::OK)
+    axum::extract::Json(req): axum::extract::Json<PlanUpdateReq>,
+) -> Result<axum::response::Json<serde_json::Value>, (StatusCode, String)> {
+    let valid = match req.plan.as_str() {
+        "pro" | "max" | "team_standard" | "team_premium" | "enterprise" | "free" => true,
+        _ => false,
+    };
+    if !valid {
+        return Err((StatusCode::BAD_REQUEST, "invalid plan".into()));
+    }
+    let rows = state
+        .pg
+        .get()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .execute(
+            "UPDATE users SET plan = $2, trial_ends_at = NULL WHERE user_id::text = $1",
+            &[&req.user_id, &req.plan],
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(axum::response::Json(serde_json::json!({ "ok": rows > 0 })))
 }
 
 // Seed the first admin from env (ADMIN_EMAIL/ADMIN_PASSWORD) if none exists.

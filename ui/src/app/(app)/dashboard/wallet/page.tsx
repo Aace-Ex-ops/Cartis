@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, Landmark, Wallet2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WalletCard } from "@/components/consumer/wallet-card";
-import { AaReconnect } from "@/components/consumer/aa-connect";
+import { AaLinkRest, AaReconnect } from "@/components/consumer/aa-connect";
 import { gql } from "@/lib/gql";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,7 +48,9 @@ const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 
 function formatSync(iso: string | null): string {
   if (!iso) return "Never synced";
-  return new Date(iso.replace(" ", "T")).toLocaleString("en-IN", {
+  const d = new Date(typeof iso === "string" ? iso.replace(" ", "T") : iso);
+  if (Number.isNaN(d.getTime())) return "Never synced";
+  return d.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
@@ -188,6 +190,16 @@ export default function WalletPage() {
                 me: MeProfile | null;
               }>(QUERY).then(setData).catch(() => {});
             }} />
+            <AaLinkRest onSynced={() => {
+              void gql<{
+                bankAccounts: BankAccount[];
+                monthlyTab: { limit: number; spent: number };
+                aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+                ledgerTransactions: LedgerTx[];
+                incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+                me: MeProfile | null;
+              }>(QUERY).then(setData).catch(() => {});
+            }} />
           </CardContent>
         </Card>
       )}
@@ -247,7 +259,7 @@ export default function WalletPage() {
           ))}
           {data.incomeStreams.length > 0 && (
             <div className="col-span-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 sm:col-span-3">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-primary">Income synced from bank</div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-primary">Income sources</div>
               <div className="mt-1 flex flex-wrap gap-2">
                 {data.incomeStreams.map((s, i) => (
                   <span key={i} className="rounded-full bg-background/70 px-2.5 py-1 text-[12px] text-foreground">
@@ -264,8 +276,28 @@ export default function WalletPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-6">
             <p className="text-[13px] text-muted-foreground text-center">
-              Connect your bank via Account Aggregator to sync transactions automatically.
+              Sync your linked bank accounts to pull balances into Cartis.
             </p>
+            <AaReconnect onSynced={() => {
+              void gql<{
+                bankAccounts: BankAccount[];
+                monthlyTab: { limit: number; spent: number };
+                aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+                ledgerTransactions: LedgerTx[];
+                incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+                me: MeProfile | null;
+              }>(QUERY).then(setData).catch(() => {});
+            }} />
+            <AaLinkRest onSynced={() => {
+              void gql<{
+                bankAccounts: BankAccount[];
+                monthlyTab: { limit: number; spent: number };
+                aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+                ledgerTransactions: LedgerTx[];
+                incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+                me: MeProfile | null;
+              }>(QUERY).then(setData).catch(() => {});
+            }} />
           </CardContent>
         </Card>
       )}
