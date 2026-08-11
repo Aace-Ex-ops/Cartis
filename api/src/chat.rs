@@ -463,6 +463,20 @@ async fn persist_and_stream(
 
     send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
 
+    if env::var("CHAT_PROVIDER").as_deref() == Ok("groq") {
+        return groq_stream(
+            system,
+            messages,
+            tx,
+            state,
+            session_id,
+            uid,
+            user_message,
+            mode,
+        )
+        .await;
+    }
+
     let token = match crate::insights::ai_token().await {
         Ok(t) => t,
         Err(e) => {
@@ -573,20 +587,131 @@ async fn persist_and_stream(
     send(sse("[DONE]")).await;
 }
 
-// One-shot capture of goal / holding / profile facts from the last exchange.
-// Three cheap 8B calls run in parallel; fail-open (empty object on any error — chat unaffected).
-async fn extract_captures(
-    account: &str,
-    token: &str,
-    user_message: &str,
-    reply: &str,
+// One-shot capture of goal / holding / profile / budget facts from the last exchange.
+// Four cheap model calls run in parallel; fail-open (empty object on any error — chat unaffected).
+const GOAL_PROMPT: &str = "You extract one saveable financial goal from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange contains a concrete goal with a real amount, return {\"goal\":{\"goal_type\":\"<emergency|retirement|home|education|other>\",\"name\":\"<short title>\",\"target_amount\":<INR number>,\"current_amount\":<INR number if known>}}. Otherwise return {}. Only use numbers the user stated or the assistant computed; never invent amounts — omit current_amount unless the user explicitly stated it.";
+const HOLDING_PROMPT: &str = "You extract one portfolio purchase from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange contains a concrete purchase or investment, return {\"holding\":{\"asset_type\":\"<equity|mutual_fund|fd|gold|cash|other>\",\"name\":\"<instrument name>\",\"quantity\":<units>,\"avg_price\":<INR per unit if known>}}. Otherwise return {}. Only use numbers the user stated or the assistant computed; never invent prices. If only a lump-sum amount is stated (e.g. \"invest 50000 in a Nifty fund\"), use quantity 1 and avg_price = the amount.";
+const PROFILE_PROMPT: &str = "You extract financial profile facts from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange states any of the user's financial details, return {\"profile\":{\"monthly_income\":<INR/month if stated>,\"monthly_spend\":<INR/month if stated>,\"investment_pct\":<0-100 if stated>,\"housing_cost\":<INR/month if stated>,\"dependents\":<integer if stated>,\"debt_emis\":<INR/month if stated>,\"monthly_tax\":<INR/month if stated>}} with only the stated fields. Otherwise return {}. housing_cost and debt_emis are recurring monthly costs the user pays now (rent, EMI) — never a one-time goal or investment amount, and never a value from a savings goal. Never invent, compute, or default values — omit any field the user did not explicitly state, including investment_pct.";
+const BUDGET_PROMPT: &str = "You extract a monthly budget from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the user stated or agreed to a monthly spending budget, return {\"budget\":{\"limit\":<INR per month>}}. Otherwise return {}. Only use a number the user stated or the assistant computed; never invent a budget.";
+
+fn groq_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .unwrap_or_default()
+}
+
+fn validate_goal(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let goal = parsed.get("goal")?;
+    let goal_type = goal.get("goal_type")?.as_str()?;
+    const KINDS: [&str; 5] = ["emergency", "retirement", "home", "education", "other"];
+    if !KINDS.contains(&goal_type) {
+        return None;
+    }
+    let name = goal.get("name")?.as_str()?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    let target = goal.get("target_amount").and_then(|v| v.as_f64())?;
+    if target <= 0.0 {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("goal_type".into(), serde_json::Value::String(goal_type.to_string()));
+    out.insert("name".into(), serde_json::Value::String(name.trim().to_string()));
+    out.insert("target_amount".into(), serde_json::Value::from(target));
+    if let Some(cur) = goal.get("current_amount").and_then(|v| v.as_f64()) {
+        if cur > 0.0 {
+            out.insert("current_amount".into(), serde_json::Value::from(cur));
+        }
+    }
+    Some(serde_json::Value::Object(out))
+}
+
+fn validate_holding(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let holding = parsed.get("holding")?;
+    let asset_type = holding.get("asset_type")?.as_str()?;
+    const KINDS: [&str; 6] = ["equity", "mutual_fund", "fd", "gold", "cash", "other"];
+    if !KINDS.contains(&asset_type) {
+        return None;
+    }
+    let name = holding.get("name")?.as_str()?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    let quantity = holding.get("quantity").and_then(|v| v.as_f64())?;
+    if quantity <= 0.0 {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("asset_type".into(), serde_json::Value::String(asset_type.to_string()));
+    out.insert("name".into(), serde_json::Value::String(name.trim().to_string()));
+    out.insert("quantity".into(), serde_json::Value::from(quantity));
+    if let Some(price) = holding.get("avg_price").and_then(|v| v.as_f64()) {
+        if price > 0.0 {
+            out.insert("avg_price".into(), serde_json::Value::from(price));
+        }
+    }
+    Some(serde_json::Value::Object(out))
+}
+
+fn validate_profile(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let profile = parsed.get("profile")?;
+    let mut out = serde_json::Map::new();
+    let mut any = false;
+    let mut add_num = |key: &'static str, v: &serde_json::Value| {
+        if let Some(n) = v.as_f64() {
+            if n > 0.0 {
+                out.insert(key.into(), serde_json::Value::from(n));
+                any = true;
+            }
+        }
+    };
+    for key in [
+        "monthly_income",
+        "monthly_spend",
+        "housing_cost",
+        "debt_emis",
+        "monthly_tax",
+    ] {
+        if let Some(v) = profile.get(key) {
+            add_num(key, v);
+        }
+    }
+    if let Some(pct) = profile.get("investment_pct").and_then(|v| v.as_f64()) {
+        if pct > 0.0 && pct <= 100.0 {
+            out.insert("investment_pct".into(), serde_json::Value::from(pct));
+            any = true;
+        }
+    }
+    if let Some(dep) = profile.get("dependents").and_then(|v| v.as_f64()) {
+        if dep >= 0.0 && dep <= 20.0 && dep.fract() == 0.0 {
+            out.insert("dependents".into(), serde_json::Value::from(dep as i64));
+            any = true;
+        }
+    }
+    if any {
+        Some(serde_json::Value::Object(out))
+    } else {
+        None
+    }
+}
+
+fn validate_budget(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let budget = parsed.get("budget")?;
+    let limit = budget.get("limit").and_then(|v| v.as_f64())?;
+    if limit <= 0.0 {
+        return None;
+    }
+    Some(serde_json::json!({ "limit": limit }))
+}
+
+fn pack_captures(
+    goal: Option<serde_json::Value>,
+    holding: Option<serde_json::Value>,
+    profile: Option<serde_json::Value>,
+    budget: Option<serde_json::Value>,
 ) -> Option<serde_json::Value> {
-    let (goal, holding, profile, budget) = tokio::join!(
-        extract_goal(account, token, user_message, reply),
-        extract_holding(account, token, user_message, reply),
-        extract_profile(account, token, user_message, reply),
-        extract_budget(account, token, user_message, reply),
-    );
     let mut out = serde_json::Map::new();
     if let Some(g) = goal {
         out.insert("goal".into(), g);
@@ -643,161 +768,146 @@ async fn extract_json(
     serde_json::from_str(text).ok()
 }
 
-async fn extract_goal(
+async fn extract_captures(
     account: &str,
     token: &str,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let parsed = extract_json(
-        account,
-        token,
-        "You extract one saveable financial goal from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange contains a concrete goal with a real amount, return {\"goal\":{\"goal_type\":\"<emergency|retirement|home|education|other>\",\"name\":\"<short title>\",\"target_amount\":<INR number>,\"current_amount\":<INR number if known>}}. Otherwise return {}. Only use numbers the user stated or the assistant computed; never invent amounts — omit current_amount unless the user explicitly stated it.",
-        user_message,
-        reply,
-    )
-    .await?;
-    let goal = parsed.get("goal")?;
-    let goal_type = goal.get("goal_type")?.as_str()?;
-    const KINDS: [&str; 5] = ["emergency", "retirement", "home", "education", "other"];
-    if !KINDS.contains(&goal_type) {
-        return None;
-    }
-    let name = goal.get("name")?.as_str()?;
-    if name.trim().is_empty() {
-        return None;
-    }
-    let target = goal.get("target_amount").and_then(|v| v.as_f64())?;
-    if target <= 0.0 {
-        return None;
-    }
-    let mut out = serde_json::Map::new();
-    out.insert("goal_type".into(), serde_json::Value::String(goal_type.to_string()));
-    out.insert("name".into(), serde_json::Value::String(name.trim().to_string()));
-    out.insert("target_amount".into(), serde_json::Value::from(target));
-    if let Some(cur) = goal.get("current_amount").and_then(|v| v.as_f64()) {
-        if cur > 0.0 {
-            out.insert("current_amount".into(), serde_json::Value::from(cur));
-        }
-    }
-    Some(serde_json::Value::Object(out))
+    let (goal, holding, profile, budget) = tokio::join!(
+        async { extract_json(account, token, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
+        async { extract_json(account, token, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
+        async { extract_json(account, token, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
+        async { extract_json(account, token, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
+    );
+    pack_captures(goal, holding, profile, budget)
 }
 
-async fn extract_holding(
-    account: &str,
-    token: &str,
+async fn groq_json(
+    client: &reqwest::Client,
+    system: &str,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let parsed = extract_json(
-        account,
-        token,
-        "You extract one portfolio purchase from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange contains a concrete purchase or investment, return {\"holding\":{\"asset_type\":\"<equity|mutual_fund|fd|gold|cash|other>\",\"name\":\"<instrument name>\",\"quantity\":<units>,\"avg_price\":<INR per unit if known>}}. Otherwise return {}. Only use numbers the user stated or the assistant computed; never invent prices. If only a lump-sum amount is stated (e.g. \"invest 50000 in a Nifty fund\"), use quantity 1 and avg_price = the amount.",
-        user_message,
-        reply,
-    )
-    .await?;
-    let holding = parsed.get("holding")?;
-    let asset_type = holding.get("asset_type")?.as_str()?;
-    const KINDS: [&str; 6] = ["equity", "mutual_fund", "fd", "gold", "cash", "other"];
-    if !KINDS.contains(&asset_type) {
-        return None;
-    }
-    let name = holding.get("name")?.as_str()?;
-    if name.trim().is_empty() {
-        return None;
-    }
-    let quantity = holding.get("quantity").and_then(|v| v.as_f64())?;
-    if quantity <= 0.0 {
-        return None;
-    }
-    let mut out = serde_json::Map::new();
-    out.insert("asset_type".into(), serde_json::Value::String(asset_type.to_string()));
-    out.insert("name".into(), serde_json::Value::String(name.trim().to_string()));
-    out.insert("quantity".into(), serde_json::Value::from(quantity));
-    if let Some(price) = holding.get("avg_price").and_then(|v| v.as_f64()) {
-        if price > 0.0 {
-            out.insert("avg_price".into(), serde_json::Value::from(price));
-        }
-    }
-    Some(serde_json::Value::Object(out))
+    let model = env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string());
+    let key = env::var("GROQ_API_KEY").ok()?;
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 200,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": format!("USER: {user_message}\n\nASSISTANT: {reply}")},
+        ],
+    });
+    let resp = client
+        .post("https://api.groq.com/openai/v1/chat/completions")
+        .bearer_auth(&key)
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    let parsed: serde_json::Value = resp.json().await.ok()?;
+    let text = parsed.pointer("/choices/0/message/content").and_then(|t| t.as_str())?;
+    let text = text
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    serde_json::from_str(text).ok()
 }
 
-async fn extract_profile(
-    account: &str,
-    token: &str,
+async fn extract_captures_groq(
+    client: &reqwest::Client,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let parsed = extract_json(
-        account,
-        token,
-        "You extract financial profile facts from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange states any of the user's financial details, return {\"profile\":{\"monthly_income\":<INR/month if stated>,\"monthly_spend\":<INR/month if stated>,\"investment_pct\":<0-100 if stated>,\"housing_cost\":<INR/month if stated>,\"dependents\":<integer if stated>,\"debt_emis\":<INR/month if stated>,\"monthly_tax\":<INR/month if stated>}} with only the stated fields. Otherwise return {}. housing_cost and debt_emis are recurring monthly costs the user pays now (rent, EMI) — never a one-time goal or investment amount, and never a value from a savings goal. Never invent, compute, or default values — omit any field the user did not explicitly state, including investment_pct.",
-        user_message,
-        reply,
-    )
-    .await?;
-    let profile = parsed.get("profile")?;
-    let mut out = serde_json::Map::new();
-    let mut any = false;
-    let mut add_num = |key: &'static str, v: &serde_json::Value| {
-        if let Some(n) = v.as_f64() {
-            if n > 0.0 {
-                out.insert(key.into(), serde_json::Value::from(n));
-                any = true;
-            }
+    let (goal, holding, profile, budget) = tokio::join!(
+        async { groq_json(client, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
+        async { groq_json(client, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
+        async { groq_json(client, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
+        async { groq_json(client, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
+    );
+    pack_captures(goal, holding, profile, budget)
+}
+
+// Groq chat: single non-streaming reply, same SSE contract as CF path.
+async fn groq_stream(
+    system: String,
+    messages: Vec<Msg>,
+    tx: mpsc::Sender<String>,
+    state: Arc<AppState>,
+    session_id: String,
+    uid: String,
+    user_message: String,
+    mode: String,
+) {
+    let send = |data: String| async {
+        let _ = tx.send(data).await;
+    };
+
+    send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
+
+    let client = groq_client();
+    let model = env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string());
+    let key = match env::var("GROQ_API_KEY") {
+        Ok(k) => k,
+        Err(_) => {
+            send(sse(r#"{"error":"GROQ_API_KEY not set"}"#)).await;
+            return;
         }
     };
-    for key in [
-        "monthly_income",
-        "monthly_spend",
-        "housing_cost",
-        "debt_emis",
-        "monthly_tax",
-    ] {
-        if let Some(v) = profile.get(key) {
-            add_num(key, v);
-        }
-    }
-    if let Some(pct) = profile.get("investment_pct").and_then(|v| v.as_f64()) {
-        if pct > 0.0 && pct <= 100.0 {
-            out.insert("investment_pct".into(), serde_json::Value::from(pct));
-            any = true;
-        }
-    }
-    if let Some(dep) = profile.get("dependents").and_then(|v| v.as_f64()) {
-        if dep >= 0.0 && dep <= 20.0 && dep.fract() == 0.0 {
-            out.insert("dependents".into(), serde_json::Value::from(dep as i64));
-            any = true;
-        }
-    }
-    if any {
-        Some(serde_json::Value::Object(out))
-    } else {
-        None
-    }
-}
 
-async fn extract_budget(
-    account: &str,
-    token: &str,
-    user_message: &str,
-    reply: &str,
-) -> Option<serde_json::Value> {
-    let parsed = extract_json(
-        account,
-        token,
-        "You extract a monthly budget from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the user stated or agreed to a monthly spending budget, return {\"budget\":{\"limit\":<INR per month>}}. Otherwise return {}. Only use a number the user stated or the assistant computed; never invent a budget.",
-        user_message,
-        reply,
-    )
-    .await?;
-    let budget = parsed.get("budget")?;
-    let limit = budget.get("limit").and_then(|v| v.as_f64())?;
-    if limit <= 0.0 {
-        return None;
+    let llm_messages: Vec<serde_json::Value> = std::iter::once(serde_json::json!({
+        "role": "system",
+        "content": system,
+    }))
+    .chain(messages.iter().map(|m| {
+        serde_json::json!({ "role": m.role, "content": m.content })
+    }))
+    .collect();
+
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 1024,
+        "messages": llm_messages,
+    });
+
+    let resp = match client
+        .post("https://api.groq.com/openai/v1/chat/completions")
+        .bearer_auth(&key)
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            send(sse(&format!(r#"{{"error":"groq: {e}"}}"#))).await;
+            return;
+        }
+    };
+    let parsed: serde_json::Value = match resp.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            send(sse(&format!(r#"{{"error":"groq parse: {e}"}}"#))).await;
+            return;
+        }
+    };
+    let full = parsed
+        .pointer("/choices/0/message/content")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    if !full.trim().is_empty() {
+        let ev = serde_json::json!({ "token": full });
+        send(sse(&ev.to_string())).await;
     }
-    Some(serde_json::json!({ "limit": limit }))
+
+    if let Some(capture) = extract_captures_groq(&client, &user_message, &full).await {
+        send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
+    }
+    persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
+    send(sse("[DONE]")).await;
 }
 
 async fn persist_turn(
