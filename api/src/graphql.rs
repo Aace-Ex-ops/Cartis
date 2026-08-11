@@ -1224,7 +1224,7 @@ impl MutationRoot {
             if let Some(ref aid) = existing {
                 tx.execute(
                     "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now()
-                     WHERE account_id = $1",
+                     WHERE account_id::text = $1",
                     &[aid, &acct.balance.to_string(), &acct.fip_id],
                 ).await?;
                 account_id = Some(aid.clone());

@@ -144,7 +144,7 @@ export function OnboardingForm() {
       <Step>
         <StepHeading
           title="Step 2 · Connect your bank"
-          body="Select a demo persona to link your bank account. No passwords needed."
+          body="One click — we pull balances and transactions from your linked bank account into Cartis. No passwords needed."
         />
         <AaConnect onSynced={() => setSynced(true)} />
         {synced && (

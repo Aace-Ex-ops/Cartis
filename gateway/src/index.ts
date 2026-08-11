@@ -245,6 +245,8 @@ async function syncYodleeData(c: { env: Env }, userId: string) {
     { aaHandle: 'yodlee', consentId: 'yodlee', accounts, transactions },
   )) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
 
+  if (!syncRes?.syncAaData) throw new Error('Backend sync failed — no data written')
+  if (accounts.length === 0) throw new Error('No bank accounts found to sync — try again later')
   return { accounts, transactions, syncRes }
 }
 
@@ -323,7 +325,9 @@ async function backendGql(
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`backend error ${res.status}`)
-  return ((await res.json()) as { data?: unknown }).data
+  const json = (await res.json()) as { data?: unknown; errors?: { message?: string }[] }
+  if (json.errors?.length) throw new Error(`backend: ${json.errors[0]?.message ?? 'graphql error'}`)
+  return json.data
 }
 
 type SellerGql = {
@@ -1025,7 +1029,7 @@ app.get('/aa/link', async (c) => {
       ...(c.env.YODLEE_CONFIG_NAME ? { configName: c.env.YODLEE_CONFIG_NAME } : {}),
       ...(cb ? { callback: cb, callbackLocation: 'top' } : {}),
     })
-    return c.html(`<!doctype html>
+    const html = `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Link your bank</title><script src="https://cdn.yodlee.com/fastlink/v4/initialize.js"></script>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#334155}div{text-align:center}p{opacity:.7;font-size:14px}</style>
@@ -1043,7 +1047,8 @@ app.get('/aa/link', async (c) => {
       onClose: function () { if (params.callback) { window.location.href = params.callback; } }
     }, 'container-fastlink');
   } catch (e) { document.body.innerHTML = '<p>FastLink failed to start: ' + e.message + '</p>'; }
-</script></body></html>`)
+</script></body></html>`
+    return c.html(html, 200, { 'Cache-Control': 'no-store' })
   } catch (e) {
     return c.html(`<p>Failed to start bank link: ${String(e)}</p>`, 502)
   }
