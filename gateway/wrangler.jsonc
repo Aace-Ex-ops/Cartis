@@ -16,7 +16,7 @@
     "directory": "../ui/out",
     "binding": "ASSETS",
     "not_found_handling": "none",
-    "run_worker_first": ["/landing/*", "/auth/*", "/api/*", "/aa/*", "/graphql", "/webhooks/*", "/health", "/login"]
+    "run_worker_first": ["/*"]
   },
   "vars": {
     "YODLEE_BASE_URL": "https://sandbox.api.yodlee.com/ysl",

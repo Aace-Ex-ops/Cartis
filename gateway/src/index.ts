@@ -389,9 +389,7 @@ const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; se
   await next()
 }
 
-app.get('/', (c) => c.json({ status: 'ok', service: 'cartis-gateway' }))
-
-app.get('/health', (c) => c.json({ status: 'ok' }))
+app.get('/health', (c) => c.json({ status: 'ok', service: 'cartis-gateway' }))
 
 app.get('/login', (c) => {
   c.header('Cache-Control', 'no-store')
@@ -1495,6 +1493,7 @@ app.get('/api/advisor/entitlement', auth, async (c) => {
 
 app.all('*', async (c) => {
   const res = await c.env.ASSETS.fetch(c.req.raw)
+  if (res.status >= 300 && res.status < 400) return res
   const isHtml = (res.headers.get('content-type') ?? '').includes('text/html')
   const range = c.req.raw.method === 'GET' ? c.req.header('Range') : null
   if (isHtml || !range) {
