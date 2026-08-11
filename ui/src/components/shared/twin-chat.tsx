@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Pencil, Plus, Send, Trash2, User } from "lucide-react";
+import { Bot, Pencil, Plus, Send, Trash2, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModelSwitcher } from "@/components/shared/model-switcher";
+import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -21,6 +22,21 @@ const TOOL_PROMPTS: Record<string, string> = {
   retirement: "How much should I invest monthly to retire at 60?",
   tax: "What can I do to lower my tax this year?",
   stock: "Review my portfolio and flag any risks",
+};
+
+type GoalCapture = {
+  goal_type: string;
+  name: string;
+  target_amount: number;
+  current_amount?: number;
+};
+
+const GOAL_LABELS: Record<string, string> = {
+  emergency: "Emergency fund",
+  retirement: "Retirement",
+  home: "Home",
+  education: "Education",
+  other: "Goal",
 };
 
 function timeAgo(iso: string): string {
@@ -59,6 +75,7 @@ export function TwinChat({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [capture, setCapture] = useState<GoalCapture | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -111,6 +128,7 @@ export function TwinChat({
       setMessages(rows.length ? rows : [{ role: "assistant", content: welcome }]);
       setActiveId(id);
       setError("");
+      setCapture(null);
     } catch {
       // ignore
     }
@@ -124,6 +142,7 @@ export function TwinChat({
     setTool(null);
     setMessages([{ role: "assistant", content: welcome }]);
     setError("");
+    setCapture(null);
   };
 
   const deleteSession = async (id: string) => {
@@ -205,6 +224,7 @@ export function TwinChat({
               token?: string;
               error?: string;
               sessionId?: string;
+              capture?: { goal: GoalCapture };
             };
             if (ev.error) {
               setError(ev.error);
@@ -212,6 +232,7 @@ export function TwinChat({
               break;
             }
             if (ev.sessionId) setActiveId(ev.sessionId);
+            if (ev.capture?.goal) setCapture(ev.capture.goal);
             if (ev.token) {
               setMessages((m) => {
                 const copy = [...m];
@@ -255,6 +276,22 @@ export function TwinChat({
           { id: "", label: "Goals", prompt: "Help me set a savings goal for a trip" },
           { id: "", label: "Tax", prompt: "What can I do to lower my tax this year?" },
         ];
+
+  const saveCapture = async () => {
+    const goal = capture;
+    if (!goal) return;
+    try {
+      await gql(
+        `mutation($goalType: String!, $name: String!, $targetAmount: Float!, $currentAmount: Float) {
+          addFinancialGoal(goalType: $goalType, name: $name, targetAmount: $targetAmount, currentAmount: $currentAmount) { goalId }
+        }`,
+        { goalType: goal.goal_type, name: goal.name, targetAmount: goal.target_amount, currentAmount: goal.current_amount },
+      );
+      setCapture(null);
+    } catch {
+      setError("Couldn't save goal — try again.");
+    }
+  };
 
   const runSuggestion = (s: { id: string; prompt: string }) => {
     setTool(s.id || null);
@@ -400,6 +437,44 @@ export function TwinChat({
                   </div>
                 </div>
               ))}
+              {capture && (
+                <div className="flex gap-2.5">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">
+                    <Bot className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="max-w-[80%] rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[12px] font-semibold text-foreground">{capture.name}</p>
+                      <button
+                        onClick={() => setCapture(null)}
+                        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                        aria-label="Dismiss goal suggestion"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      {GOAL_LABELS[capture.goal_type] ?? "Goal"} · ₹
+                      {Math.round(capture.target_amount).toLocaleString("en-IN")}
+                      {typeof capture.current_amount === "number" &&
+                        ` · ${Math.round(capture.current_amount).toLocaleString("en-IN")} saved`}
+                    </p>
+                    <div className="mt-2 flex gap-1.5">
+                      <Button size="sm" className="h-7 px-2.5 text-[12px]" onClick={() => void saveCapture()}>
+                        Save goal
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-[12px]"
+                        onClick={() => setCapture(null)}
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {busy && (
                 <div className="flex gap-2.5">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">

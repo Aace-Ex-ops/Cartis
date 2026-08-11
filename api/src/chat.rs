@@ -544,6 +544,9 @@ async fn persist_and_stream(
                 continue;
             }
             if data == "[DONE]" {
+                if let Some(capture) = extract_goal(&account, &token, &user_message, &full).await {
+                    send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
+                }
                 persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
                 send(sse("[DONE]")).await;
                 return;
@@ -563,8 +566,72 @@ async fn persist_and_stream(
         }
         buf.clear();
     }
+    if let Some(capture) = extract_goal(&account, &token, &user_message, &full).await {
+        send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
+    }
     persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
     send(sse("[DONE]")).await;
+}
+
+// One-shot extraction of a saveable financial goal from the last chat exchange.
+// Cheap 8B model, non-streaming, fail-open (None on any error — chat unaffected).
+async fn extract_goal(
+    account: &str,
+    token: &str,
+    user_message: &str,
+    reply: &str,
+) -> Option<serde_json::Value> {
+    let url = format!(
+        "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/meta/llama-3.1-8b-instruct-fp8"
+    );
+    let payload = serde_json::json!({
+        "messages": [
+            {"role": "system", "content": "You extract one saveable financial goal from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange contains a concrete goal with a real amount, return {\"goal\":{\"goal_type\":\"<emergency|retirement|home|education|other>\",\"name\":\"<short title>\",\"target_amount\":<INR number>,\"current_amount\":<INR number if known>}}. Otherwise return {}. Only use numbers the user stated or the assistant computed; never invent amounts — omit current_amount unless the user explicitly stated it."},
+            {"role": "user", "content": format!("USER: {user_message}\n\nASSISTANT: {reply}")},
+        ],
+        "max_tokens": 200,
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .ok()?;
+    let res = client.post(&url).bearer_auth(token).json(&payload).send().await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = res.json().await.ok()?;
+    let text = body.pointer("/result/response").and_then(|r| r.as_str())?;
+    let text = text
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let parsed: serde_json::Value = serde_json::from_str(text).ok()?;
+    let goal = parsed.get("goal")?;
+    let goal_type = goal.get("goal_type")?.as_str()?;
+    const KINDS: [&str; 5] = ["emergency", "retirement", "home", "education", "other"];
+    if !KINDS.contains(&goal_type) {
+        return None;
+    }
+    let name = goal.get("name")?.as_str()?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    let target = goal.get("target_amount").and_then(|v| v.as_f64())?;
+    if target <= 0.0 {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("goal_type".into(), serde_json::Value::String(goal_type.to_string()));
+    out.insert("name".into(), serde_json::Value::String(name.trim().to_string()));
+    out.insert("target_amount".into(), serde_json::Value::from(target));
+    if let Some(cur) = goal.get("current_amount").and_then(|v| v.as_f64()) {
+        if cur > 0.0 {
+            out.insert("current_amount".into(), serde_json::Value::from(cur));
+        }
+    }
+    Some(serde_json::json!({ "goal": serde_json::Value::Object(out) }))
 }
 
 async fn persist_turn(
