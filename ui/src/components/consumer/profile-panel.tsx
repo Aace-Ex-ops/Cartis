@@ -114,10 +114,17 @@ export function ProfilePanel() {
   }, []);
 
   useEffect(() => {
-    setTheme(getStoredTheme());
+    const stored = getStoredTheme();
+    setTheme(stored);
+    applyTheme(stored);
   }, []);
 
+  const themeMounted = useRef(false);
   useEffect(() => {
+    if (!themeMounted.current) {
+      themeMounted.current = true;
+      return;
+    }
     applyTheme(theme);
     try {
       localStorage.setItem("theme", theme);
