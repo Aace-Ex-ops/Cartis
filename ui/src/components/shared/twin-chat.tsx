@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModelSwitcher } from "@/components/shared/model-switcher";
 import { gql } from "@/lib/gql";
+import { DATA_CHANGED_EVENT } from "@/lib/use-live-data";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
@@ -370,6 +371,7 @@ export function TwinChat({
         { goalType: goal.goal_type, name: goal.name, targetAmount: goal.target_amount, currentAmount: goal.current_amount },
       );
       setCaptures((c) => ({ ...c, goal: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
     } catch {
       setError("Couldn't save goal — try again.");
     }
@@ -386,6 +388,7 @@ export function TwinChat({
         { assetType: holding.asset_type, name: holding.name, quantity: holding.quantity, avgPrice: holding.avg_price },
       );
       setCaptures((c) => ({ ...c, holding: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
     } catch {
       setError("Couldn't add purchase — try again.");
     }
@@ -398,6 +401,7 @@ export function TwinChat({
       await gql(`mutation { setMonthlyTabLimit(limit: ${budget.limit}) { limit } }`);
       fetch(`${GATEWAY}/api/budget/cache/clear`, { method: "POST", credentials: "include" }).catch(() => {});
       setCaptures((c) => ({ ...c, budget: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
     } catch {
       setError("Couldn't set budget — try again.");
     }
@@ -421,6 +425,7 @@ export function TwinChat({
     try {
       await gql(`mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`);
       setCaptures((c) => ({ ...c, profile: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
     } catch {
       setError("Couldn't update profile — try again.");
     }

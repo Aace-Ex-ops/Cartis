@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, Landmark, Wallet2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WalletCard } from "@/components/consumer/wallet-card";
 import { AaLinkRest, AaReconnect } from "@/components/consumer/aa-connect";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -68,8 +69,7 @@ export default function WalletPage() {
     me: MeProfile | null;
   } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(async () => {
     void gql<{
       bankAccounts: BankAccount[];
       monthlyTab: { limit: number; spent: number };
@@ -78,16 +78,11 @@ export default function WalletPage() {
       incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
       me: MeProfile | null;
     }>(QUERY)
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {
-        if (!cancelled) setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 }, aaConnections: [], ledgerTransactions: [], incomeStreams: [], me: null });
-      });
-    return () => {
-      cancelled = true;
-    };
+      .then((d) => setData(d))
+      .catch(() => setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 }, aaConnections: [], ledgerTransactions: [], incomeStreams: [], me: null }));
   }, []);
+
+  useLiveData(load, [load]);
 
   if (data === null) {
     return (

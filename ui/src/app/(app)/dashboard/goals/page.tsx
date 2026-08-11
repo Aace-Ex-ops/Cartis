@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Plus, Trash2, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -50,14 +51,7 @@ export default function GoalsPage() {
     }
   }, []);
 
-  const loaded = useRef(false);
-
-  useEffect(() => {
-    if (!loaded.current) {
-      load();
-      loaded.current = true;
-    }
-  }, [load]);
+  useLiveData(load, [load]);
 
   async function addGoal() {
     const targetAmount = parseFloat(target);

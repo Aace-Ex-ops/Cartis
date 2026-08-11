@@ -1,12 +1,13 @@
 "use client";
 
- import { useCallback, useEffect, useRef, useState } from "react";
+ import { useCallback, useState } from "react";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -64,14 +65,7 @@ const load = useCallback(async () => {
   }
 }, []);
 
-const loaded = useRef(false);
-
-useEffect(() => {
-  if (!loaded.current) {
-    load();
-    loaded.current = true;
-  }
-}, [load]);
+useLiveData(load, [load]);
 
 // Open/close actions
 async function addHolding() {
