@@ -188,7 +188,7 @@ pub async fn chat_stream(
         }
     };
     let model = match fetch_model(&state, &uid).await {
-        Ok(Some(m)) if !m.is_empty() => m,
+        Ok(Some(m)) if !m.is_empty() && !m.starts_with("groq/") => m,
         _ => "@cf/meta/llama-4-scout-17b-16e-instruct".to_string(),
     };
     let mut system = system_prompt(seller, &context);
@@ -785,11 +785,11 @@ async fn extract_captures(
 
 async fn groq_json(
     client: &reqwest::Client,
+    model: &str,
     system: &str,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let model = env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string());
     let key = env::var("GROQ_API_KEY").ok()?;
     let body = serde_json::json!({
         "model": model,
@@ -819,14 +819,15 @@ async fn groq_json(
 
 async fn extract_captures_groq(
     client: &reqwest::Client,
+    model: &str,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
     let (goal, holding, profile, budget) = tokio::join!(
-        async { groq_json(client, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
-        async { groq_json(client, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
-        async { groq_json(client, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
-        async { groq_json(client, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
+        async { groq_json(client, model, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
+        async { groq_json(client, model, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
+        async { groq_json(client, model, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
+        async { groq_json(client, model, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
     );
     pack_captures(goal, holding, profile, budget)
 }
@@ -849,7 +850,10 @@ async fn groq_stream(
     send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
 
     let client = groq_client();
-    let model = env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string());
+    let model = match fetch_model(&state, &uid).await {
+        Ok(Some(m)) if m.starts_with("groq/") => m["groq/".len()..].to_string(),
+        _ => env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string()),
+    };
     let key = match env::var("GROQ_API_KEY") {
         Ok(k) => k,
         Err(_) => {
@@ -903,7 +907,7 @@ async fn groq_stream(
         send(sse(&ev.to_string())).await;
     }
 
-    if let Some(capture) = extract_captures_groq(&client, &user_message, &full).await {
+    if let Some(capture) = extract_captures_groq(&client, &model, &user_message, &full).await {
         send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
     }
     persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;

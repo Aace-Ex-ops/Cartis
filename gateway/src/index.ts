@@ -958,7 +958,8 @@ Rules:
 Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence explanation>" }`
 
   try {
-    const out = (await c.env.AI.run(data.me?.aiModel || '@cf/meta/llama-4-scout-17b-16e-instruct', {
+    const chosen = data.me?.aiModel?.startsWith('groq/') ? undefined : data.me?.aiModel
+    const out = (await c.env.AI.run(chosen || '@cf/meta/llama-4-scout-17b-16e-instruct', {
       messages: [{ role: 'user', content: prompt }],
     })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
     const content = typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
