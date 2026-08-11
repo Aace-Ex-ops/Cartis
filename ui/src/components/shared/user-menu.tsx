@@ -107,13 +107,15 @@ export function UserMenu({ user }: { user: User }) {
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => void switchType(isBusiness ? "personal" : "business")}
-            className="cursor-pointer"
-          >
-            <Repeat className="mr-2 h-4 w-4" />
-            {isBusiness ? "Switch to Personal finance" : "Switch to Business"}
-          </DropdownMenuItem>
+          {isBusiness && (
+            <DropdownMenuItem
+              onClick={() => void switchType("personal")}
+              className="cursor-pointer"
+            >
+              <Repeat className="mr-2 h-4 w-4" />
+              Switch to Personal finance
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>

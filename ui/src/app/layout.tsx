@@ -63,6 +63,13 @@ export default function RootLayout({
       className={`${inter.variable} ${playfair.variable} ${jetbrains.variable} ${anybody.variable} ${inclusiveSans.variable} ${gantari.variable} ${instrumentSerif.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem("theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <Preloader />
         <SmoothScrollProvider>{children}</SmoothScrollProvider>

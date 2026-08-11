@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,27 @@ import { Switch } from "@/components/ui/switch";
 import { gql } from "@/lib/gql";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+
+type Theme = "system" | "light" | "dark";
+
+const THEMES: Theme[] = ["system", "light", "dark"];
+
+function getStoredTheme(): Theme {
+  try {
+    const t = localStorage.getItem("theme");
+    return t === "light" || t === "dark" || t === "system" ? t : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function applyTheme(t: Theme) {
+  if (typeof window === "undefined") return;
+  const dark =
+    t === "dark" ||
+    (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+}
 
 type ProfileData = {
   me: {
@@ -60,6 +81,10 @@ export function ProfilePanel() {
   });
   const [profileSaved, setProfileSaved] = useState(false);
 
+  const [theme, setTheme] = useState<Theme>("system");
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+
   useEffect(() => {
     let cancelled = false;
     void gql<ProfileData>(
@@ -86,6 +111,26 @@ export function ProfilePanel() {
         });
       });
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    setTheme(getStoredTheme());
+  }, []);
+
+  useEffect(() => {
+    applyTheme(theme);
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      // private mode etc.
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme(themeRef.current);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, []);
 
   const me = data?.me;
@@ -163,6 +208,31 @@ export function ProfilePanel() {
             <span className="text-[15px] font-medium text-foreground">{me?.fullName ?? "…"}</span>
             <span className="text-[13px] text-muted-foreground">{me?.email ?? ""}</span>
             <span className="mt-0.5 text-[11px] text-muted-foreground/60 capitalize">{me?.userType ?? ""}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>System follows your device setting.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex max-w-sm gap-1 rounded-lg border border-border/60 bg-background p-1">
+            {THEMES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTheme(t)}
+                className={`flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium capitalize transition-colors cursor-pointer ${
+                  theme === t
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
           </div>
         </CardContent>
       </Card>
