@@ -581,10 +581,11 @@ async fn extract_captures(
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let (goal, holding, profile) = tokio::join!(
+    let (goal, holding, profile, budget) = tokio::join!(
         extract_goal(account, token, user_message, reply),
         extract_holding(account, token, user_message, reply),
         extract_profile(account, token, user_message, reply),
+        extract_budget(account, token, user_message, reply),
     );
     let mut out = serde_json::Map::new();
     if let Some(g) = goal {
@@ -595,6 +596,9 @@ async fn extract_captures(
     }
     if let Some(p) = profile {
         out.insert("profile".into(), p);
+    }
+    if let Some(b) = budget {
+        out.insert("budget".into(), b);
     }
     if out.is_empty() {
         None
@@ -772,6 +776,28 @@ async fn extract_profile(
     } else {
         None
     }
+}
+
+async fn extract_budget(
+    account: &str,
+    token: &str,
+    user_message: &str,
+    reply: &str,
+) -> Option<serde_json::Value> {
+    let parsed = extract_json(
+        account,
+        token,
+        "You extract a monthly budget from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the user stated or agreed to a monthly spending budget, return {\"budget\":{\"limit\":<INR per month>}}. Otherwise return {}. Only use a number the user stated or the assistant computed; never invent a budget.",
+        user_message,
+        reply,
+    )
+    .await?;
+    let budget = parsed.get("budget")?;
+    let limit = budget.get("limit").and_then(|v| v.as_f64())?;
+    if limit <= 0.0 {
+        return None;
+    }
+    Some(serde_json::json!({ "limit": limit }))
 }
 
 async fn persist_turn(

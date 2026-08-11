@@ -48,10 +48,15 @@ type ProfileCapture = {
   monthly_tax?: number;
 };
 
+type BudgetCapture = {
+  limit: number;
+};
+
 type Captures = {
   goal?: GoalCapture;
   holding?: HoldingCapture;
   profile?: ProfileCapture;
+  budget?: BudgetCapture;
 };
 
 const GOAL_LABELS: Record<string, string> = {
@@ -386,6 +391,18 @@ export function TwinChat({
     }
   };
 
+  const saveBudget = async () => {
+    const budget = captures.budget;
+    if (!budget) return;
+    try {
+      await gql(`mutation { setMonthlyTabLimit(limit: ${budget.limit}) { limit } }`);
+      fetch(`${GATEWAY}/api/budget/cache/clear`, { method: "POST", credentials: "include" }).catch(() => {});
+      setCaptures((c) => ({ ...c, budget: undefined }));
+    } catch {
+      setError("Couldn't set budget — try again.");
+    }
+  };
+
   const saveProfile = async () => {
     const p = captures.profile;
     if (!p) return;
@@ -553,7 +570,7 @@ export function TwinChat({
                   </div>
                 </div>
               ))}
-              {(captures.goal || captures.holding || captures.profile) && (
+              {(captures.goal || captures.holding || captures.profile || captures.budget) && (
                 <>
                   {captures.goal && (
                     <CaptureCard
@@ -579,6 +596,15 @@ export function TwinChat({
                       saveLabel="Add purchase"
                       onSave={() => void saveHolding()}
                       onDismiss={() => setCaptures((c) => ({ ...c, holding: undefined }))}
+                    />
+                  )}
+                  {captures.budget && (
+                    <CaptureCard
+                      title="Set monthly budget"
+                      meta={`${inr(captures.budget.limit)}/month`}
+                      saveLabel="Save budget"
+                      onSave={() => void saveBudget()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, budget: undefined }))}
                     />
                   )}
                   {captures.profile && (
