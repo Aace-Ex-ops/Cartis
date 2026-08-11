@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Landmark } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Landmark, Wallet2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WalletCard } from "@/components/consumer/wallet-card";
 import { AaReconnect } from "@/components/consumer/aa-connect";
@@ -18,10 +18,30 @@ type BankAccount = {
   isPrimary: boolean;
 };
 
+type LedgerTx = {
+  txnType: string;
+  amount: number;
+  description: string | null;
+  transactionDate: string | null;
+  createdAt: string | null;
+};
+
+type MeProfile = {
+  monthlyIncome: number | null;
+  monthlySpend: number | null;
+  investmentPct: number | null;
+  housingCost: number | null;
+  debtEmis: number | null;
+  monthlyTax: number | null;
+};
+
 const QUERY = `{
   bankAccounts { accountId bankName mobileNumber balance lastSyncAt isPrimary }
   monthlyTab { limit spent }
   aaConnections { aaHandle consentStatus fipId lastFetchedAt bankName }
+  ledgerTransactions(limit: 10) { txnType amount description transactionDate createdAt }
+  incomeStreams { source frequency amount currency fromDate toDate }
+  me { monthlyIncome monthlySpend investmentPct housingCost debtEmis monthlyTax }
 }`;
 
 const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
@@ -41,6 +61,9 @@ export default function WalletPage() {
     bankAccounts: BankAccount[];
     monthlyTab: { limit: number; spent: number };
     aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+    ledgerTransactions: LedgerTx[];
+    incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+    me: MeProfile | null;
   } | null>(null);
 
   useEffect(() => {
@@ -49,12 +72,15 @@ export default function WalletPage() {
       bankAccounts: BankAccount[];
       monthlyTab: { limit: number; spent: number };
       aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+      ledgerTransactions: LedgerTx[];
+      incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+      me: MeProfile | null;
     }>(QUERY)
       .then((d) => {
         if (!cancelled) setData(d);
       })
       .catch(() => {
-        if (!cancelled) setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 }, aaConnections: [] });
+        if (!cancelled) setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 }, aaConnections: [], ledgerTransactions: [], incomeStreams: [], me: null });
       });
     return () => {
       cancelled = true;
@@ -157,11 +183,82 @@ export default function WalletPage() {
                 bankAccounts: BankAccount[];
                 monthlyTab: { limit: number; spent: number };
                 aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+                ledgerTransactions: LedgerTx[];
+                incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+                me: MeProfile | null;
               }>(QUERY).then(setData).catch(() => {});
             }} />
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <ArrowUpRight className="h-4 w-4" /> Recent transactions
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {data.ledgerTransactions.length === 0 && (
+            <p className="rounded-lg border border-border/50 bg-background/50 px-4 py-6 text-center text-[13px] text-muted-foreground">
+              No transactions yet — they appear after linking a bank with transaction history.
+            </p>
+          )}
+          {data.ledgerTransactions.map((t, i) => (
+            <div key={i} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-2.5">
+              <div className="flex items-center gap-3">
+                <span className={`flex h-8 w-8 items-center justify-center rounded-full ${t.txnType === "debit" ? "bg-destructive/10 text-destructive" : "bg-green-500/10 text-green-600"}`}>
+                  {t.txnType === "debit" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownLeft className="h-4 w-4" />}
+                </span>
+                <div>
+                  <div className="text-[13px] font-medium text-foreground">{t.description || "Bank transaction"}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {t.transactionDate ? t.transactionDate.slice(0, 10) : (t.createdAt ? t.createdAt.slice(0, 10) : "")}
+                  </div>
+                </div>
+              </div>
+              <div className={`text-[14px] font-semibold ${t.txnType === "debit" ? "text-foreground" : "text-green-600"}`}>
+                {t.txnType === "debit" ? "−" : "+"}{fmt(t.amount)}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Wallet2 className="h-4 w-4" /> Financial profile
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {[
+            { label: "Monthly income", value: data.me?.monthlyIncome != null ? fmt(data.me.monthlyIncome) : "—" },
+            { label: "Monthly spend", value: data.me?.monthlySpend != null ? fmt(data.me.monthlySpend) : "—" },
+            { label: "Investment", value: data.me?.investmentPct != null ? `${data.me.investmentPct}%` : "—" },
+            { label: "Housing", value: data.me?.housingCost != null ? fmt(data.me.housingCost) : "—" },
+            { label: "Debt EMIs", value: data.me?.debtEmis != null ? fmt(data.me.debtEmis) : "—" },
+            { label: "Monthly tax", value: data.me?.monthlyTax != null ? fmt(data.me.monthlyTax) : "—" },
+          ].map((row) => (
+            <div key={row.label} className="rounded-lg border border-border/50 bg-background/50 px-4 py-3">
+              <div className="text-[11px] text-muted-foreground">{row.label}</div>
+              <div className="mt-0.5 text-[15px] font-semibold text-foreground">{row.value}</div>
+            </div>
+          ))}
+          {data.incomeStreams.length > 0 && (
+            <div className="col-span-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 sm:col-span-3">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-primary">Income synced from bank</div>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {data.incomeStreams.map((s, i) => (
+                  <span key={i} className="rounded-full bg-background/70 px-2.5 py-1 text-[12px] text-foreground">
+                    {s.source || "Income"} · {fmt(s.amount)}{s.frequency !== "MONTHLY" ? ` / ${s.frequency.toLowerCase()}` : ""}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {!aaConn && (
         <Card>

@@ -157,6 +157,33 @@ impl QueryRoot {
         Ok(rows.iter().map(BankAccount::from_row).collect())
     }
 
+    #[graphql(name = "ledgerTransactions")]
+    async fn ledger_transactions(&self, ctx: &Context<'_>, limit: Option<i32>) -> Result<Vec<LedgerTx>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT transaction_type, amount::float8, description, transaction_date::text, created_at::text
+                 FROM ledger_entries WHERE user_id::text = $1
+                 ORDER BY created_at DESC LIMIT $2",
+                &[&uid, &limit.unwrap_or(10)],
+            )
+            .await?;
+        Ok(rows.iter().map(LedgerTx::from_row).collect())
+    }
+
+    #[graphql(name = "incomeStreams")]
+    async fn income_streams(&self, ctx: &Context<'_>) -> Result<Vec<IncomeStream>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT account_ref, source, frequency, amount::float8, currency, from_date::text, to_date::text
+                 FROM income_streams WHERE user_id::text = $1 ORDER BY from_date DESC",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(IncomeStream::from_row).collect())
+    }
+
     async fn banks(&self, ctx: &Context<'_>) -> Result<Vec<Bank>> {
         let rows = pg(ctx).get().await?
             .query("SELECT name, fip_id FROM banks ORDER BY name", &[])
@@ -1175,6 +1202,7 @@ impl MutationRoot {
         consent_id: String,
         accounts: Vec<AaAccountInput>,
         transactions: Vec<AaTxInput>,
+        income: Vec<AaIncomeInput>,
     ) -> Result<SyncResult> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let mut conn = pg(ctx).get().await?;
@@ -1210,13 +1238,14 @@ impl MutationRoot {
                 .await?
                 .get(0);
 
-            // Upsert bank_account
+            // Upsert bank_account (keyed on the Yodlee account ref so multiple
+            // accounts under one bank don't collapse into a single row)
             let existing: Option<String> = tx
                 .query_opt(
                     "SELECT account_id::text FROM bank_accounts
-                     WHERE user_id::text = $1 AND bank_id::text = $2
+                     WHERE user_id::text = $1 AND masked_account_number = COALESCE($2, '')
                      ORDER BY created_at DESC LIMIT 1",
-                    &[&uid, &bank_id],
+                    &[&uid, &acct.account_ref],
                 )
                 .await?
                 .map(|r| r.get(0));
@@ -1231,10 +1260,10 @@ impl MutationRoot {
             } else {
                 let new_id: String = tx
                     .query_one(
-                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, last_sync_at)
-                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, now())
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, last_sync_at)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), now())
                          RETURNING account_id::text",
-                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string()],
+                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref],
                     )
                     .await?
                     .get(0);
@@ -1251,13 +1280,43 @@ impl MutationRoot {
             ).to_string();
             let res = tx
                 .execute(
-                    "INSERT INTO ledger_entries (user_id, account_type, transaction_type, amount, idempotency_key)
-                     VALUES ($1::text::uuid, 'budget', $2, $3::text::numeric, $4)
+                    "INSERT INTO ledger_entries (user_id, account_type, transaction_type, amount, idempotency_key, description, transaction_date)
+                     VALUES ($1::text::uuid, 'budget', $2, $3::text::numeric, $4, $5, $6)
                      ON CONFLICT (idempotency_key) DO NOTHING",
-                    &[&uid, &txn.txn_type, &txn.amount.to_string(), &key],
+                    &[&uid, &txn.txn_type, &txn.amount.to_string(), &key, &txn.narration, &txn.timestamp],
                 )
                 .await?;
             inserted += res;
+        }
+
+        // Upsert income streams (best-effort; no streams = no-op)
+        for inc in &income {
+            tx.execute(
+                "INSERT INTO income_streams (user_id, account_ref, source, frequency, amount, currency, from_date, to_date)
+                 VALUES ($1::text::uuid, COALESCE($2, ''), COALESCE($3, ''), COALESCE($4, 'MONTHLY'), $5::text::numeric, COALESCE($6, 'INR'), COALESCE($7, ''), COALESCE($8, ''))
+                 ON CONFLICT (user_id, source, from_date, frequency) DO UPDATE SET
+                    amount = EXCLUDED.amount, to_date = EXCLUDED.to_date, account_ref = EXCLUDED.account_ref",
+                &[&uid, &inc.account_ref, &inc.source, &inc.frequency, &inc.amount.to_string(), &inc.currency, &inc.from_date, &inc.to_date],
+            ).await?;
+        }
+
+        // Auto-fill monthly income from synced streams (only if unset — manual value wins)
+        let monthly_income: f64 = income.iter().map(|inc| {
+            let base = inc.amount;
+            match inc.frequency.as_deref() {
+                Some("WEEKLY") => base * 52.0 / 12.0,
+                Some("YEARLY") | Some("ANNUAL") => base / 12.0,
+                Some("QUARTERLY") => base / 3.0,
+                Some("DAILY") => base * 365.0 / 12.0,
+                _ => base,
+            }
+        }).sum();
+        if monthly_income > 0.0 {
+            tx.execute(
+                "UPDATE users SET monthly_income = $2::text::numeric, updated_at = NOW()
+                 WHERE user_id::text = $1 AND monthly_income IS NULL",
+                &[&uid, &monthly_income.to_string()],
+            ).await?;
         }
 
         tx.commit().await?;
@@ -1568,6 +1627,70 @@ struct BankAccount {
     is_primary: bool,
 }
 
+struct LedgerTx {
+    txn_type: String,
+    amount: f64,
+    description: Option<String>,
+    transaction_date: Option<String>,
+    created_at: Option<String>,
+}
+
+#[Object]
+impl LedgerTx {
+    async fn txn_type(&self) -> &str { &self.txn_type }
+    async fn amount(&self) -> f64 { self.amount }
+    async fn description(&self) -> Option<&str> { self.description.as_deref() }
+    async fn transaction_date(&self) -> Option<&str> { self.transaction_date.as_deref() }
+    async fn created_at(&self) -> Option<&str> { self.created_at.as_deref() }
+}
+
+impl LedgerTx {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            txn_type: r.get(0),
+            amount: r.get(1),
+            description: r.get(2),
+            transaction_date: r.get(3),
+            created_at: r.get(4),
+        }
+    }
+}
+
+struct IncomeStream {
+    account_ref: Option<String>,
+    source: Option<String>,
+    frequency: Option<String>,
+    amount: f64,
+    currency: Option<String>,
+    from_date: Option<String>,
+    to_date: Option<String>,
+}
+
+#[Object]
+impl IncomeStream {
+    async fn account_ref(&self) -> Option<&str> { self.account_ref.as_deref() }
+    async fn source(&self) -> Option<&str> { self.source.as_deref() }
+    async fn frequency(&self) -> Option<&str> { self.frequency.as_deref() }
+    async fn amount(&self) -> f64 { self.amount }
+    async fn currency(&self) -> Option<&str> { self.currency.as_deref() }
+    async fn from_date(&self) -> Option<&str> { self.from_date.as_deref() }
+    async fn to_date(&self) -> Option<&str> { self.to_date.as_deref() }
+}
+
+impl IncomeStream {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            account_ref: r.get(0),
+            source: r.get(1),
+            frequency: r.get(2),
+            amount: r.get(3),
+            currency: r.get(4),
+            from_date: r.get(5),
+            to_date: r.get(6),
+        }
+    }
+}
+
 #[Object]
 impl BankAccount {
     async fn account_id(&self) -> &str { &self.account_id }
@@ -1806,6 +1929,7 @@ struct AaAccountInput {
     bank_name: Option<String>,
     balance: f64,
     fip_id: Option<String>,
+    account_ref: Option<String>,
 }
 
 #[derive(async_graphql::InputObject)]
@@ -1815,6 +1939,17 @@ struct AaTxInput {
     amount: f64,
     narration: Option<String>,
     timestamp: Option<String>,
+}
+
+#[derive(async_graphql::InputObject)]
+struct AaIncomeInput {
+    account_ref: Option<String>,
+    source: Option<String>,
+    frequency: Option<String>,
+    amount: f64,
+    currency: Option<String>,
+    from_date: Option<String>,
+    to_date: Option<String>,
 }
 
 struct AaConnection {

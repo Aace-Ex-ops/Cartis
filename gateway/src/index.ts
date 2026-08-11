@@ -197,9 +197,10 @@ type YodleeTx = {
   merchant?: { name?: string }
 }
 
-function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] } {
-  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[] = []
+function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] } {
+  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string }[] = []
   const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
+  const income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] = []
 
   for (const raw of data.account ?? []) {
     const a = raw as YodleeAccount
@@ -208,6 +209,7 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }
       bankName: a.providerName ?? '',
       balance: Number(a.balance?.amount) || 0,
       fipId: String(a.providerAccountId ?? a.id ?? ''),
+      accountRef: String(a.id ?? ''),
     })
   }
 
@@ -222,27 +224,47 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }
     })
   }
 
-  return { accounts, transactions }
+  for (const raw of data.income ?? []) {
+    const s = raw as { accountId?: number | string; incomeStream?: { source?: string; frequency?: string; amount?: { amount?: number; currency?: string }; fromDate?: string; toDate?: string }[] }
+    for (const stream of s.incomeStream ?? []) {
+      income.push({
+        accountRef: String(s.accountId ?? ''),
+        source: stream.source ?? '',
+        frequency: stream.frequency ?? 'MONTHLY',
+        amount: Number(stream.amount?.amount) || 0,
+        currency: stream.amount?.currency ?? 'INR',
+        fromDate: stream.fromDate ?? '',
+        toDate: stream.toDate ?? '',
+      })
+    }
+  }
+
+  return { accounts, transactions, income }
 }
 
 async function syncYodleeData(c: { env: Env }, userId: string) {
-  const from = new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 10)
+  const from = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10)
   const to = new Date().toISOString().slice(0, 10)
-  const [accountsRes, txnsRes] = await Promise.all([
-    yodleeFetch(c, '/accounts'),
-    yodleeFetch(c, `/transactions?fromDate=${from}&toDate=${to}&top=500`),
-  ])
-  const { accounts, transactions } = parseYodleeFetch({ account: accountsRes.account as unknown[] | undefined, transaction: txnsRes.transaction as unknown[] | undefined })
+  const accountsRes = await yodleeFetch(c, '/accounts')
+  const providerAccountIds = Array.from(new Set(
+    (accountsRes.account as unknown[] | undefined ?? [])
+      .map((a) => (a as { providerAccountId?: number | string }).providerAccountId)
+      .filter((id): id is number | string => id !== undefined && id !== null)
+  )).join(',')
+  const txnsRes = await yodleeFetch(c, `/transactions?fromDate=${from}&toDate=${to}&top=500${providerAccountIds ? `&providerAccountId=${providerAccountIds}` : ''}`)
+  const incomeRes = await yodleeFetch(c, `/income?fromDate=${from}&toDate=${to}`).catch(() => null)
+  const { accounts, transactions, income } = parseYodleeFetch({ account: accountsRes.account as unknown[] | undefined, transaction: txnsRes.transaction as unknown[] | undefined, income: incomeRes?.income as unknown[] | undefined })
+  console.log(`[yodlee] accounts=${accounts.length} providerAccounts=${providerAccountIds} txns=${transactions.length} income=${income.length}`)
 
   const syncRes = (await backendGql(
     c,
-    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
-      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
+    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!, $income: [AaIncomeInput!]!) {
+      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions, income: $income) {
         inserted balance accountId
       }
     }`,
     userId,
-    { aaHandle: 'yodlee', consentId: 'yodlee', accounts, transactions },
+    { aaHandle: 'yodlee', consentId: 'yodlee', accounts, transactions, income },
   )) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
 
   if (!syncRes?.syncAaData) throw new Error('Backend sync failed — no data written')
