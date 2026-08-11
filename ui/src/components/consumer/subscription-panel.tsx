@@ -16,7 +16,6 @@ type Plan = {
   productId: string;
 };
 
-// TODO: replace placeholder product ids with real Polar product ids
 const PERSONAL_PLANS: Plan[] = [
   {
     plan: "free",
@@ -29,42 +28,42 @@ const PERSONAL_PLANS: Plan[] = [
   {
     plan: "pro",
     name: "Pro",
-    price: `${CURRENCY}10/mo`,
+    price: `${CURRENCY}499/mo`,
     desc: "Everything in Free, plus unlimited AI coaching and insights.",
     cta: "Upgrade to Pro",
-    productId: "polar-pro",
+    productId: "9afd6c39-4e44-47f8-bd76-38c5b8166324",
   },
   {
     plan: "max",
     name: "Max",
-    price: `${CURRENCY}99/mo`,
+    price: `${CURRENCY}1,499/mo`,
     desc: "Everything in Pro, plus priority support and advanced analytics.",
     cta: "Upgrade to Max",
-    productId: "polar-max",
+    productId: "78bc8c82-a1b1-4fc6-a7a0-680b55fa63f8",
   },
 ];
 
 const BUSINESS_PLANS: Plan[] = [
   {
     plan: "team_standard",
-    name: "Team · Standard seat",
-    price: `${CURRENCY}15/seat/mo`,
+    name: "Team · Standard",
+    price: `${CURRENCY}4,999/mo`,
     desc: "SMB essentials — P&L, cash flow, GST & tax, inventory, advisor.",
     cta: "Start Team",
-    productId: "polar-team-standard",
+    productId: "cc1b8227-db5b-4909-9b7a-12b24a8e8ff4",
   },
   {
     plan: "team_premium",
-    name: "Team · Premium seat",
-    price: `${CURRENCY}99/seat/mo`,
+    name: "Team · Premium",
+    price: `${CURRENCY}9,999/mo`,
     desc: "Everything in Standard, plus premium seats and advanced tools.",
     cta: "Go Premium",
-    productId: "polar-team-premium",
+    productId: "b67bf07d-9007-4880-86ab-b982f85f7119",
   },
   {
     plan: "enterprise",
     name: "Enterprise",
-    price: `${CURRENCY}200/mo`,
+    price: `${CURRENCY}24,999/mo`,
     desc: "All features. Up to 400 employees — above that, contact sales.",
     cta: "Contact us",
     productId: "",

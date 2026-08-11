@@ -1027,13 +1027,13 @@ app.post('/api/subscription/checkout', auth, async (c) => {
   return c.json({ url: data.url })
 })
 
-// Polar product id → plan tier. TODO: replace placeholders with real Polar product ids.
+// Polar product id → plan tier (sandbox org "Cartis").
 const POLAR_PRODUCTS: Record<string, string> = {
-  'polar-pro': 'pro',
-  'polar-max': 'max',
-  'polar-team-standard': 'team_standard',
-  'polar-team-premium': 'team_premium',
-  'polar-enterprise': 'enterprise',
+  '9afd6c39-4e44-47f8-bd76-38c5b8166324': 'pro',
+  '78bc8c82-a1b1-4fc6-a7a0-680b55fa63f8': 'max',
+  'cc1b8227-db5b-4909-9b7a-12b24a8e8ff4': 'team_standard',
+  'b67bf07d-9007-4880-86ab-b982f85f7119': 'team_premium',
+  '2cf29781-b6a5-4cc1-b34b-1c7c9ec3b2d3': 'enterprise',
 }
 
 app.post('/webhooks/polar', async (c) => {
