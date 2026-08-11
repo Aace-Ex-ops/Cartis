@@ -183,12 +183,14 @@ export function RevnueCapabilities() {
       style={{ paddingTop: 96, paddingBottom: 96 }}
     >
       <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 bg-black x-fade-top" />
+        <div className="absolute inset-0 bg-white x-fade-bottom-soft" />
         <video
           ref={videoRef}
           loop
           muted
           playsInline
-          className="w-full h-full object-cover object-center select-none"
+          className="w-full h-full object-cover object-center select-none x-fade-top x-fade-bottom-soft"
           src={BG_VIDEO}
           poster="/landing/posters/capabilities-bg.jpg"
         />

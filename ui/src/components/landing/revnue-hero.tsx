@@ -67,14 +67,14 @@ export function RevnueHero() {
         className="sticky top-0 w-full h-screen overflow-hidden flex flex-col justify-center"
       >
         {videoOk && (
-          <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
+          <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none bg-black">
             <video
               autoPlay
               loop
               muted
               playsInline
               onError={() => setVideoOk(false)}
-              className="w-full h-full object-cover select-none"
+              className="w-full h-full object-cover select-none x-fade-top-soft x-fade-bottom-soft"
               src={HEADER_BG_URL}
               poster="/landing/posters/header-bg.jpg"
             />
