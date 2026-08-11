@@ -31,6 +31,29 @@ type GoalCapture = {
   current_amount?: number;
 };
 
+type HoldingCapture = {
+  asset_type: string;
+  name: string;
+  quantity: number;
+  avg_price?: number;
+};
+
+type ProfileCapture = {
+  monthly_income?: number;
+  monthly_spend?: number;
+  investment_pct?: number;
+  housing_cost?: number;
+  dependents?: number;
+  debt_emis?: number;
+  monthly_tax?: number;
+};
+
+type Captures = {
+  goal?: GoalCapture;
+  holding?: HoldingCapture;
+  profile?: ProfileCapture;
+};
+
 const GOAL_LABELS: Record<string, string> = {
   emergency: "Emergency fund",
   retirement: "Retirement",
@@ -38,6 +61,60 @@ const GOAL_LABELS: Record<string, string> = {
   education: "Education",
   other: "Goal",
 };
+
+const ASSET_LABELS: Record<string, string> = {
+  equity: "Stocks",
+  mutual_fund: "Mutual fund",
+  fd: "Fixed deposit",
+  gold: "Gold",
+  cash: "Cash",
+  other: "Other",
+};
+
+const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
+function CaptureCard({
+  title,
+  meta,
+  saveLabel,
+  onSave,
+  onDismiss,
+}: {
+  title: string;
+  meta: string;
+  saveLabel: string;
+  onSave: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="flex gap-2.5">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">
+        <Bot className="h-3.5 w-3.5" />
+      </div>
+      <div className="max-w-[80%] rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[12px] font-semibold text-foreground">{title}</p>
+          <button
+            onClick={onDismiss}
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+            aria-label="Dismiss suggestion"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+        <p className="mt-0.5 text-[12px] text-muted-foreground">{meta}</p>
+        <div className="mt-2 flex gap-1.5">
+          <Button size="sm" className="h-7 px-2.5 text-[12px]" onClick={onSave}>
+            {saveLabel}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-[12px]" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function timeAgo(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -75,7 +152,7 @@ export function TwinChat({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [capture, setCapture] = useState<GoalCapture | null>(null);
+  const [captures, setCaptures] = useState<Captures>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -128,7 +205,7 @@ export function TwinChat({
       setMessages(rows.length ? rows : [{ role: "assistant", content: welcome }]);
       setActiveId(id);
       setError("");
-      setCapture(null);
+      setCaptures({});
     } catch {
       // ignore
     }
@@ -142,7 +219,7 @@ export function TwinChat({
     setTool(null);
     setMessages([{ role: "assistant", content: welcome }]);
     setError("");
-    setCapture(null);
+    setCaptures({});
   };
 
   const deleteSession = async (id: string) => {
@@ -224,7 +301,7 @@ export function TwinChat({
               token?: string;
               error?: string;
               sessionId?: string;
-              capture?: { goal: GoalCapture };
+              capture?: Captures;
             };
             if (ev.error) {
               setError(ev.error);
@@ -232,7 +309,7 @@ export function TwinChat({
               break;
             }
             if (ev.sessionId) setActiveId(ev.sessionId);
-            if (ev.capture?.goal) setCapture(ev.capture.goal);
+            if (ev.capture) setCaptures(ev.capture);
             if (ev.token) {
               setMessages((m) => {
                 const copy = [...m];
@@ -277,8 +354,8 @@ export function TwinChat({
           { id: "", label: "Tax", prompt: "What can I do to lower my tax this year?" },
         ];
 
-  const saveCapture = async () => {
-    const goal = capture;
+  const saveGoal = async () => {
+    const goal = captures.goal;
     if (!goal) return;
     try {
       await gql(
@@ -287,9 +364,48 @@ export function TwinChat({
         }`,
         { goalType: goal.goal_type, name: goal.name, targetAmount: goal.target_amount, currentAmount: goal.current_amount },
       );
-      setCapture(null);
+      setCaptures((c) => ({ ...c, goal: undefined }));
     } catch {
       setError("Couldn't save goal — try again.");
+    }
+  };
+
+  const saveHolding = async () => {
+    const holding = captures.holding;
+    if (!holding) return;
+    try {
+      await gql(
+        `mutation($assetType: String!, $name: String!, $quantity: Float!, $avgPrice: Float) {
+          addHolding(assetType: $assetType, name: $name, quantity: $quantity, avgPrice: $avgPrice) { holdingId }
+        }`,
+        { assetType: holding.asset_type, name: holding.name, quantity: holding.quantity, avgPrice: holding.avg_price },
+      );
+      setCaptures((c) => ({ ...c, holding: undefined }));
+    } catch {
+      setError("Couldn't add purchase — try again.");
+    }
+  };
+
+  const saveProfile = async () => {
+    const p = captures.profile;
+    if (!p) return;
+    const fields: string[] = [];
+    if (p.monthly_income) fields.push(`monthlyIncome: ${p.monthly_income}`);
+    if (p.monthly_spend) fields.push(`monthlySpend: ${p.monthly_spend}`);
+    if (p.investment_pct) fields.push(`investmentPct: ${p.investment_pct}`);
+    if (p.housing_cost) fields.push(`housingCost: ${p.housing_cost}`);
+    if (p.dependents !== undefined) fields.push(`dependents: ${p.dependents}`);
+    if (p.debt_emis) fields.push(`debtEmis: ${p.debt_emis}`);
+    if (p.monthly_tax) fields.push(`monthlyTax: ${p.monthly_tax}`);
+    if (!fields.length) {
+      setCaptures((c) => ({ ...c, profile: undefined }));
+      return;
+    }
+    try {
+      await gql(`mutation { updateFinancialProfile(${fields.join(", ")}) { id } }`);
+      setCaptures((c) => ({ ...c, profile: undefined }));
+    } catch {
+      setError("Couldn't update profile — try again.");
     }
   };
 
@@ -437,43 +553,57 @@ export function TwinChat({
                   </div>
                 </div>
               ))}
-              {capture && (
-                <div className="flex gap-2.5">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-elevated">
-                    <Bot className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="max-w-[80%] rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[12px] font-semibold text-foreground">{capture.name}</p>
-                      <button
-                        onClick={() => setCapture(null)}
-                        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                        aria-label="Dismiss goal suggestion"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                    <p className="mt-0.5 text-[12px] text-muted-foreground">
-                      {GOAL_LABELS[capture.goal_type] ?? "Goal"} · ₹
-                      {Math.round(capture.target_amount).toLocaleString("en-IN")}
-                      {typeof capture.current_amount === "number" &&
-                        ` · ${Math.round(capture.current_amount).toLocaleString("en-IN")} saved`}
-                    </p>
-                    <div className="mt-2 flex gap-1.5">
-                      <Button size="sm" className="h-7 px-2.5 text-[12px]" onClick={() => void saveCapture()}>
-                        Save goal
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-[12px]"
-                        onClick={() => setCapture(null)}
-                      >
-                        Dismiss
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+              {(captures.goal || captures.holding || captures.profile) && (
+                <>
+                  {captures.goal && (
+                    <CaptureCard
+                      title={captures.goal.name}
+                      meta={`${GOAL_LABELS[captures.goal.goal_type] ?? "Goal"} · ${inr(captures.goal.target_amount)}${
+                        typeof captures.goal.current_amount === "number"
+                          ? ` · ${inr(captures.goal.current_amount)} saved`
+                          : ""
+                      }`}
+                      saveLabel="Save goal"
+                      onSave={() => void saveGoal()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, goal: undefined }))}
+                    />
+                  )}
+                  {captures.holding && (
+                    <CaptureCard
+                      title={captures.holding.name}
+                      meta={`${ASSET_LABELS[captures.holding.asset_type] ?? "Investment"} · ${captures.holding.quantity} units${
+                        typeof captures.holding.avg_price === "number"
+                          ? ` @ ${inr(captures.holding.avg_price)}`
+                          : ""
+                      }`}
+                      saveLabel="Add purchase"
+                      onSave={() => void saveHolding()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, holding: undefined }))}
+                    />
+                  )}
+                  {captures.profile && (
+                    <CaptureCard
+                      title="Update financial profile"
+                      meta={
+                        Object.entries({
+                          "income": captures.profile.monthly_income ? inr(captures.profile.monthly_income) + "/mo" : "",
+                          "spend": captures.profile.monthly_spend ? inr(captures.profile.monthly_spend) + "/mo" : "",
+                          "invest": captures.profile.investment_pct !== undefined ? `${captures.profile.investment_pct}%` : "",
+                          "housing": captures.profile.housing_cost ? inr(captures.profile.housing_cost) + "/mo" : "",
+                          "dependents": captures.profile.dependents !== undefined ? `${captures.profile.dependents}` : "",
+                          "debt EMI": captures.profile.debt_emis ? inr(captures.profile.debt_emis) + "/mo" : "",
+                          "tax": captures.profile.monthly_tax ? inr(captures.profile.monthly_tax) + "/mo" : "",
+                        })
+                          .filter(([, v]) => v)
+                          .map(([k, v]) => `${k} ${v}`)
+                          .join(" · ")
+                      }
+                      saveLabel="Save profile"
+                      onSave={() => void saveProfile()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, profile: undefined }))}
+                    />
+                  )}
+                </>
               )}
               {busy && (
                 <div className="flex gap-2.5">

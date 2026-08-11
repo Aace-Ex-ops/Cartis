@@ -1436,9 +1436,17 @@ impl MutationRoot {
         let row = pg(ctx).get().await?
             .query_one(
                 "INSERT INTO holdings (user_id, asset_type, name, quantity, avg_price, current_price, as_of)
-                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::numeric, $7::date)
+                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, NULLIF($5, '')::numeric, NULLIF($6, '')::numeric, NULLIF($7, '')::date)
                  RETURNING holding_id::text, asset_type, name, quantity::float8, avg_price::float8, current_price::float8, as_of::text, created_at::text",
-                &[&uid, &asset_type, &name, &quantity.to_string(), &avg_price.map(|v| v.to_string()), &current_price.map(|v| v.to_string()), &as_of],
+                &[
+                    &uid,
+                    &asset_type,
+                    &name,
+                    &quantity.to_string(),
+                    &avg_price.map(|v| v.to_string()).unwrap_or_default(),
+                    &current_price.map(|v| v.to_string()).unwrap_or_default(),
+                    &as_of.unwrap_or_default(),
+                ],
             )
             .await?;
         Ok(Holding::from_row(&row))
