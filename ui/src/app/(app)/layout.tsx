@@ -38,6 +38,7 @@ const PERSONAL_NAV = [
 const BUSINESS_NAV = [
   {
     items: [
+      { id: "nav-overview", title: "Overview", href: "/dashboard", icon: LayoutDashboard },
       { id: "nav-income", title: "Income", href: "/dashboard/income", icon: TrendingUp },
       { id: "nav-expenses", title: "Expenses", href: "/dashboard/expenses", icon: ReceiptText },
       { id: "nav-pnl", title: "Profit & Loss", href: "/dashboard/pnl", icon: FileText },
