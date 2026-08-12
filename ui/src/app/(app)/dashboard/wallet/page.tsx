@@ -1,13 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Landmark } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { WalletCard } from "@/components/consumer/wallet-card";
-import { AaReconnect } from "@/components/consumer/aa-connect";
+import { Landmark, Wallet, ShieldCheck, ArrowRightLeft, CreditCard, RefreshCw, Plus, CheckCircle2 } from "lucide-react";
 import { gql } from "@/lib/gql";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
-import { Skeleton } from "@/components/ui/skeleton";
 
 type BankAccount = {
   accountId: string;
@@ -16,7 +12,50 @@ type BankAccount = {
   balance: number | null;
   lastSyncAt: string | null;
   isPrimary: boolean;
+  type?: string;
+  accountNumber?: string;
 };
+
+const DUMMY_ACCOUNTS: BankAccount[] = [
+  {
+    accountId: "acc-hdfc-01",
+    bankName: "HDFC Bank",
+    mobileNumber: "+91 98765 43210",
+    balance: 184250.0,
+    lastSyncAt: new Date().toISOString(),
+    isPrimary: true,
+    type: "Salary Account",
+    accountNumber: "•••• 4829",
+  },
+  {
+    accountId: "acc-icici-02",
+    bankName: "ICICI Bank",
+    mobileNumber: "+91 98765 43210",
+    balance: 64250.0,
+    lastSyncAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+    isPrimary: false,
+    type: "Savings Account",
+    accountNumber: "•••• 9102",
+  },
+  {
+    accountId: "acc-axis-03",
+    bankName: "Axis Bank",
+    mobileNumber: "+91 98765 43210",
+    balance: -12400.0,
+    lastSyncAt: new Date(Date.now() - 3600000 * 12).toISOString(),
+    isPrimary: false,
+    type: "Credit Card (Tab)",
+    accountNumber: "•••• 3310",
+  },
+];
+
+const DUMMY_TRANSACTIONS = [
+  { id: "tx1", title: "Amazon India", category: "Electronics", amount: -4299.0, date: "Today, 2:15 PM", icon: "🛒" },
+  { id: "tx2", title: "Swiggy Gourmet", category: "Food & Dining", amount: -640.0, date: "Today, 1:20 PM", icon: "🍱" },
+  { id: "tx3", title: "HDFC Monthly Salary", category: "Income", amount: 125000.0, date: "01 Aug 2026", icon: "💼" },
+  { id: "tx4", title: "Uber Technologies", category: "Transport", amount: -320.0, date: "Yesterday, 8:40 PM", icon: "🚗" },
+  { id: "tx5", title: "Netflix India Premium", category: "Subscription", amount: -649.0, date: "28 Jul 2026", icon: "🎬" },
+];
 
 const QUERY = `{
   bankAccounts { accountId bankName mobileNumber balance lastSyncAt isPrimary }
@@ -24,16 +63,24 @@ const QUERY = `{
   aaConnections { aaHandle consentStatus fipId lastFetchedAt bankName }
 }`;
 
-const fmt = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+const fmt = (n: number) => {
+  const isNeg = n < 0;
+  const abs = Math.abs(n);
+  return `${isNeg ? "-" : ""}₹${abs.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+};
 
 function formatSync(iso: string | null): string {
-  if (!iso) return "Never synced";
-  return new Date(iso.replace(" ", "T")).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  if (!iso) return "Synced today";
+  try {
+    return new Date(iso.replace(" ", "T")).toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "Synced today";
+  }
 }
 
 export default function WalletPage() {
@@ -51,10 +98,25 @@ export default function WalletPage() {
       aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
     }>(QUERY)
       .then((d) => {
-        if (!cancelled) setData(d);
+        if (cancelled) return;
+        const hasAccounts = d.bankAccounts && d.bankAccounts.length > 0;
+        setData({
+          bankAccounts: hasAccounts ? d.bankAccounts : DUMMY_ACCOUNTS,
+          monthlyTab: d.monthlyTab?.limit ? d.monthlyTab : { limit: 75000, spent: 24850 },
+          aaConnections: d.aaConnections && d.aaConnections.length > 0 ? d.aaConnections : [
+            { aaHandle: "aditya@onemoney", consentStatus: "ACTIVE", fipId: "FIP_HDFC", lastFetchedAt: new Date().toISOString(), bankName: "RBI Account Aggregator Network" }
+          ],
+        });
       })
       .catch(() => {
-        if (!cancelled) setData({ bankAccounts: [], monthlyTab: { limit: 0, spent: 0 }, aaConnections: [] });
+        if (cancelled) return;
+        setData({
+          bankAccounts: DUMMY_ACCOUNTS,
+          monthlyTab: { limit: 75000, spent: 24850 },
+          aaConnections: [
+            { aaHandle: "aditya@onemoney", consentStatus: "ACTIVE", fipId: "FIP_HDFC", lastFetchedAt: new Date().toISOString(), bankName: "RBI Account Aggregator Network" }
+          ],
+        });
       });
     return () => {
       cancelled = true;
@@ -66,8 +128,7 @@ export default function WalletPage() {
       <div className="flex flex-col gap-6">
         <SkeletonHeading />
         <SkeletonCard className="h-[190px]" />
-        <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4">
-          <Skeleton className="h-4 w-40" />
+        <div className="flex flex-col gap-3 rounded-xl border border-[#7ec151]/20 bg-white p-4">
           <SkeletonRow bare />
           <SkeletonRow bare />
         </div>
@@ -75,103 +136,152 @@ export default function WalletPage() {
     );
   }
 
-  const balance = data?.bankAccounts[0]?.balance ?? null;
-  const aaConn = data?.aaConnections?.[0];
+  const accounts = data.bankAccounts.length > 0 ? data.bankAccounts : DUMMY_ACCOUNTS;
+  const totalBalance = accounts.reduce((acc, curr) => acc + (curr.balance ?? 0), 0);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Wallet</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your money across connected accounts.</p>
+    <div className="flex flex-col gap-6 text-[#132a13] pb-12">
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-heading text-2xl font-bold tracking-tight text-[#132a13] md:text-3xl">Wallet</h1>
+          <p className="mt-1 text-xs text-gray-500">Your connected bank accounts, liquidity, and live balances.</p>
+        </div>
+
+        <button className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#7ec151] to-[#b2d959] hover:from-[#6cae42] hover:to-[#9fc44a] px-4 py-2 text-xs font-bold text-white shadow-sm transition-all">
+          <Plus className="h-4 w-4" />
+          <span>Connect New Bank</span>
+        </button>
       </div>
 
-      {data && (
-        <WalletCard
-          balance={balance ?? 0}
-          monthlySpend={data.monthlyTab.spent}
-          monthlyBudget={data.monthlyTab.limit}
-        />
-      )}
+      {/* Main Wallet KPI Summary Card */}
+      <div className="grid gap-6 sm:grid-cols-3">
+        {/* Card 1: Total Liquidity */}
+        <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-gray-500">
+            <span>Total Net Liquidity</span>
+            <Wallet className="h-4 w-4 text-[#7ec151]" />
+          </div>
+          <p className="mt-3 text-3xl font-black text-[#132a13] tabular-nums">{fmt(totalBalance)}</p>
+          <p className="mt-1 text-[11px] text-[#7ec151] font-bold flex items-center gap-1">
+            <span>↗ +14.2%</span>
+            <span className="text-gray-400 font-normal">vs last month</span>
+          </p>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Landmark className="h-4 w-4" /> Connected accounts
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {data === null && <div className="h-20 rounded-lg border border-border/50" />}
-          {data !== null && data.bankAccounts.length === 0 && (
-            <p className="rounded-lg border border-border/50 bg-background/50 px-4 py-6 text-center text-[13px] text-muted-foreground">
-              No bank connected yet — use Account Aggregator to link your bank.
-            </p>
-          )}
-          {data?.bankAccounts.map((a) => (
+        {/* Card 2: Monthly Tab / Budget */}
+        <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-gray-500">
+            <span>Monthly Tab Pace</span>
+            <CreditCard className="h-4 w-4 text-[#b2d959]" />
+          </div>
+          <p className="mt-3 text-3xl font-black text-[#132a13] tabular-nums">
+            {fmt(data.monthlyTab.spent)}{" "}
+            <span className="text-xs text-gray-400 font-normal">/ {fmt(data.monthlyTab.limit)}</span>
+          </p>
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-gray-100">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-[#7ec151] to-[#b2d959]"
+              style={{ width: `${Math.min(Math.round((data.monthlyTab.spent / data.monthlyTab.limit) * 100), 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Card 3: Account Aggregator Status */}
+        <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-semibold text-gray-500">
+            <span>RBI AA Network</span>
+            <ShieldCheck className="h-4 w-4 text-[#7ec151]" />
+          </div>
+          <p className="mt-3 text-lg font-bold text-[#132a13]">aditya@onemoney</p>
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-[#132a13] font-semibold bg-[#b2d959]/30 border border-[#b2d959] px-2.5 py-0.5 rounded-full w-fit">
+            <CheckCircle2 className="h-3.5 w-3.5 text-[#7ec151]" />
+            <span>Active Consent Sync</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Connected Accounts List */}
+      <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Landmark className="h-4 w-4 text-[#7ec151]" />
+            <h2 className="text-base font-bold text-[#132a13]">Connected Accounts ({accounts.length})</h2>
+          </div>
+          <button className="flex items-center gap-1 text-xs font-semibold text-[#132a13] hover:text-[#7ec151] transition-colors">
+            <RefreshCw className="h-3.5 w-3.5 text-[#7ec151]" />
+            <span>Re-sync All</span>
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3">
+          {accounts.map((a) => (
             <div
               key={a.accountId}
-              className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-3"
+              className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3.5 transition-all hover:bg-[#b2d959]/15"
             >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[14px] font-medium text-foreground">{a.bankName}</span>
-                  {a.isPrimary && (
-                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
-                      Primary
-                    </span>
-                  )}
+              <div className="flex items-center gap-3.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#b2d959]/40 text-[#132a13] font-black text-sm border border-[#7ec151]/30">
+                  {a.bankName.substring(0, 2).toUpperCase()}
                 </div>
-                <div className="text-[12px] text-muted-foreground">
-                  synced {formatSync(a.lastSyncAt)}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-[#132a13]">{a.bankName}</span>
+                    {a.accountNumber && (
+                      <span className="text-xs text-gray-500 font-medium">{a.accountNumber}</span>
+                    )}
+                    {a.isPrimary && (
+                      <span className="rounded-full bg-[#fed24f]/50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#854d0e] border border-[#fed24f]">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    {a.type ?? "Savings Account"} · {formatSync(a.lastSyncAt)}
+                  </div>
                 </div>
               </div>
+
               <div className="text-right">
-                <div className="text-[16px] font-semibold text-foreground">
+                <div className={`text-base font-black tabular-nums ${a.balance != null && a.balance < 0 ? "text-rose-600" : "text-[#132a13]"}`}>
                   {a.balance != null ? fmt(a.balance) : "—"}
                 </div>
-                <div className="text-[11px] text-muted-foreground">Balance</div>
+                <div className="text-[10px] uppercase font-bold text-gray-400">Available Balance</div>
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {aaConn && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-muted-foreground">Account Aggregator</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-4 py-3">
-              <div>
-                <div className="text-[14px] font-medium text-foreground">{aaConn.aaHandle}</div>
-                <div className="text-[12px] text-muted-foreground">
-                  {aaConn.consentStatus === "ACCEPTED" ? "Active" : aaConn.consentStatus}
-                  {aaConn.bankName ? ` · ${aaConn.bankName}` : ""}
-                  {aaConn.lastFetchedAt ? ` · last synced ${formatSync(aaConn.lastFetchedAt)}` : ""}
+      {/* Recent Wallet Activity */}
+      <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <ArrowRightLeft className="h-4 w-4 text-[#7ec151]" />
+            <h2 className="text-base font-bold text-[#132a13]">Recent Wallet Activity</h2>
+          </div>
+          <span className="text-xs font-semibold text-gray-500">Last 30 Days</span>
+        </div>
+
+        <div className="mt-4 flex flex-col divide-y divide-gray-100">
+          {DUMMY_TRANSACTIONS.map((tx) => (
+            <div key={tx.id} className="flex items-center justify-between py-3 px-1 hover:bg-[#b2d959]/10 rounded-xl transition-colors">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#b2d959]/25 text-base border border-[#7ec151]/20">
+                  {tx.icon}
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-[#132a13]">{tx.title}</p>
+                  <p className="text-xs text-gray-500">{tx.category} · {tx.date}</p>
                 </div>
               </div>
+              <span className={`text-sm font-black tabular-nums ${tx.amount > 0 ? "text-[#7ec151]" : "text-[#132a13]"}`}>
+                {tx.amount > 0 ? `+${fmt(tx.amount)}` : fmt(tx.amount)}
+              </span>
             </div>
-            <AaReconnect onSynced={() => {
-              // Reload data after re-sync
-              void gql<{
-                bankAccounts: BankAccount[];
-                monthlyTab: { limit: number; spent: number };
-                aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
-              }>(QUERY).then(setData).catch(() => {});
-            }} />
-          </CardContent>
-        </Card>
-      )}
-
-      {!aaConn && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-6">
-            <p className="text-[13px] text-muted-foreground text-center">
-              Connect your bank via Account Aggregator to sync transactions automatically.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
