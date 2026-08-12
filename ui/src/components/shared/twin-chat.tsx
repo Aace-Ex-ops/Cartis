@@ -53,11 +53,19 @@ type BudgetCapture = {
   limit: number;
 };
 
+type PurchaseCapture = {
+  name: string;
+  price: number;
+  verdict: string;
+  explanation?: string;
+};
+
 type Captures = {
   goal?: GoalCapture;
   holding?: HoldingCapture;
   profile?: ProfileCapture;
   budget?: BudgetCapture;
+  purchase?: PurchaseCapture;
 };
 
 const GOAL_LABELS: Record<string, string> = {
@@ -431,6 +439,23 @@ export function TwinChat({
     }
   };
 
+  const savePurchase = async () => {
+    const purchase = captures.purchase;
+    if (!purchase) return;
+    try {
+      await gql(
+        `mutation($name: String!, $price: Float!, $verdict: String!, $explanation: String) {
+          addPurchase(name: $name, price: $price, verdict: $verdict, explanation: $explanation)
+        }`,
+        { name: purchase.name, price: purchase.price, verdict: purchase.verdict, explanation: purchase.explanation ?? null },
+      );
+      setCaptures((c) => ({ ...c, purchase: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
+    } catch {
+      setError("Couldn't add purchase — try again.");
+    }
+  };
+
   const runSuggestion = (s: { id: string; prompt: string }) => {
     setTool(s.id || null);
     void send(s.prompt);
@@ -575,8 +600,19 @@ export function TwinChat({
                   </div>
                 </div>
               ))}
-              {(captures.goal || captures.holding || captures.profile || captures.budget) && (
+              {(captures.goal || captures.holding || captures.profile || captures.budget || captures.purchase) && (
                 <>
+                  {captures.purchase && (
+                    <CaptureCard
+                      title={captures.purchase.name}
+                      meta={`${inr(captures.purchase.price)} · ${captures.purchase.verdict}${
+                        captures.purchase.explanation ? ` — ${captures.purchase.explanation}` : ""
+                      }`}
+                      saveLabel="Add to purchases"
+                      onSave={() => void savePurchase()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, purchase: undefined }))}
+                    />
+                  )}
                   {captures.goal && (
                     <CaptureCard
                       title={captures.goal.name}

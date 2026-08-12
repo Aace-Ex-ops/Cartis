@@ -1518,6 +1518,38 @@ impl MutationRoot {
             .await?;
         Ok(res > 0)
     }
+
+    async fn add_purchase(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        price: f64,
+        verdict: String,
+        explanation: Option<String>,
+    ) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let verdict = verdict.to_lowercase();
+        if !["good", "warning", "bad"].contains(&verdict.as_str()) {
+            return Err("invalid verdict".into());
+        }
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO products (name, site_url, site_name, price)
+                 VALUES ($1, 'twin-chat://', 'Twin Chat', $2::text::numeric)
+                 RETURNING product_id::text",
+                &[&name, &price.to_string()],
+            )
+            .await?;
+        let product_id: String = row.get(0);
+        pg(ctx).get().await?
+            .execute(
+                "INSERT INTO analysis_log (analysis_id, user_id, product_id, verdict, explanation)
+                 VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, $3, $4)",
+                &[&uid, &product_id, &verdict, &explanation],
+            )
+            .await?;
+        Ok(true)
+    }
 }
 
 struct User {
