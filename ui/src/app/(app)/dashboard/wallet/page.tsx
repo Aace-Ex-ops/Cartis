@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Landmark, Wallet, ShieldCheck, ArrowRightLeft, CreditCard, RefreshCw, Plus, CheckCircle2 } from "lucide-react";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
 type BankAccount = {
@@ -14,6 +15,23 @@ type BankAccount = {
   isPrimary: boolean;
   type?: string;
   accountNumber?: string;
+};
+
+type LedgerTx = {
+  txnType: string;
+  amount: number;
+  description: string | null;
+  transactionDate: string | null;
+  createdAt: string | null;
+};
+
+type MeProfile = {
+  monthlyIncome: number | null;
+  monthlySpend: number | null;
+  investmentPct: number | null;
+  housingCost: number | null;
+  debtEmis: number | null;
+  monthlyTax: number | null;
 };
 
 const DUMMY_ACCOUNTS: BankAccount[] = [
@@ -61,6 +79,9 @@ const QUERY = `{
   bankAccounts { accountId bankName mobileNumber balance lastSyncAt isPrimary }
   monthlyTab { limit spent }
   aaConnections { aaHandle consentStatus fipId lastFetchedAt bankName }
+  ledgerTransactions(limit: 10) { txnType amount description transactionDate createdAt }
+  incomeStreams { source frequency amount currency fromDate toDate }
+  me { monthlyIncome monthlySpend investmentPct housingCost debtEmis monthlyTax }
 }`;
 
 const fmt = (n: number) => {
@@ -72,7 +93,7 @@ const fmt = (n: number) => {
 function formatSync(iso: string | null): string {
   if (!iso) return "Synced today";
   try {
-    return new Date(iso.replace(" ", "T")).toLocaleString("en-IN", {
+    return new Date(typeof iso === "string" ? iso.replace(" ", "T") : iso).toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
       hour: "2-digit",
@@ -88,17 +109,21 @@ export default function WalletPage() {
     bankAccounts: BankAccount[];
     monthlyTab: { limit: number; spent: number };
     aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+    ledgerTransactions?: LedgerTx[];
+    incomeStreams?: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+    me?: MeProfile | null;
   } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void gql<{
+  const load = useCallback(async () => {
+    gql<{
       bankAccounts: BankAccount[];
       monthlyTab: { limit: number; spent: number };
       aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+      ledgerTransactions: LedgerTx[];
+      incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+      me: MeProfile | null;
     }>(QUERY)
       .then((d) => {
-        if (cancelled) return;
         const hasAccounts = d.bankAccounts && d.bankAccounts.length > 0;
         setData({
           bankAccounts: hasAccounts ? d.bankAccounts : DUMMY_ACCOUNTS,
@@ -109,7 +134,6 @@ export default function WalletPage() {
         });
       })
       .catch(() => {
-        if (cancelled) return;
         setData({
           bankAccounts: DUMMY_ACCOUNTS,
           monthlyTab: { limit: 75000, spent: 24850 },
@@ -118,10 +142,9 @@ export default function WalletPage() {
           ],
         });
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useLiveData(load, [load]);
 
   if (data === null) {
     return (

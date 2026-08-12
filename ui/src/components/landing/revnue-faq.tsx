@@ -34,7 +34,7 @@ export function RevnueFaq() {
   const [open, setOpen] = useState(0);
 
   return (
-    <section id="faq" className="min-h-screen bg-white py-24 md:py-28">
+    <section id="faq" className="bg-white py-20 md:py-28">
       <div className="mx-auto max-w-6xl px-6">
         <div className="flex items-end justify-between gap-6">
           <div>

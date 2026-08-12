@@ -65,3 +65,22 @@
   width: max-content;
   animation: landing-marquee 35s linear infinite;
 }
+
+@media (min-width: 1024px) {
+  .anybody-heading {
+    font-size: 70px !important;
+    line-height: 1.1 !important;
+  }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .anybody-heading {
+    font-size: 52px !important;
+    line-height: 1.1 !important;
+  }
+}
+@media (max-width: 767px) {
+  .anybody-heading {
+    font-size: 34px !important;
+    line-height: 1.2 !important;
+  }
+}

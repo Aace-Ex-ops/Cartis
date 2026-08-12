@@ -1,5 +1,8 @@
+use std::collections::HashSet;
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use argon2::password_hash::PasswordHasher;
 
 use async_graphql::{EmptySubscription, Schema};
 use async_graphql::http::graphiql_source;
@@ -13,6 +16,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::Deserialize;
+mod admin;
 mod chat;
 mod email;
 mod graphql;
@@ -20,13 +24,12 @@ mod insights;
 
 pub struct AppState {
     pub pg: deadpool_postgres::Pool,
-    pub redis: Option<redis::Client>,
+    pub admin_tokens: Mutex<HashSet<String>>,
 }
 
 #[tokio::main]
 async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL required");
-    let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let port = env::var("PORT").unwrap_or_else(|_| "8000".into());
     let backend_secret = env::var("BACKEND_SECRET").unwrap_or_default();
 
@@ -36,21 +39,11 @@ async fn main() {
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
         .expect("postgres pool creation failed");
 
-    let redis = match redis::Client::open(redis_url) {
-        Ok(c) => match c.get_async_connection().await {
-            Ok(_) => Some(c),
-            Err(e) => {
-                eprintln!("redis unavailable, continuing without cache: {e}");
-                None
-            }
-        },
-        Err(e) => {
-            eprintln!("redis misconfigured, continuing without cache: {e}");
-            None
-        }
-    };
-
-    let state = Arc::new(AppState { pg, redis });
+    let state = Arc::new(AppState {
+        pg,
+        admin_tokens: Mutex::new(HashSet::new()),
+    });
+    bootstrap_admin(&state).await;
     let schema = Schema::build(graphql::QueryRoot, graphql::MutationRoot, EmptySubscription)
         .data(state.clone())
         .finish();
@@ -71,8 +64,14 @@ async fn main() {
             "/chat/sessions/{session_id}",
             patch(chat::rename_session).delete(chat::delete_session),
         )
-        .route("/api/email", post(api_email))
+        .route("/api/admin/login", post(admin::login))
+        .route("/api/admin/admins", post(admin::add_admin))
+        .route("/api/admin/users", axum::routing::get(admin::users))
+        .route("/api/admin/subscriptions", axum::routing::get(admin::subscriptions))
+        .route("/api/admin/emails", axum::routing::get(admin::emails))
+        .route("/api/admin/logins", axum::routing::get(admin::logins))
         .route("/setu-proxy", post(setu_proxy))
+        .route("/plan/update", post(plan_update))
         .with_state(state.clone())
         .layer(axum::extract::Extension(schema))
         .layer(axum::middleware::from_fn_with_state(
@@ -92,7 +91,7 @@ async fn require_backend_secret(
     req: axum::http::Request<axum::body::Body>,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    if !secret.is_empty() {
+    if !secret.is_empty() && !req.uri().path().starts_with("/api/admin/") {
         let ok = req
             .headers()
             .get("x-cartis-backend-secret")
@@ -155,17 +154,71 @@ async fn setu_proxy(
 }
 
 #[derive(Deserialize)]
-struct EmailReq {
-    to: String,
-    subject: String,
-    html: String,
+struct PlanUpdateReq {
+    user_id: String,
+    plan: String,
 }
 
-async fn api_email(
-    axum::extract::Json(body): axum::extract::Json<EmailReq>,
-) -> Result<StatusCode, StatusCode> {
-    email::send_email(&body.to, &body.subject, &body.html).await;
-    Ok(StatusCode::OK)
+// Called by the gateway (Polar webhook) with a valid BACKEND_SECRET.
+async fn plan_update(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Json(req): axum::extract::Json<PlanUpdateReq>,
+) -> Result<axum::response::Json<serde_json::Value>, (StatusCode, String)> {
+    let valid = match req.plan.as_str() {
+        "pro" | "max" | "team_standard" | "team_premium" | "enterprise" | "free" => true,
+        _ => false,
+    };
+    if !valid {
+        return Err((StatusCode::BAD_REQUEST, "invalid plan".into()));
+    }
+    let rows = state
+        .pg
+        .get()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .execute(
+            "UPDATE users SET plan = $2, trial_ends_at = NULL WHERE user_id::text = $1",
+            &[&req.user_id, &req.plan],
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(axum::response::Json(serde_json::json!({ "ok": rows > 0 })))
+}
+
+// Seed the first admin from env (ADMIN_EMAIL/ADMIN_PASSWORD) if none exists.
+async fn bootstrap_admin(state: &Arc<AppState>) {
+    let (Ok(email), Ok(password)) = (env::var("ADMIN_EMAIL"), env::var("ADMIN_PASSWORD")) else {
+        return;
+    };
+    if email.is_empty() || password.is_empty() {
+        return;
+    }
+    let exists = match state.pg.get().await {
+        Ok(c) => c
+            .query_opt("SELECT 1 FROM admins LIMIT 1", &[])
+            .await
+            .ok()
+            .flatten()
+            .is_some(),
+        Err(_) => true,
+    };
+    if exists {
+        return;
+    }
+    let salt = argon2::password_hash::SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
+    let hash = argon2::Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .unwrap_or_default();
+    if let Ok(mut conn) = state.pg.get().await {
+        let _ = conn
+            .execute(
+                "INSERT INTO admins (email, password_hash) VALUES ($1, $2)",
+                &[&email, &hash],
+            )
+            .await;
+    }
+    println!("bootstrapped admin {email}");
 }
 
 async fn graphql_handler(

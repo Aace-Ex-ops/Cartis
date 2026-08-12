@@ -32,14 +32,13 @@ E2E (Samsung Galaxy S24 Ultra @ ₹1,09,999): flipkart ₹79,999 · reliancedigi
   {
     identifier: "CARTIS-104",
     state: "InProgress",
-    comment: `**Aug 10: Resend replaced with Amazon SES** (domain \`cartis.dpdns.org\`, region ap-south-2). Gateway \`/api/email\` now signs SigV4 via \`aws4fetch\` → SES SendEmail. Secrets: \`AWS_ACCESS_KEY_ID/SECRET\` (IAM \`cartis-worker-email\`, email-only policy), \`AWS_REGION\`, \`EMAIL_FROM=Cartis <no-reply@cartis.dpdns.org>\`. Resend domain + \`RESEND_API_KEY\` secret deleted. Backend unchanged.
+    comment: `**Aug 10 (final): email LIVE on Resend — domain verified, real send delivered.**
 
-- Domain moved to Cloudflare DNS; \`https://cartis.dpdns.org\` serves the gateway (custom domain, live).
-- SES domain identity: 3 Easy-DKIM CNAMEs in DNS (verified at the authoritative nameservers) — status **PENDING → SUCCESS** (AWS polls; up to 24h).
-- Gmail recipient verified for sandbox test; production access requested.
-- SigV4 verified live (SES accepts the signature; rejects only the unverified From until DKIM resolves).
+Pivot for demo deadline: SES DKIM verification lagged >2h (AWS-side poll; DNS was provably correct), so \`/api/email\` reverted to **Resend** (commit \`bf56d23\`). Domain \`cartis.dpdns.org\` re-registered (\`aa9255ea\`), TXT \`resend._domainkey\` added in Cloudflare, verified in ~15 min. \`EMAIL_FROM=Cartis <no-reply@cartis.dpdns.org>\`.
 
-Remaining: DKIM → SUCCESS, live send test to \`kyahifarakpdtahein@gmail.com\`, production-access decision → then Done.`,
+**Verified live: \`{"ok":true}\` → Gmail inbox.** Backend \`email.rs\` unchanged (proxies via \`x-cartis-backend-secret\`).
+
+SES (ap-south-2) parked in background: IAM \`cartis-worker-email\`, identity + Easy-DKIM CNAMEs in DNS, production-access request in review. When DKIM → SUCCESS, the swap is ~5 lines.`,
   },
   {
     identifier: "CARTIS-105",

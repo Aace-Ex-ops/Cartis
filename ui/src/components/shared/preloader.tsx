@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { CartisHelloEffect } from "@/components/ui/apple-hello-effect";
 
-const TOTAL = 2200;
+const TOTAL = 1200;
 const FADE = 400;
 
 export function Preloader() {
@@ -30,7 +30,6 @@ export function Preloader() {
     return () => {
       cancelAnimationFrame(raf);
       clearTimeout(t);
-      document.body.style.overflow = "";
     };
   }, []);
 

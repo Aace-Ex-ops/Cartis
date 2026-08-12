@@ -30,7 +30,9 @@ CREATE TABLE users (
     ai_model TEXT DEFAULT '@cf/meta/llama-4-scout-17b-16e-instruct',
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     email_notifications BOOLEAN NOT NULL DEFAULT TRUE,
-    last_digest_email_at TIMESTAMPTZ
+    last_digest_email_at TIMESTAMPTZ,
+    plan VARCHAR(30) NOT NULL DEFAULT 'free',
+    trial_ends_at TIMESTAMPTZ
 );
 
 CREATE TABLE sessions (

@@ -6,7 +6,7 @@ import { Menu, Check, X, ArrowUpRight, Send, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
 
-const HEADER_BG_URL = "https://cdn.jiro.build/Wallet/Astro.mp4";
+const HEADER_BG_URL = "/landing/videos/astro-v4.mp4";
 
 const NAV_ITEMS = [
   { label: "Sign in", desc: "Back to your dashboard", href: "/signin" },
@@ -23,7 +23,26 @@ export function FinanceHeaderWallet() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    fetch(HEADER_BG_URL)
+      .then((r) => r.blob())
+      .then((b) => {
+        if (!cancelled) {
+          url = URL.createObjectURL(b);
+          setVideoSrc(url);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, []);
 
   useEffect(() => {
     const check = () => {
@@ -37,6 +56,7 @@ export function FinanceHeaderWallet() {
   useEffect(() => {
     let rafId = 0;
     let last = -1;
+    let watchdogId: ReturnType<typeof setInterval> | null = null;
     const getProgress = () => {
       const el = document.getElementById("scroll-container-wrapper");
       if (!el) return 0;
@@ -44,23 +64,30 @@ export function FinanceHeaderWallet() {
       if (travel <= 0) return 0;
       return Math.min(Math.max(-el.getBoundingClientRect().top / travel, 0), 1);
     };
+    const syncVideo = (progress: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (progress >= 0.95) {
+        if (video.paused) {
+          video.loop = false;
+          if (video.currentTime < 4) video.currentTime = 4;
+          video.play().catch(() => {});
+        }
+      } else {
+        if (!video.paused) video.pause();
+        const target = 4 * progress;
+        if (video.readyState >= 2 && Math.abs(target - video.currentTime) > 0.02) {
+          video.currentTime = target;
+        }
+      }
+    };
     const apply = () => {
       rafId = 0;
       const progress = getProgress();
       setScrollProgress(progress);
-      const video = videoRef.current;
-      if (video && Math.abs(progress - last) > 0.0005) {
+      if (Math.abs(progress - last) > 0.0005) {
         last = progress;
-        if (progress >= 0.95) {
-          if (video.paused) {
-            video.loop = false;
-            if (video.currentTime < 4) video.currentTime = 4;
-            video.play().catch(() => {});
-          }
-        } else {
-          if (!video.paused) video.pause();
-          video.currentTime = 4 * progress;
-        }
+        syncVideo(progress);
       }
     };
     const onScroll = () => {
@@ -77,24 +104,54 @@ export function FinanceHeaderWallet() {
       }
     };
 
+    const onVideoReady = () => {
+      const video = videoRef.current;
+      if (!video) return;
+      const progress = getProgress();
+      syncVideo(progress);
+      if (watchdogId) {
+        clearInterval(watchdogId);
+        watchdogId = null;
+      }
+      if (!rafId) rafId = requestAnimationFrame(apply);
+    };
+
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
     const video = videoRef.current;
     if (video) {
-      video.addEventListener("loadedmetadata", onScroll);
-      video.addEventListener("loadeddata", onScroll);
+      video.addEventListener("loadedmetadata", onVideoReady);
+      video.addEventListener("loadeddata", onVideoReady);
+      video.addEventListener("canplay", onVideoReady);
+      video.addEventListener("seeked", onVideoReady);
       video.addEventListener("timeupdate", onTimeUpdate);
       video.addEventListener("ended", onTimeUpdate);
+      if (video.readyState >= 2) {
+        onVideoReady();
+      } else {
+        watchdogId = setInterval(() => {
+          const v = videoRef.current;
+          if (!v) return;
+          syncVideo(getProgress());
+          if (v.readyState >= 2 && watchdogId) {
+            clearInterval(watchdogId);
+            watchdogId = null;
+          }
+        }, 500);
+      }
     }
     const initialTimeout = setTimeout(onScroll, 100);
     return () => {
       clearTimeout(initialTimeout);
       if (rafId) cancelAnimationFrame(rafId);
+      if (watchdogId) clearInterval(watchdogId);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
       if (video) {
-        video.removeEventListener("loadedmetadata", onScroll);
-        video.removeEventListener("loadeddata", onScroll);
+        video.removeEventListener("loadedmetadata", onVideoReady);
+        video.removeEventListener("loadeddata", onVideoReady);
+        video.removeEventListener("canplay", onVideoReady);
+        video.removeEventListener("seeked", onVideoReady);
         video.removeEventListener("timeupdate", onTimeUpdate);
         video.removeEventListener("ended", onTimeUpdate);
       }
@@ -108,40 +165,22 @@ export function FinanceHeaderWallet() {
     <>
       <div
         id="scroll-container-wrapper"
-        className="relative w-full h-[250vh] bg-black select-none text-white"
+        className="relative w-full h-[250vh] max-md:h-[200vh] bg-black select-none text-white"
       >
         <div id="hero-sticky-viewport" className="sticky top-0 left-0 w-full h-screen overflow-hidden">
           <video
             ref={videoRef}
             id="bg-video-element"
             className="absolute inset-0 w-full h-full object-cover z-0 opacity-90 transition-opacity duration-1000"
-            src={HEADER_BG_URL}
+            src={videoSrc ?? undefined}
+            poster="/landing/posters/astro.jpg"
             muted
             playsInline
             loop
+            preload="auto"
           />
           <div className="absolute inset-0 bg-black/35 z-10 pointer-events-none" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/60 z-10 pointer-events-none" />
-          <style>{`
-            @media (min-width: 1024px) {
-              .anybody-heading {
-                font-size: 70px !important;
-                line-height: 1.1 !important;
-              }
-            }
-            @media (min-width: 768px) and (max-width: 1023px) {
-              .anybody-heading {
-                font-size: 52px !important;
-                line-height: 1.1 !important;
-              }
-            }
-            @media (max-width: 767px) {
-              .anybody-heading {
-                font-size: 34px !important;
-                line-height: 1.2 !important;
-              }
-            }
-          `}</style>
           <header
             id="top-nav-bar"
             className="absolute top-0 left-0 right-0 z-30 flex justify-between items-center px-4 md:px-[80px] py-6 md:py-12"
@@ -183,7 +222,7 @@ export function FinanceHeaderWallet() {
                   background: "#FFF",
                   cursor: "pointer",
                 }}
-                className="hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(255,255,255,0.15)] hover:shadow-[0_8px_30px_rgba(255,255,255,0.25)] transition-all duration-300"
+                className="min-h-[44px] hover:scale-105 active:scale-95 shadow-[0_4px_20px_rgba(255,255,255,0.15)] hover:shadow-[0_8px_30px_rgba(255,255,255,0.25)] transition-all duration-300"
               >
                 <span
                   style={{
@@ -228,7 +267,6 @@ export function FinanceHeaderWallet() {
               style={{
                 opacity: rightTextOpacity,
                 transform: `translateX(${rightTextShift}px)`,
-                transition: "transform 0.15s ease-out, opacity 0.15s ease-out",
               }}
               className="absolute right-6 md:right-[80px] bottom-12 md:bottom-[90px] text-right z-20"
             >

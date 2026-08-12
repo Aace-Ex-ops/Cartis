@@ -55,7 +55,7 @@ export function RevnuePartners() {
 
         <h3
           ref={ref}
-          className="mx-auto mt-24 max-w-5xl font-gantari text-[28px] font-medium leading-[1.14] tracking-[-1px] text-white md:mt-32 md:text-6xl md:tracking-[-3px]"
+          className="mx-auto mt-24 max-w-5xl font-gantari text-[22px] sm:text-[28px] font-medium leading-[1.14] tracking-[-0.5px] sm:tracking-[-1px] text-white md:mt-32 md:text-6xl md:tracking-[-3px]"
         >
           {words.map((word, i) => {
             const clean = word.replace(/[^A-Za-z-]/g, "");

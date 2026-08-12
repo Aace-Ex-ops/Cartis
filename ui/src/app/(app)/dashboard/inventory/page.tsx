@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { gql } from "@/lib/gql";
 import { fetchSellerInventory, fmt, type SellerInventoryItem } from "@/lib/seller";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -29,14 +30,7 @@ export default function InventoryPage() {
     }
   }, []);
 
-  const loaded = useRef(false);
-
-  useEffect(() => {
-    if (!loaded.current) {
-      load();
-      loaded.current = true;
-    }
-  }, [load]);
+  useLiveData(load, [load]);
 
   const canAdd = name.trim() !== "" && Number.isFinite(Number(stock)) && Number(stock) >= 0;
 

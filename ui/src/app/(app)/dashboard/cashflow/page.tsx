@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { CashFlowChart } from "@/components/seller/cashflow-chart";
 import { TrendingUp } from "lucide-react";
+import { useLiveData } from "@/lib/use-live-data";
 import { fetchSellerSeries, fmt, type SellerSeriesPoint } from "@/lib/seller";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 
@@ -18,19 +19,16 @@ const DUMMY_CASHFLOW: SellerSeriesPoint[] = [
 export default function CashFlowPage() {
   const [data, setData] = useState<SellerSeriesPoint[] | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchSellerSeries(6)
-      .then((d) => {
-        if (!cancelled) setData(d && d.length > 0 ? d : DUMMY_CASHFLOW);
-      })
-      .catch(() => {
-        if (!cancelled) setData(DUMMY_CASHFLOW);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      const res = await fetchSellerSeries(6);
+      setData(res && res.length > 0 ? res : DUMMY_CASHFLOW);
+    } catch {
+      setData(DUMMY_CASHFLOW);
+    }
   }, []);
+
+  useLiveData(load, [load]);
 
   if (!data) {
     return (

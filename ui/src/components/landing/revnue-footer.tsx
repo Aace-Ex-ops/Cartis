@@ -28,7 +28,7 @@ export function RevnueFooter() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-          className="bg-gradient-to-b from-[#0C0C0C] to-[rgba(12,12,12,0.20)] bg-clip-text text-center font-inclusive text-[44px] font-medium leading-[1.02] tracking-[-3px] text-transparent md:text-8xl md:tracking-[-6px] lg:text-[120px]"
+          className="bg-gradient-to-b from-[#0C0C0C] to-[rgba(12,12,12,0.20)] bg-clip-text text-center font-inclusive text-[28px] sm:text-[44px] font-medium leading-[1.02] tracking-[-1.5px] sm:tracking-[-3px] text-transparent md:text-8xl md:tracking-[-6px] lg:text-[120px]"
         >
           Full control of your financial operations
         </motion.h2>
@@ -100,7 +100,7 @@ export function RevnueFooter() {
         </div>
 
         <div className="pointer-events-none select-none overflow-hidden text-center">
-          <span className="font-inclusive text-[22vw] font-medium leading-[0.9] tracking-[-0.04em] text-[#0C0C0C] opacity-[0.03]">
+          <span className="font-inclusive text-[16vw] sm:text-[22vw] font-medium leading-[0.9] tracking-[-0.04em] text-[#0C0C0C] opacity-[0.03]">
             CARTIS
           </span>
         </div>

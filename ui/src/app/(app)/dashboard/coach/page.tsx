@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useLiveData } from "@/lib/use-live-data";
 import {
   AlertTriangle,
   Download,
@@ -21,7 +22,6 @@ import { gql } from "@/lib/gql";
 import { fmt } from "@/lib/seller";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
-const PRO_PRODUCT_ID = "55681814-5a2b-4312-94c0-6fef945fc0ed";
 
 const TYPES = [
   { id: "saas", label: "SaaS" },
@@ -106,36 +106,35 @@ export default function AdvisorPage() {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [h, s, e] = await Promise.all([
-        fetch(`${GATEWAY}/api/advisor/health`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ businessType: type }),
-        }),
-        fetch(`${GATEWAY}/api/advisor/strategies`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ businessType: type }),
-        }),
-        fetch(`${GATEWAY}/api/advisor/entitlement`, { credentials: "include" }),
-      ]);
-      if (cancelled) return;
-      if (!h.ok) return setFailed(true);
-      setHealth((await h.json()) as Health);
-      if (s.ok) setStrategies((await s.json()) as Strategies);
-      if (e.ok) setPro(((await e.json()) as { pro: boolean }).pro);
-    })().catch(() => {
-      if (!cancelled) setFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    const [h, s, e] = await Promise.all([
+      fetch(`${GATEWAY}/api/advisor/health`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ businessType: type }),
+      }),
+      fetch(`${GATEWAY}/api/advisor/strategies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ businessType: type }),
+      }),
+      fetch(`${GATEWAY}/api/advisor/entitlement`, { credentials: "include" }),
+    ]);
+    if (!h.ok) throw new Error("advisor unavailable");
+    setHealth((await h.json()) as Health);
+    if (s.ok) setStrategies((await s.json()) as Strategies);
+    if (e.ok) setPro(((await e.json()) as { plan?: string }).plan !== "free");
   }, [type]);
+
+  useLiveData(async () => {
+    try {
+      await load();
+    } catch {
+      setFailed(true);
+    }
+  }, [load]);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,23 +183,6 @@ export default function AdvisorPage() {
       "mutation ($type: String) { updateUserType(userType: \"business\", businessType: $type) { businessType } }",
       { type: id },
     ).catch(() => {});
-  }
-
-  async function upgrade() {
-    setBusy(true);
-    try {
-      const res = await fetch(`${GATEWAY}/api/subscription/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ productId: PRO_PRODUCT_ID }),
-      });
-      const data = (await res.json()) as { url?: string };
-      if (data.url) window.location.href = data.url;
-    } catch {
-      // ignore
-    }
-    setBusy(false);
   }
 
   if (failed) {
@@ -376,13 +358,9 @@ export default function AdvisorPage() {
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={busy}>
             <RefreshCw className={`mr-2 h-4 w-4 ${busy ? "animate-spin" : ""}`} /> Refresh
           </Button>
-          {pro ? (
+          {pro && (
             <Button size="sm" onClick={() => window.print()}>
-              <Download className="mr-2 h-4 w-4" /> Export PDF (Pro)
-            </Button>
-          ) : (
-            <Button size="sm" onClick={() => void upgrade()} disabled={busy}>
-              <Download className="mr-2 h-4 w-4" /> Upgrade to Pro
+              <Download className="mr-2 h-4 w-4" /> Export PDF
             </Button>
           )}
         </div>

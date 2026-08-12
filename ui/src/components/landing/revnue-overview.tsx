@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import Image from "next/image";
 
-const BG_VIDEO =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/Overview%20section%20BG.mp4";
-const ARROW = "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/right%20arrow.svg";
+const BG_VIDEO = "/landing/videos/overview-bg.mp4";
+const ARROW = "/landing/svg/right-arrow.svg";
 
 const EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
@@ -17,6 +16,21 @@ const lineReveal = {
 
 export function RevnueOverview() {
   const [hover, setHover] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) { el.play().catch(() => {}); }
+        else { el.pause(); }
+      },
+      { rootMargin: "200px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   return (
     <section
@@ -26,12 +40,13 @@ export function RevnueOverview() {
     >
       <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
         <video
-          autoPlay
+          ref={videoRef}
           loop
           muted
           playsInline
           className="w-full h-full object-cover select-none pointer-events-none"
           src={BG_VIDEO}
+          poster="/landing/posters/overview-bg.jpg"
         />
         <div className="absolute inset-0 bg-white/5" />
       </div>

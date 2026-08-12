@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import Image from "next/image";
 
-const ARROW_RIGHT = "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/arrow%20right.svg";
-const ARROW_RIGHT_UP =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/arrow%20right%20up.svg";
+const ARROW_RIGHT = "/landing/svg/arrow-right.svg";
+const ARROW_RIGHT_UP = "/landing/svg/arrow-right-up.svg";
 
 const STEPS = [
   {
@@ -14,36 +13,36 @@ const STEPS = [
     cardTitle: "Install & connect",
     cardSubtitle:
       "Install the extension or sign in, then connect your bank or add your ledger. Cartis meets your money where it is.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2001.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2001.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2001.svg",
+    bgImage: "/landing/images/card-bg-01.png",
+    numberSvg: "/landing/svg/number-01.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-01.svg",
   },
   {
     id: "02",
     cardTitle: "Shop & track",
     cardSubtitle:
       "Browse like normal. Cartis checks price, budget, and urgency against your real money in the background.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2002.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2002.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2002.svg",
+    bgImage: "/landing/images/card-bg-02.png",
+    numberSvg: "/landing/svg/number-02.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-02.svg",
   },
   {
     id: "03",
     cardTitle: "Get honest verdicts",
     cardSubtitle:
       "Buy, wait, or avoid — with a plain-English reason tied to your actual budget and wallet.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2003.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2003.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2001.svg",
+    bgImage: "/landing/images/card-bg-03.png",
+    numberSvg: "/landing/svg/number-03.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-01.svg",
   },
   {
     id: "04",
     cardTitle: "Grow & optimize",
     cardSubtitle:
       "Financial advisor, goals, tools, and reports that turn your numbers into a plan you can act on.",
-    bgImage: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/card%20bg%2004.png",
-    numberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/number%2004.svg",
-    hoverNumberSvg: "https://cdn.jiro.build/Jahid/Random/RevNue/All%20SVG/hover%20number%2001.svg",
+    bgImage: "/landing/images/card-bg-04.png",
+    numberSvg: "/landing/svg/number-04.svg",
+    hoverNumberSvg: "/landing/svg/hover-number-01.svg",
   },
 ];
 
@@ -64,7 +63,7 @@ function StepCard({
       onClick={onInteract}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="relative flex flex-col justify-between items-start flex-1 p-6 sm:p-8 rounded-2xl bg-[#F3F3F3] select-none cursor-pointer overflow-hidden transition-all duration-500 h-[460px] sm:h-[500px] lg:h-full"
+      className="relative flex flex-col justify-between items-start flex-1 p-5 sm:p-8 rounded-2xl bg-[#F3F3F3] select-none cursor-pointer overflow-hidden transition-all duration-500 h-[380px] sm:h-[460px] lg:h-full"
       style={{ alignSelf: "stretch" }}
       initial={{ opacity: 0, x: 150 }}
       animate={{ opacity: 1, x: 0 }}
@@ -304,7 +303,7 @@ export function RevnueHowItWorks() {
                 How it works
               </motion.span>
               <motion.h2
-                className="font-inclusive text-[40px] sm:text-[60px] lg:text-[76px] font-medium leading-[96%] tracking-[-2px] sm:tracking-[-5px] w-full max-w-[600px] text-[#0C0C0C] mb-4"
+                className="font-inclusive text-[32px] sm:text-[60px] lg:text-[76px] font-medium leading-[96%] tracking-[-1.5px] sm:tracking-[-5px] w-full max-w-[600px] text-[#0C0C0C] mb-4"
                 initial={{ opacity: 0, x: -70 }}
                 whileInView={{ opacity: 1, x: 0 }}
                 viewport={{ once: false, amount: 0.2 }}
@@ -384,6 +383,7 @@ export function RevnueHowItWorks() {
           <div className="absolute right-0 top-0 bottom-0 w-8 sm:w-16 bg-gradient-to-l from-white via-white/80 to-transparent pointer-events-none z-10" />
           <div
             ref={carouselRef}
+            data-lenis-prevent
             onScroll={() => {
               if (!carouselRef.current) return;
               const t = Math.round(carouselRef.current.scrollLeft / (0.75 * carouselRef.current.offsetWidth + 24));

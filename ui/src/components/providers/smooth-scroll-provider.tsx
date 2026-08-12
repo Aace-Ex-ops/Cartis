@@ -25,7 +25,7 @@ export function SmoothScrollProvider({ children }: { children: React.ReactNode }
 
     if (!lenisRef.current) {
       const lenis = new Lenis({
-        duration: 1.5,
+        duration: 1.2,
         easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
         smoothWheel: true,
         wheelMultiplier: 0.9,
@@ -50,12 +50,6 @@ export function SmoothScrollProvider({ children }: { children: React.ReactNode }
         }
       };
     }
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!lenisRef.current) return;
-    lenisRef.current.scrollTo(0, { immediate: true });
-    lenisRef.current.resize();
   }, [pathname]);
 
   return <>{children}</>;

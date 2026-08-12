@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Repeat, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -37,12 +37,20 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: boolean }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [userType, setUserType] = useState(user.userType);
+  const [effectivePlan, setEffectivePlan] = useState("free");
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
+    void gql<{
+      me?: { userType?: string; effectivePlan?: string; trialEndsAt?: string | null } | null;
+    }>("{ me { userType effectivePlan trialEndsAt } }")
       .then((d) => {
-        if (!cancelled && d.me?.userType) setUserType(d.me.userType);
+        if (!cancelled) {
+          if (d.me?.userType) setUserType(d.me.userType);
+          setEffectivePlan(d.me?.effectivePlan ?? "free");
+          setTrialEndsAt(d.me?.trialEndsAt ?? null);
+        }
       })
       .catch(() => {});
     return () => {
@@ -50,16 +58,10 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
     };
   }, []);
 
-  const isBusiness = userType === "business" || userType === "seller";
-
-  async function switchType(next: "personal" | "business") {
-    try {
-      await gql<unknown>(`mutation { updateUserType(userType: "${next}") { id } }`);
-      window.location.reload();
-    } catch {
-      // keep current state; retry next open
-    }
-  }
+  const planLabel =
+    effectivePlan === "trial"
+      ? `Trial · ${trialEndsAt ? new Date(trialEndsAt).toLocaleDateString() : ""}`.trim()
+      : ({ free: "Free", pro: "Pro", max: "Max", team_standard: "Team · Standard", team_premium: "Team · Premium", enterprise: "Enterprise" } as Record<string, string>)[effectivePlan] ?? "Free";
 
   const initials = user.fullName
     ?.split(" ")
@@ -111,7 +113,7 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
               <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              {isBusiness ? "Business" : "Personal finance"}
+              {planLabel}
             </span>
           </div>
           <DropdownMenuSeparator />
@@ -121,13 +123,6 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => void switchType(isBusiness ? "personal" : "business")}
-            className="cursor-pointer"
-          >
-            <Repeat className="mr-2 h-4 w-4" />
-            {isBusiness ? "Switch to Personal finance" : "Switch to Business"}
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>
