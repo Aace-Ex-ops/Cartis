@@ -1,13 +1,28 @@
 "use client";
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export default function SignUpPage() {
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
+const ERRORS: Record<string, string> = {
+  already_exists: "An account with this email already exists. Sign in instead.",
+  google_denied: "Google sign-in was denied. Please try again.",
+};
+
+function SignUpContent() {
+  const params = useSearchParams();
+  const error = params.get("error");
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-green-50 to-white px-4">
       <div className="w-full max-w-sm text-center">
         <h1 className="mb-2 text-3xl font-bold tracking-tight text-[#132a13]">Create your account</h1>
         <p className="mb-8 text-sm text-gray-500">Start managing your finances</p>
+
+        {error && ERRORS[error] && (
+          <p className="mb-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600">{ERRORS[error]}</p>
+        )}
+
         <a
           href={`${GATEWAY}/auth/start?intent=signup`}
           className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-300 bg-white px-6 py-3 text-sm font-medium text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md"
@@ -20,7 +35,16 @@ export default function SignUpPage() {
           </svg>
           Continue with Google
         </a>
+
+        <p className="mt-6 text-xs text-gray-400">
+          Already have an account?{" "}
+          <a href="/signin" className="text-[#132a13] underline">Sign in</a>
+        </p>
       </div>
     </div>
   );
+}
+
+export default function SignUpPage() {
+  return <Suspense><SignUpContent /></Suspense>;
 }
