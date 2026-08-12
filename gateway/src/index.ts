@@ -244,10 +244,11 @@ type YodleeTx = {
   merchant?: { name?: string }
 }
 
-function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] } {
-  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string }[] = []
+function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[]; holding?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]; holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] } {
+  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string }[] = []
   const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
   const income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] = []
+  const holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] = []
 
   for (const raw of data.account ?? []) {
     const a = raw as YodleeAccount
@@ -257,6 +258,20 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
       balance: Number(a.balance?.amount) || 0,
       fipId: String(a.providerAccountId ?? a.id ?? ''),
       accountRef: String(a.id ?? ''),
+      accountType: a.accountType ?? '',
+    })
+  }
+
+  for (const raw of data.holding ?? []) {
+    const h = raw as { symbol?: string; holdingType?: string; description?: string; quantity?: number; price?: { amount?: number }; value?: { amount?: number }; costBasis?: { amount?: number } }
+    holdings.push({
+      symbol: h.symbol ?? '',
+      holdingType: h.holdingType ?? '',
+      description: h.description ?? '',
+      quantity: Number(h.quantity) || 0,
+      price: Number(h.price?.amount) || 0,
+      value: Number(h.value?.amount) || 0,
+      costBasis: Number(h.costBasis?.amount) || 0,
     })
   }
 
@@ -290,9 +305,10 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
 }
 
 type YodleeSyncPayload = {
-  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string }[]
+  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string }[]
   transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]
   income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]
+  holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[]
 }
 
 // One shared Yodlee fetch (accounts + transactions + income) — the sandbox
@@ -317,21 +333,28 @@ async function fetchYodleeData(c: { env: Env }): Promise<YodleeSyncPayload> {
     // Income is best-effort (entitlement / fixture-dependent) — never fatal, but visible.
     console.log('[yodlee] income fetch failed (continuing):', String(e))
   }
-  const parsed = parseYodleeFetch({ account: rawAccounts, transaction: txnsRes.transaction as unknown[] | undefined, income })
-  console.log(`[yodlee] accounts=${parsed.accounts.length} providerAccounts=${providerAccountIds.join(',')} paStatus=${refreshStatus} txns=${parsed.transactions.length} income=${parsed.income.length}`)
+  let holdings: unknown[] = []
+  try {
+    const holdingsRes = await yodleeFetch(c, '/holdings')
+    holdings = holdingsRes.holding as unknown[] | undefined ?? []
+  } catch (e) {
+    console.log('[yodlee] holdings fetch failed (continuing):', String(e))
+  }
+  const parsed = parseYodleeFetch({ account: rawAccounts, transaction: txnsRes.transaction as unknown[] | undefined, income, holding: holdings })
+  console.log(`[yodlee] accounts=${parsed.accounts.length} providerAccounts=${providerAccountIds.join(',')} paStatus=${refreshStatus} txns=${parsed.transactions.length} income=${parsed.income.length} holdings=${parsed.holdings.length}`)
   return parsed
 }
 
 async function writeAaSync(c: { env: Env }, userId: string, data: YodleeSyncPayload) {
   const syncRes = (await backendGql(
     c,
-    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!, $income: [AaIncomeInput!]!) {
-      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions, income: $income) {
+    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!, $income: [AaIncomeInput!]!, $holdings: [AaHoldingInput!]!) {
+      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions, income: $income, holdings: $holdings) {
         inserted balance accountId
       }
     }`,
     userId,
-    { aaHandle: 'yodlee', consentId: 'yodlee', accounts: data.accounts, transactions: data.transactions, income: data.income },
+    { aaHandle: 'yodlee', consentId: 'yodlee', accounts: data.accounts, transactions: data.transactions, income: data.income, holdings: data.holdings },
   )) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
   if (!syncRes?.syncAaData) throw new Error('Backend sync failed — no data written')
   return syncRes.syncAaData
@@ -792,6 +815,10 @@ app.post('/api/internal/yodlee-sweep', async (c) => {
       const inc = await fetchJ(token, `/income?fromDate=${from}&toDate=${to}`)
       out.incomeStatus = inc.status
       out.income = ((inc.json.income ?? []) as unknown[]).length
+      const holdingsJ = await fetchJ(token, '/holdings')
+      out.holdingsStatus = holdingsJ.status
+      out.holdings = ((holdingsJ.json.holding ?? []) as unknown[]).length
+      out.holdingsSample = JSON.stringify((holdingsJ.json.holding ?? []).slice(0, 2)).slice(0, 600)
       if (refresh) {
         out.allTime = ((await (await fetch(`${c.env.YODLEE_BASE_URL}/transactions?top=500`, { headers: { 'Authorization': `Bearer ${token}`, 'Api-Version': '1.1' } })).json().catch(() => ({}))) as { transaction?: unknown[] }).transaction?.length ?? 0
         const ids = ((acc.json.account ?? []) as { providerAccountId?: number }[])

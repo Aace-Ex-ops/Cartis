@@ -1242,6 +1242,7 @@ impl MutationRoot {
         accounts: Vec<AaAccountInput>,
         transactions: Vec<AaTxInput>,
         income: Vec<AaIncomeInput>,
+        holdings: Vec<AaHoldingInput>,
     ) -> Result<SyncResult> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let mut conn = pg(ctx).get().await?;
@@ -1291,18 +1292,19 @@ impl MutationRoot {
 
             if let Some(ref aid) = existing {
                 tx.execute(
-                    "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now()
+                    "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now(),
+                        account_type = COALESCE($4, account_type)
                      WHERE account_id::text = $1",
-                    &[aid, &acct.balance.to_string(), &acct.fip_id],
+                    &[aid, &acct.balance.to_string(), &acct.fip_id, &acct.account_type],
                 ).await?;
                 account_id = Some(aid.clone());
             } else {
                 let new_id: String = tx
                     .query_one(
-                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, last_sync_at)
-                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), now())
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, account_type, last_sync_at)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), $6, now())
                          RETURNING account_id::text",
-                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref],
+                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref, &acct.account_type],
                     )
                     .await?
                     .get(0);
@@ -1335,6 +1337,30 @@ impl MutationRoot {
                 )
                 .await?;
             inserted += res;
+        }
+
+        // Upsert holdings (best-effort; full replace on sync)
+        if !holdings.is_empty() {
+            tx.execute(
+                "DELETE FROM holdings WHERE user_id::text = $1",
+                &[&uid],
+            ).await?;
+            for h in &holdings {
+                let asset_type = match h.holding_type.as_deref().unwrap_or("") {
+                    "stock" | "equity" => "equity",
+                    "mutual_fund" | "mf" => "mutual_fund",
+                    "fd" | "fixed_deposit" => "fd",
+                    "gold" | "precious_metal" => "gold",
+                    "cash" | "money_market" => "cash",
+                    _ => "other",
+                };
+                let name = h.description.as_deref().unwrap_or(h.symbol.as_deref().unwrap_or("Holding"));
+                tx.execute(
+                    "INSERT INTO holdings (user_id, asset_type, name, quantity, avg_price, current_price, as_of)
+                     VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::numeric, now()::date)",
+                    &[&uid, &asset_type, &name, &h.quantity.to_string(), &h.cost_basis.map(|c| format!("{:.2}", c / h.quantity)).unwrap_or_default(), &h.price.to_string()],
+                ).await?;
+            }
         }
 
         // Upsert income streams (best-effort; no streams = no-op)
@@ -2027,6 +2053,18 @@ struct AaAccountInput {
     balance: f64,
     fip_id: Option<String>,
     account_ref: Option<String>,
+    account_type: Option<String>,
+}
+
+#[derive(async_graphql::InputObject)]
+struct AaHoldingInput {
+    symbol: Option<String>,
+    holding_type: Option<String>,
+    description: Option<String>,
+    quantity: f64,
+    price: f64,
+    value: f64,
+    cost_basis: Option<f64>,
 }
 
 #[derive(async_graphql::InputObject)]
