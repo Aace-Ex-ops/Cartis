@@ -23,6 +23,18 @@ const MODELS = [
     id: "@cf/meta/llama-3.1-8b-instruct-fp8",
     name: "Llama 3.1 8B",
   },
+  {
+    id: "groq/llama-3.3-70b-versatile",
+    name: "Llama 3.3 70B (Groq)",
+  },
+  {
+    id: "groq/openai/gpt-oss-120b",
+    name: "GPT-OSS 120B (Groq)",
+  },
+  {
+    id: "groq/llama-3.1-8b-instant",
+    name: "Llama 3.1 8B (Groq)",
+  },
 ];
 
 type ModelData = { me: { aiModel: string | null } };

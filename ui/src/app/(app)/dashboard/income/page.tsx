@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { IncomeChart } from "@/components/seller/income-chart";
 import { CategoryBreakdown } from "@/components/consumer/category-breakdown";
 import { EntryForm } from "@/components/seller/entry-form";
@@ -16,6 +16,7 @@ import {
   type SellerCategory,
   type SellerSeriesPoint,
 } from "@/lib/seller";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -35,14 +36,7 @@ export default function IncomePage() {
     }
   }, []);
 
-  const loaded = useRef(false);
-
-  useEffect(() => {
-    if (!loaded.current) {
-      load();
-      loaded.current = true;
-    }
-  }, [load]);
+  useLiveData(load, [load]);
 
   if (failed) {
     return (

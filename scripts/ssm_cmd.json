@@ -1,0 +1,5 @@
+{
+  "commands": [
+    "sudo -u postgres psql -d cartis -c \"ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS name VARCHAR(255);\""
+  ]
+}

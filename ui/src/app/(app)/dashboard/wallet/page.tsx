@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Landmark, Wallet, ShieldCheck, ArrowRightLeft, CreditCard, RefreshCw, Plus, CheckCircle2 } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Landmark, Wallet, ShieldCheck, ArrowRightLeft, CreditCard, RefreshCw, Plus, CheckCircle2, ArrowDownLeft, ArrowUpRight, Wallet2 } from "lucide-react";
+import { AaLinkRest, AaReconnect } from "@/components/consumer/aa-connect";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
 type BankAccount = {
@@ -14,6 +16,23 @@ type BankAccount = {
   isPrimary: boolean;
   type?: string;
   accountNumber?: string;
+};
+
+type LedgerTx = {
+  txnType: string;
+  amount: number;
+  description: string | null;
+  transactionDate: string | null;
+  createdAt: string | null;
+};
+
+type MeProfile = {
+  monthlyIncome: number | null;
+  monthlySpend: number | null;
+  investmentPct: number | null;
+  housingCost: number | null;
+  debtEmis: number | null;
+  monthlyTax: number | null;
 };
 
 const DUMMY_ACCOUNTS: BankAccount[] = [
@@ -61,6 +80,9 @@ const QUERY = `{
   bankAccounts { accountId bankName mobileNumber balance lastSyncAt isPrimary }
   monthlyTab { limit spent }
   aaConnections { aaHandle consentStatus fipId lastFetchedAt bankName }
+  ledgerTransactions(limit: 10) { txnType amount description transactionDate createdAt }
+  incomeStreams { source frequency amount currency fromDate toDate }
+  me { monthlyIncome monthlySpend investmentPct housingCost debtEmis monthlyTax }
 }`;
 
 const fmt = (n: number) => {
@@ -72,7 +94,7 @@ const fmt = (n: number) => {
 function formatSync(iso: string | null): string {
   if (!iso) return "Synced today";
   try {
-    return new Date(iso.replace(" ", "T")).toLocaleString("en-IN", {
+    return new Date(typeof iso === "string" ? iso.replace(" ", "T") : iso).toLocaleString("en-IN", {
       day: "2-digit",
       month: "short",
       hour: "2-digit",
@@ -88,17 +110,30 @@ export default function WalletPage() {
     bankAccounts: BankAccount[];
     monthlyTab: { limit: number; spent: number };
     aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+    ledgerTransactions: LedgerTx[];
+    incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+    me: MeProfile | null;
   } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(async () => {
     void gql<{
       bankAccounts: BankAccount[];
       monthlyTab: { limit: number; spent: number };
       aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+      ledgerTransactions: LedgerTx[];
+      incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+      me: MeProfile | null;
+    }>(QUERY)
+  const load = useCallback(async () => {
+    void gql<{
+      bankAccounts: BankAccount[];
+      monthlyTab: { limit: number; spent: number };
+      aaConnections: { aaHandle: string; consentStatus: string; fipId: string | null; lastFetchedAt: string | null; bankName: string | null }[];
+      ledgerTransactions: LedgerTx[];
+      incomeStreams: { source: string; frequency: string; amount: number; currency: string; fromDate: string | null; toDate: string | null }[];
+      me: MeProfile | null;
     }>(QUERY)
       .then((d) => {
-        if (cancelled) return;
         const hasAccounts = d.bankAccounts && d.bankAccounts.length > 0;
         setData({
           bankAccounts: hasAccounts ? d.bankAccounts : DUMMY_ACCOUNTS,
@@ -106,22 +141,27 @@ export default function WalletPage() {
           aaConnections: d.aaConnections && d.aaConnections.length > 0 ? d.aaConnections : [
             { aaHandle: "aditya@onemoney", consentStatus: "ACTIVE", fipId: "FIP_HDFC", lastFetchedAt: new Date().toISOString(), bankName: "RBI Account Aggregator Network" }
           ],
+          ledgerTransactions: d.ledgerTransactions ?? [],
+          incomeStreams: d.incomeStreams ?? [],
+          me: d.me ?? null,
         });
       })
       .catch(() => {
-        if (cancelled) return;
         setData({
           bankAccounts: DUMMY_ACCOUNTS,
           monthlyTab: { limit: 75000, spent: 24850 },
           aaConnections: [
             { aaHandle: "aditya@onemoney", consentStatus: "ACTIVE", fipId: "FIP_HDFC", lastFetchedAt: new Date().toISOString(), bankName: "RBI Account Aggregator Network" }
           ],
+          ledgerTransactions: [],
+          incomeStreams: [],
+          me: null,
         });
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+  }, []);
+
+  useLiveData(load, [load]);
 
   if (data === null) {
     return (
@@ -182,7 +222,7 @@ export default function WalletPage() {
           <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-gray-100">
             <div
               className="h-full rounded-full bg-gradient-to-r from-[#7ec151] to-[#b2d959]"
-              style={{ width: `${Math.min(Math.round((data.monthlyTab.spent / data.monthlyTab.limit) * 100), 100)}%` }}
+              style={{ width: `${Math.min(Math.round((data.monthlyTab.spent / (data.monthlyTab.limit || 1)) * 100), 100)}%` }}
             />
           </div>
         </div>
@@ -193,7 +233,9 @@ export default function WalletPage() {
             <span>RBI AA Network</span>
             <ShieldCheck className="h-4 w-4 text-[#7ec151]" />
           </div>
-          <p className="mt-3 text-lg font-bold text-[#132a13]">aditya@onemoney</p>
+          <p className="mt-3 text-lg font-bold text-[#132a13]">
+            {data.aaConnections?.[0]?.aaHandle ?? "aditya@onemoney"}
+          </p>
           <div className="mt-1 flex items-center gap-1.5 text-xs text-[#132a13] font-semibold bg-[#b2d959]/30 border border-[#b2d959] px-2.5 py-0.5 rounded-full w-fit">
             <CheckCircle2 className="h-3.5 w-3.5 text-[#7ec151]" />
             <span>Active Consent Sync</span>
@@ -253,33 +295,61 @@ export default function WalletPage() {
         </div>
       </div>
 
-      {/* Recent Wallet Activity */}
+      {/* AA Sync & Connect Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#7ec151]/30 bg-[#b2d959]/20 p-5 shadow-sm">
+        <p className="text-xs font-semibold text-[#132a13]">
+          Sync your linked bank accounts to pull latest live transactions and balances into Cartis.
+        </p>
+        <div className="flex items-center gap-2">
+          <AaReconnect onSynced={() => { void load(); }} />
+          <AaLinkRest onSynced={() => { void load(); }} />
+        </div>
+      </div>
+
+      {/* Recent Transactions List */}
       <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between pb-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <ArrowRightLeft className="h-4 w-4 text-[#7ec151]" />
-            <h2 className="text-base font-bold text-[#132a13]">Recent Wallet Activity</h2>
+            <h2 className="text-base font-bold text-[#132a13]">Recent Transactions</h2>
           </div>
           <span className="text-xs font-semibold text-gray-500">Last 30 Days</span>
         </div>
 
         <div className="mt-4 flex flex-col divide-y divide-gray-100">
-          {DUMMY_TRANSACTIONS.map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between py-3 px-1 hover:bg-[#b2d959]/10 rounded-xl transition-colors">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#b2d959]/25 text-base border border-[#7ec151]/20">
-                  {tx.icon}
+          {data.ledgerTransactions.length > 0
+            ? data.ledgerTransactions.map((t, i) => (
+                <div key={i} className="flex items-center justify-between py-3 px-1 hover:bg-[#b2d959]/10 rounded-xl transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-8 w-8 items-center justify-center rounded-full ${t.txnType === "debit" ? "bg-rose-100 text-rose-700" : "bg-[#b2d959]/40 text-[#132a13]"}`}>
+                      {t.txnType === "debit" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownLeft className="h-4 w-4" />}
+                    </span>
+                    <div>
+                      <p className="text-sm font-bold text-[#132a13]">{t.description || "Bank transaction"}</p>
+                      <p className="text-xs text-gray-500">{t.transactionDate ? t.transactionDate.slice(0, 10) : ""}</p>
+                    </div>
+                  </div>
+                  <span className={`text-sm font-black tabular-nums ${t.txnType === "debit" ? "text-rose-600" : "text-[#7ec151]"}`}>
+                    {t.txnType === "debit" ? "−" : "+"}{fmt(t.amount)}
+                  </span>
                 </div>
-                <div>
-                  <p className="text-sm font-bold text-[#132a13]">{tx.title}</p>
-                  <p className="text-xs text-gray-500">{tx.category} · {tx.date}</p>
+              ))
+            : DUMMY_TRANSACTIONS.map((tx) => (
+                <div key={tx.id} className="flex items-center justify-between py-3 px-1 hover:bg-[#b2d959]/10 rounded-xl transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#b2d959]/25 text-base border border-[#7ec151]/20">
+                      {tx.icon}
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-[#132a13]">{tx.title}</p>
+                      <p className="text-xs text-gray-500">{tx.category} · {tx.date}</p>
+                    </div>
+                  </div>
+                  <span className={`text-sm font-black tabular-nums ${tx.amount > 0 ? "text-[#7ec151]" : "text-[#132a13]"}`}>
+                    {tx.amount > 0 ? `+${fmt(tx.amount)}` : fmt(tx.amount)}
+                  </span>
                 </div>
-              </div>
-              <span className={`text-sm font-black tabular-nums ${tx.amount > 0 ? "text-[#7ec151]" : "text-[#132a13]"}`}>
-                {tx.amount > 0 ? `+${fmt(tx.amount)}` : fmt(tx.amount)}
-              </span>
-            </div>
-          ))}
+              ))}
         </div>
       </div>
     </div>

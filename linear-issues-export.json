@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Onboarding: remove phone number step, redirect to WhatsApp directly",
+    "description": "After selecting the bank name in onboarding, the phone-number query must be removed. Selecting a bank should directly redirect to WhatsApp (wa.me with the bank's number). Keep a fallback 'Continue on WhatsApp' button in case the popup is blocked."
+  },
+  {
+    "title": "Change default WhatsApp sync message",
+    "description": "The default WhatsApp message sent on behalf of the user to their bank's number must be updated. Bank name stays auto-filled. New copy: 'Hi Cartis, I bank with {bank} and want to sync my transactions to my Cartis account.'"
+  },
+  {
+    "title": "Sync: parse only bank balance, reflect onboarding-selected bank account",
+    "description": "Transaction sync only needs to parse the user's bank balance from pasted SMS/alert text. The balance must be written to the bank account the user selected during onboarding (setPrimaryBankAccount), not the most recently created account. Remove transaction-entry parsing/persistence."
+  },
+  {
+    "title": "Landing 'Get started free' should route to dashboard when logged in",
+    "description": "All three 'Get started free' CTAs on the landing page link to /signup even when the user already has a session. Make them auth-aware: logged in -> /dashboard, logged out -> /signup."
+  },
+  {
+    "title": "AI twin returns 'ai status 401'",
+    "description": "AI twin chat stops responding with SSE error 'ai status 401' after recent UI changes. This is the Cloudflare Workers AI bearer token being stale/invalid on the API side. Harden ai_token() (persist rotated OAuth tokens), include status/body in the SSE error, and verify API env CF_CLIENT_ID / CF_REFRESH_TOKEN / CF_API_TOKEN / CF_ACCOUNT_ID / CF_AI_MODEL are configured and the API is redeployed."
+  },
+  {
+    "title": "Add 'Delete account' option in user profile",
+    "description": "Add a full-wipe 'Delete account' (danger zone) in the user Profile panel: deletes all user data (sessions, chat sessions/messages, bank accounts + ledger, transactions, analysis, budgets, seller data, insights), logs out, redirects to landing. Requires a deleteUser mutation and a confirmation step in the UI."
+  }
+]

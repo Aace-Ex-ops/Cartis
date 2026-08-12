@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 
 type Holding = {
   holdingId: string;
@@ -105,14 +106,7 @@ export default function PortfolioPage() {
     }
   }, []);
 
-  const loaded = useRef(false);
-
-  useEffect(() => {
-    if (!loaded.current) {
-      void load();
-      loaded.current = true;
-    }
-  }, [load]);
+  useLiveData(load, [load]);
 
   function addHolding() {
     const quantity = parseFloat(qty);

@@ -1,6 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { AwsClient } from 'aws4fetch'
 import { analyzeProduct, type ScrapedProduct } from './coach'
 
 type Env = {
@@ -22,6 +21,7 @@ SETU_CLIENT_ID: string
   AWS_ACCESS_KEY_ID: string
   AWS_SECRET_ACCESS_KEY: string
   AWS_REGION: string
+  RESEND_API_KEY?: string
   EMAIL_FROM?: string
   YODLEE_CLIENT_ID: string
   YODLEE_SECRET: string
@@ -31,6 +31,7 @@ SETU_CLIENT_ID: string
   YODLEE_FASTLINK_URL: string
   CORS_ALLOWED_ORIGIN?: string
   AUTH_REDIRECT_BASE?: string
+  YODLEE_CONFIG_NAME?: string
 }
 
 type Session = {
@@ -184,18 +185,44 @@ async function yodleeToken(
 async function yodleeFetch(
   c: { env: { YODLEE_CLIENT_ID: string; YODLEE_SECRET: string; YODLEE_BASE_URL: string; YODLEE_TEST_LOGIN: string; SESSIONS: KVNamespace } },
   path: string,
+  init?: { method?: string; body?: string },
 ): Promise<Record<string, unknown>> {
   const token = await yodleeToken(c, c.env.YODLEE_TEST_LOGIN)
   const res = await fetch(`${c.env.YODLEE_BASE_URL}${path}`, {
+    method: init?.method ?? 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Api-Version': '1.1',
       'Content-Type': 'application/json',
     },
+    body: init?.body,
   })
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
   if (!res.ok) throw new Error(`Yodlee API error ${res.status}: ${JSON.stringify(json)}`)
   return json
+}
+
+// Refresh provider accounts that never completed aggregation (mid-outage links
+// end up PARTIAL/FAILED with balances but no transaction history). Bounded poll.
+async function refreshProviderAccounts(c: { env: Env }, providerAccountIds: string[], statuses: string[]): Promise<string> {
+  const stale = providerAccountIds.filter((_, i) => statuses[i] !== 'LOGIN_SUCCESS')
+  if (stale.length === 0) return statuses[0] ?? 'LOGIN_SUCCESS'
+  try {
+    await yodleeFetch(c, `/providerAccounts?providerAccountIds=${stale.join(',')}`, { method: 'PUT' })
+  } catch (e) {
+    // Y825 = refreshed recently (rate-limited) — not fatal, proceed with existing data
+    console.log('[yodlee] refresh skipped:', String(e))
+    return 'SKIPPED'
+  }
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const res = await yodleeFetch(c, `/providerAccounts?providerAccountIds=${stale.join(',')}`)
+    const pa = (res.providerAccount ?? []) as { id?: number; status?: string }[]
+    const statusesNow = pa.map((p) => p.status ?? 'UNKNOWN')
+    if (statusesNow.every((s) => ['LOGIN_SUCCESS', 'FAILED'].includes(s))) return statusesNow[0] ?? 'LOGIN_SUCCESS'
+    if (i === 19) console.log(`[yodlee] refresh still running: ${statusesNow.join(',')}`)
+  }
+  return 'TIMEOUT'
 }
 
 type YodleeAccount = {
@@ -217,9 +244,11 @@ type YodleeTx = {
   merchant?: { name?: string }
 }
 
-function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] } {
-  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string }[] = []
+function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[]; holding?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]; holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] } {
+  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[] = []
   const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
+  const income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] = []
+  const holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] = []
 
   for (const raw of data.account ?? []) {
     const a = raw as YodleeAccount
@@ -228,6 +257,21 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }
       bankName: a.providerName ?? '',
       balance: Number(a.balance?.amount) || 0,
       fipId: String(a.providerAccountId ?? a.id ?? ''),
+      accountRef: String(a.id ?? ''),
+      accountType: a.accountType ?? null,
+    })
+  }
+
+  for (const raw of data.holding ?? []) {
+    const h = raw as { symbol?: string; holdingType?: string; description?: string; quantity?: number; price?: { amount?: number }; value?: { amount?: number }; costBasis?: { amount?: number } }
+    holdings.push({
+      symbol: h.symbol ?? '',
+      holdingType: h.holdingType ?? '',
+      description: h.description ?? '',
+      quantity: Number(h.quantity) || 0,
+      price: Number(h.price?.amount) || 0,
+      value: Number(h.value?.amount) || 0,
+      costBasis: Number(h.costBasis?.amount) || 0,
     })
   }
 
@@ -242,30 +286,78 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[] }
     })
   }
 
-  return { accounts, transactions }
+  for (const raw of data.income ?? []) {
+    const s = raw as { accountId?: number | string; incomeStream?: { source?: string; frequency?: string; amount?: { amount?: number; currency?: string }; fromDate?: string; toDate?: string }[] }
+    for (const stream of s.incomeStream ?? []) {
+      income.push({
+        accountRef: String(s.accountId ?? ''),
+        source: stream.source ?? '',
+        frequency: stream.frequency ?? 'MONTHLY',
+        amount: Number(stream.amount?.amount) || 0,
+        currency: stream.amount?.currency ?? 'INR',
+        fromDate: stream.fromDate ?? '',
+        toDate: stream.toDate ?? '',
+      })
+    }
+  }
+
+  return { accounts, transactions, income, holdings }
 }
 
-async function syncYodleeData(c: { env: Env }, userId: string) {
-  const from = new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 10)
-  const to = new Date().toISOString().slice(0, 10)
-  const [accountsRes, txnsRes] = await Promise.all([
-    yodleeFetch(c, '/accounts'),
-    yodleeFetch(c, `/transactions?fromDate=${from}&toDate=${to}&top=500`),
-  ])
-  const { accounts, transactions } = parseYodleeFetch({ account: accountsRes.account as unknown[] | undefined, transaction: txnsRes.transaction as unknown[] | undefined })
+type YodleeSyncPayload = {
+  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[]
+  transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]
+  income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]
+  holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[]
+}
 
+// One shared Yodlee fetch (accounts + transactions + income) — the sandbox
+// world is shared (YODLEE_TEST_LOGIN), so the cron fetches once and fans out.
+async function fetchYodleeData(c: { env: Env }): Promise<YodleeSyncPayload> {
+  const from = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10)
+  const to = new Date().toISOString().slice(0, 10)
+  const accountsRes = await yodleeFetch(c, '/accounts')
+  const rawAccounts = accountsRes.account as unknown[] | undefined ?? []
+  const providerAccountIds = Array.from(new Set(
+    rawAccounts.map((a) => (a as { providerAccountId?: number | string }).providerAccountId)
+      .filter((id): id is number | string => id !== undefined && id !== null)
+  )).map(String)
+  const statuses = rawAccounts.map((a) => (a as { providerAccountStatus?: string }).providerAccountStatus ?? 'UNKNOWN')
+  const refreshStatus = await refreshProviderAccounts(c, providerAccountIds, statuses)
+  const txnsRes = await yodleeFetch(c, `/transactions?fromDate=${from}&toDate=${to}&top=500${providerAccountIds.length ? `&providerAccountId=${providerAccountIds.join(',')}` : ''}`)
+  let income: unknown[] = []
+  try {
+    const incomeRes = await yodleeFetch(c, `/income?fromDate=${from}&toDate=${to}`)
+    income = incomeRes.income as unknown[] | undefined ?? []
+  } catch (e) {
+    // Income is best-effort (entitlement / fixture-dependent) — never fatal, but visible.
+    console.log('[yodlee] income fetch failed (continuing):', String(e))
+  }
+  let holdings: unknown[] = []
+  try {
+    const holdingsRes = await yodleeFetch(c, '/holdings')
+    holdings = holdingsRes.holding as unknown[] | undefined ?? []
+  } catch (e) {
+    console.log('[yodlee] holdings fetch failed (continuing):', String(e))
+  }
+  const parsed = parseYodleeFetch({ account: rawAccounts, transaction: txnsRes.transaction as unknown[] | undefined, income, holding: holdings })
+  console.log(`[yodlee] accounts=${parsed.accounts.length} providerAccounts=${providerAccountIds.join(',')} paStatus=${refreshStatus} txns=${parsed.transactions.length} income=${parsed.income.length} holdings=${parsed.holdings.length}`)
+  return parsed
+}
+
+async function writeAaSync(c: { env: Env }, userId: string, data: YodleeSyncPayload) {
   const syncRes = (await backendGql(
     c,
-    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!) {
-      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions) {
+    `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!, $income: [AaIncomeInput!]!, $holdings: [AaHoldingInput!]!) {
+      syncAaData(aaHandle: $aaHandle, consentId: $consentId, accounts: $accounts, transactions: $transactions, income: $income, holdings: $holdings) {
         inserted balance accountId
       }
     }`,
     userId,
-    { aaHandle: 'yodlee', consentId: 'yodlee', accounts, transactions },
+    { aaHandle: 'yodlee', consentId: 'yodlee', accounts: data.accounts, transactions: data.transactions, income: data.income, holdings: data.holdings },
   )) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
-
-  return { accounts, transactions, syncRes }
+  if (!syncRes?.syncAaData) throw new Error('Backend sync failed — no data written')
+  return syncRes.syncAaData
 }
 
 function cookieToken(c: { req: { header: (n: string) => string | undefined } }) {
@@ -343,7 +435,9 @@ async function backendGql(
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`backend error ${res.status}`)
-  return ((await res.json()) as { data?: unknown }).data
+  const json = (await res.json()) as { data?: unknown; errors?: { message?: string }[] }
+  if (json.errors?.length) throw new Error(`backend: ${json.errors[0]?.message ?? 'graphql error'}`)
+  return json.data
 }
 
 type SellerGql = {
@@ -405,9 +499,7 @@ const auth: MiddlewareHandler<{ Bindings: Env; Variables: { session: Session; se
   await next()
 }
 
-app.get('/', (c) => c.json({ status: 'ok', service: 'cartis-gateway' }))
-
-app.get('/health', (c) => c.json({ status: 'ok' }))
+app.get('/health', (c) => c.json({ status: 'ok', service: 'cartis-gateway' }))
 
 app.get('/login', (c) => {
   c.header('Cache-Control', 'no-store')
@@ -607,41 +699,25 @@ app.post('/auth/revoke-all', async (c) => {
 app.post('/api/email', async (c) => {
   const secret = c.req.header('x-cartis-backend-secret')
   if (!secret || secret !== c.env.BACKEND_SECRET) return c.json({ error: 'unauthorized' }, 401)
-  if (!c.env.AWS_ACCESS_KEY_ID || !c.env.AWS_SECRET_ACCESS_KEY || !c.env.AWS_REGION) {
-    return c.json({ error: 'SES not configured' }, 503)
-  }
+  if (!c.env.RESEND_API_KEY) return c.json({ error: 'no RESEND_API_KEY' }, 503)
   const { to, subject, html } = (await c.req.json().catch(() => ({}))) as { to?: string; subject?: string; html?: string }
   if (!to || !subject || !html) return c.json({ error: 'to, subject, html required' }, 400)
-  const from = c.env.EMAIL_FROM ?? 'Cartis <no-reply@cartis.dpdns.org>'
-  const aws = new AwsClient({
-    accessKeyId: c.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: c.env.AWS_SECRET_ACCESS_KEY,
-    region: c.env.AWS_REGION,
-    service: 'ses',
-  })
-  const res = await aws.fetch(`https://email.${c.env.AWS_REGION}.amazonaws.com/v2/email/outbound-emails`, {
+  const from = c.env.EMAIL_FROM ?? 'Cartis <onboarding@resend.dev>'
+  const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      FromEmailAddress: from,
-      Destination: { ToAddresses: [to] },
-      Content: {
-        Simple: {
-          Subject: { Data: subject },
-          Body: { Html: { Data: html } },
-        },
-      },
-    }),
+    headers: { Authorization: `Bearer ${c.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to, subject, html }),
   })
   const ok = res.ok
   if (!ok) {
     const body = await res.text().catch(() => '')
     c.env.SESSIONS.put(`email:fail:${Date.now()}`, body.slice(0, 500), { expirationTtl: 86400 })
-    return c.json({ error: `ses ${res.status}`, detail: body.slice(0, 300) }, 502)
+    return c.json({ error: `resend ${res.status}`, detail: body.slice(0, 300) }, 502)
   }
   return c.json({ ok: true })
 })
 
+// The /api/aa/reconnect route directly above handles Yodlee sync (no sweep route needed).
 app.post('/api/session/refresh', auth, (c) => {
   const session = c.get('session')
   return c.json({
@@ -948,7 +1024,8 @@ Rules:
 Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence explanation>" }`
 
   try {
-    const out = (await c.env.AI.run(data.me?.aiModel || '@cf/meta/llama-4-scout-17b-16e-instruct', {
+    const chosen = data.me?.aiModel?.startsWith('groq/') ? undefined : data.me?.aiModel
+    const out = (await c.env.AI.run(chosen || '@cf/meta/llama-4-scout-17b-16e-instruct', {
       messages: [{ role: 'user', content: prompt }],
     })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
     const content = typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
@@ -996,7 +1073,7 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
 
 app.post('/api/subscription/checkout', auth, async (c) => {
   const userId = c.get('session').user_id
-  const body = (await c.req.json().catch(() => ({}))) as { productId?: string }
+  const body = (await c.req.json().catch(() => ({}))) as { productId?: string; plan?: string }
   if (!body.productId) return c.json({ error: 'productId required' }, 400)
 
   const res = await fetch(`${c.env.POLAR_API_URL}/v1/checkouts`, {
@@ -1008,7 +1085,7 @@ app.post('/api/subscription/checkout', auth, async (c) => {
     body: JSON.stringify({
       product_id: body.productId,
       success_url: new URL('/dashboard', c.req.url).toString(),
-      metadata: { user_id: userId },
+      metadata: { user_id: userId, plan: body.plan ?? '' },
     }),
   })
   if (!res.ok) return c.json({ error: 'checkout creation failed' }, 502)
@@ -1016,6 +1093,15 @@ app.post('/api/subscription/checkout', auth, async (c) => {
   if (!data.url) return c.json({ error: 'no checkout url' }, 502)
   return c.json({ url: data.url })
 })
+
+// Polar product id → plan tier (production org "saptarshi").
+const POLAR_PRODUCTS: Record<string, string> = {
+  '57780d49-cca0-43eb-91fd-6a538e261f67': 'pro',
+  'c70e8ce4-7151-4705-adbf-7c828a1cb7fe': 'max',
+  '4caad456-f357-4934-8afe-b73af5b0872f': 'team_standard',
+  'b5ca8384-87d0-4a59-9229-95c2be263df8': 'team_premium',
+  'b6647353-deea-4dea-bf7c-726fd8e11691': 'enterprise',
+}
 
 app.post('/webhooks/polar', async (c) => {
   const secret = c.env.POLAR_WEBHOOK_SECRET
@@ -1033,19 +1119,27 @@ app.post('/webhooks/polar', async (c) => {
     return c.json({ error: 'bad signature' }, 401)
   }
   await c.env.SESSIONS.put(`polar:event:${webhookId}`, raw, { expirationTtl: 2592000 })
-  const event = JSON.parse(raw) as { type?: string; data?: { id?: string } }
+  const event = JSON.parse(raw) as { type?: string; data?: Record<string, unknown> }
   console.log('[polar]', event.type ?? 'unknown', event.data?.id ?? '')
-  const ent = (event.data ?? {}) as {
-    metadata?: { user_id?: string }
+  const data = (event.data ?? {}) as {
+    metadata?: { user_id?: string; plan?: string }
     status?: string
     paidAt?: string | null
-    type?: string
+    productId?: string
   }
-  const userId = ent.metadata?.user_id
+  const userId = data.metadata?.user_id
   const paid = ['order.paid', 'checkout.updated', 'order.updated'].includes(event.type ?? '') && userId
-  if (paid && (ent.status === 'paid' || ent.paidAt || event.type === 'order.paid')) {
-    await c.env.SESSIONS.put(`polar:entitled:${userId}`, JSON.stringify({ plan: 'pro', since: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 365 })
-    console.log('[polar] entitlement granted', userId)
+  if (paid && (data.status === 'paid' || data.paidAt || event.type === 'order.paid')) {
+    const plan = data.metadata?.plan || POLAR_PRODUCTS[data.productId ?? ''] || 'pro'
+    await fetch(`${c.env.BACKEND_URL}/plan/update`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+      },
+      body: JSON.stringify({ user_id: userId, plan }),
+    })
+    console.log('[polar] entitlement granted', userId, plan)
   }
   return c.json({ ok: true })
 })
@@ -1053,32 +1147,36 @@ app.post('/webhooks/polar', async (c) => {
 // ── Account linking (Yodlee FastLink) routes ───────────────────────────────
 
 // FastLink launch page: mints a user token server-side and opens the hosted
-// link UI. Callback URL (UI page with ?linked=1) is passed as cb.
+// link UI (FastLink 4). Callback URL (UI page with ?linked=1) is passed as cb.
 app.get('/aa/link', async (c) => {
   const cb = c.req.query('cb') ?? ''
   try {
     const token = await yodleeToken(c, c.env.YODLEE_TEST_LOGIN)
     const fl = c.env.YODLEE_FASTLINK_URL
-    const jsUrl = new URL('/fastlink/js/fastlink.js', fl).toString()
-    const paramsJson = JSON.stringify(cb ? { callbackURL: cb } : {})
-    return c.html(`<!doctype html>
+    const paramsJson = JSON.stringify({
+      ...(c.env.YODLEE_CONFIG_NAME ? { configName: c.env.YODLEE_CONFIG_NAME } : {}),
+      ...(cb ? { callback: cb, callbackLocation: 'top' } : {}),
+    })
+    const html = `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Link your bank</title><script src="${jsUrl}"></script>
+<title>Link your bank</title><script src="https://cdn.yodlee.com/fastlink/v4/initialize.js"></script>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#334155}div{text-align:center}p{opacity:.7;font-size:14px}</style>
-</head><body><div><p>Opening secure bank link…</p></div>
+</head><body><div id="container-fastlink"><p>Opening secure bank link…</p></div>
 <script>
   var params = ${paramsJson};
   try {
-    fastlink.open({ fastLinkURL: ${JSON.stringify(fl)}, jwtToken: ${JSON.stringify(token)}, params: params });
-    fastlink.on('success', function (data) {
-      if (data && data.providerAccount) {
-        fetch('/aa/success', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ providerAccountId: data.providerAccount.providerAccountId, sessionId: data.sessionId || null }) }).catch(function () {});
-      }
-    });
-    fastlink.on('close', function () { if (params.callbackURL) { window.location.href = params.callbackURL; } });
+    fastlink.open({ fastLinkURL: ${JSON.stringify(fl)}, accessToken: 'Bearer ' + ${JSON.stringify(token)}, params: params,
+      onSuccess: function (data) {
+        if (data && data.providerAccount) {
+          fetch('/aa/success', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ providerAccountId: data.providerAccount.providerAccountId, sessionId: data.sessionId || null }) }).catch(function () {});
+        }
+      },
+      onClose: function () { if (params.callback) { window.location.href = params.callback; } }
+    }, 'container-fastlink');
   } catch (e) { document.body.innerHTML = '<p>FastLink failed to start: ' + e.message + '</p>'; }
-</script></body></html>`)
+</script></body></html>`
+    return c.html(html, 200, { 'Cache-Control': 'no-store' })
   } catch (e) {
     return c.html(`<p>Failed to start bank link: ${String(e)}</p>`, 502)
   }
@@ -1123,12 +1221,15 @@ app.get('/api/aa/status/:consentId', auth, async (c) => {
 app.post('/api/aa/fetch', auth, async (c) => {
   const userId = c.get('session').user_id
   try {
-    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
+    const data = await fetchYodleeData(c)
+    if (data.accounts.length === 0) throw new Error('No bank accounts found to sync — try again later')
+    const syncRes = await writeAaSync(c, userId, data)
     return c.json({
       ok: true,
-      accounts,
-      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
-      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+      accounts: data.accounts,
+      balance: syncRes.balance ?? data.accounts[0]?.balance ?? null,
+      transactionCount: syncRes.inserted ?? data.transactions.length,
+      incomeCount: data.income.length,
     })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
@@ -1138,12 +1239,59 @@ app.post('/api/aa/fetch', auth, async (c) => {
 app.post('/api/aa/reconnect', auth, async (c) => {
   const userId = c.get('session').user_id
   try {
-    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
+    const data = await fetchYodleeData(c)
+    if (data.accounts.length === 0) throw new Error('No bank accounts found to sync — try again later')
+    const syncRes = await writeAaSync(c, userId, data)
     return c.json({
       ok: true,
-      accounts,
-      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
-      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+      accounts: data.accounts,
+      balance: syncRes.balance ?? data.accounts[0]?.balance ?? null,
+      transactionCount: syncRes.inserted ?? data.transactions.length,
+      incomeCount: data.income.length,
+    })
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+// Link Dag Site 16441 via REST with the proven sandbox creds, then sync.
+app.post('/api/aa/link-rest', auth, async (c) => {
+  const userId = c.get('session').user_id
+  try {
+    const detail = (await yodleeFetch(c, '/providers/16441')) as { provider?: { id?: number; name?: string; loginForm?: { id?: number; label?: string; fieldType?: string }[] } }
+    const prov = detail.provider
+    console.log(`[link-rest] provider=${JSON.stringify(prov).slice(0, 500)}`)
+    const pid = prov?.id ?? 16441
+    const fields = prov?.loginForm ?? []
+    const loginForm = (fields.length >= 2 ? fields : [{ id: 1 }, { id: 2 }])
+      .slice(0, 2)
+      .map((f, i) => ({ id: f.id, value: i === 0 ? 'YodTest.site16441.2' : 'site16441.2' }))
+    const created = (await yodleeFetch(c, `/providerAccounts?providerId=${pid}`, {
+      method: 'POST',
+      body: JSON.stringify({ providerAccount: { loginForm } }),
+    })) as { providerAccount?: { id?: number } }
+    console.log(`[link-rest] created=${JSON.stringify(created).slice(0, 300)}`)
+    const paId = created.providerAccount?.id
+    if (!paId) throw new Error('No provider account created')
+
+    let status = 'ADD_IN_PROGRESS'
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 5000))
+      const res = await yodleeFetch(c, `/providerAccounts?providerAccountIds=${paId}`)
+      status = ((res.providerAccount ?? []) as { status?: string }[])[0]?.status ?? 'UNKNOWN'
+      console.log(`[link-rest] poll[${i}] status=${status}`)
+      if (['LOGIN_SUCCESS', 'FAILED'].includes(status)) break
+    }
+    if (status !== 'LOGIN_SUCCESS') throw new Error(`Link aggregation ${status} — try again in a minute`)
+
+    const data = await fetchYodleeData(c)
+    const syncRes = await writeAaSync(c, userId, data)
+    return c.json({
+      ok: true,
+      accounts: data.accounts,
+      balance: syncRes.balance ?? data.accounts[0]?.balance ?? null,
+      transactionCount: syncRes.inserted ?? data.transactions.length,
+      incomeCount: data.income.length,
     })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
@@ -1517,16 +1665,94 @@ Rules: be specific and actionable for an Indian SMB; mention concrete levers (GS
 
 app.get('/api/advisor/entitlement', auth, async (c) => {
   const userId = c.get('session').user_id
-  const ent = await c.env.SESSIONS.get(`polar:entitled:${userId}`)
-  return c.json({ pro: ent !== null, since: ent ? (JSON.parse(ent) as { since?: string }).since ?? null : null })
+  const me = (await backendGql(
+    c,
+    `{ me { userType effectivePlan } }`,
+    userId,
+  ).catch(() => null)) as { me?: { userType?: string; effectivePlan?: string } } | null
+  if (me?.me?.effectivePlan) {
+    return c.json({ plan: me.me.effectivePlan, userType: me.me.userType ?? 'personal' })
+  }
+  return c.json({ plan: 'free', userType: 'personal' })
 })
 
 // ── Catch-all asset handler ─────────────────────────────────────────────────
 
 app.all('*', async (c) => {
   const res = await c.env.ASSETS.fetch(c.req.raw)
-  if (!res.headers.get('content-type')?.includes('text/html')) return res
-  return new Response(res.body, { status: res.status, headers: { ...res.headers, 'Cache-Control': 'no-store' } })
+  if (res.status >= 300 && res.status < 400) return res
+  const isHtml = (res.headers.get('content-type') ?? '').includes('text/html')
+  const range = c.req.raw.method === 'GET' ? c.req.header('Range') : null
+  if (isHtml || !range) {
+    if (isHtml) return new Response(res.body, { status: res.status, headers: { ...res.headers, 'Cache-Control': 'no-store' } })
+    const headers: Record<string, string> = { ...res.headers, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=31536000, immutable' }
+    const total = Number(res.headers.get('content-length') ?? 0)
+    if (c.req.raw.method === 'GET' && total > 0 && /\.(mp4|webm|mp3|m4v)$/.test(new URL(c.req.raw.url).pathname)) {
+      headers['Content-Range'] = `bytes 0-${total - 1}/${total}`
+      return new Response(res.body, { status: 206, headers })
+    }
+    return new Response(res.body, { status: res.status, headers })
+  }
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range)
+  const total = Number(res.headers.get('content-length') ?? 0)
+  if (!m || total <= 0) return res
+  const start = m[1] ? Number(m[1]) : total - Number(m[2])
+  const end = m[2] ? Number(m[2]) : total - 1
+  if (start > end || start >= total) {
+    return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${total}` } })
+  }
+  const body = await res.arrayBuffer()
+  return new Response(body.slice(start, end + 1), {
+    status: 206,
+    headers: {
+      'Content-Type': res.headers.get('content-type') ?? 'application/octet-stream',
+      'Content-Range': `bytes ${start}-${end}/${total}`,
+      'Content-Length': String(end - start + 1),
+      'Accept-Ranges': 'bytes',
+      'ETag': res.headers.get('etag') ?? '',
+      'Cache-Control': 'private, max-age=31536000, immutable',
+    },
+  })
 })
 
-export default app
+// Daily Yodlee sync (05:30 UTC = 11:00 IST): fetch the shared sandbox world
+// once, fan out to every user with an AA connection.
+async function syncAll(env: Env) {
+  if (await env.SESSIONS.get('yodlee:cron:lock')) {
+    console.log('[yodlee] cron skipped — previous run in flight')
+    return
+  }
+  await env.SESSIONS.put('yodlee:cron:lock', '1', { expirationTtl: 1800 })
+  try {
+    const c = { env }
+    const usersRes = await fetch(`${env.BACKEND_URL}/api/internal/aa-users`, {
+      headers: { 'x-cartis-backend-secret': env.BACKEND_SECRET },
+    })
+    if (!usersRes.ok) throw new Error(`aa-users ${usersRes.status}`)
+    const uids = (await usersRes.json()) as string[]
+    if (uids.length === 0) {
+      console.log('[yodlee] cron: no AA users to sync')
+      return
+    }
+    const data = await fetchYodleeData(c)
+    for (const uid of uids) {
+      try {
+        await writeAaSync(c, uid, data)
+        console.log(`[yodlee] cron synced ${uid.slice(0, 8)}`)
+      } catch (e) {
+        console.log(`[yodlee] cron write failed ${uid.slice(0, 8)}:`, String(e))
+      }
+    }
+  } catch (e) {
+    console.log('[yodlee] cron failed:', String(e))
+  } finally {
+    await env.SESSIONS.delete('yodlee:cron:lock')
+  }
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(syncAll(env))
+  },
+}

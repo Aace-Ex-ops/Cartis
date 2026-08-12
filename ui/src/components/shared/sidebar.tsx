@@ -23,11 +23,13 @@ export function Sidebar({
   upgrade,
   user,
   collapsed = false,
+  userType,
 }: {
   groups: NavGroup[];
   upgrade?: { title: string; subtitle: string; href: string };
   user?: { id: string; name: string; email: string; avatar: string };
   collapsed?: boolean;
+  userType?: string;
 }) {
   const pathname = usePathname();
 

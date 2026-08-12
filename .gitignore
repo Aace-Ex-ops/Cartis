@@ -19,3 +19,5 @@ dist/
 
 # Architecture deep-dives (private)
 /docs/
+strix_runs/
+strix_instructions.md

@@ -4,10 +4,19 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { AuthAwareLink } from "@/components/shared/auth-aware-link";
 
-const CHAIR_URL =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/chair.png";
-const HEADER_BG_URL =
-  "https://cdn.jiro.build/Jahid/Random/RevNue/All%20Images/header%20bg%20revnue.mp4";
+function useIsMobile() {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const h = (e: MediaQueryListEvent) => setM(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  return m;
+}
+
+const CHAIR_URL = "/landing/images/chair.webp";
+const HEADER_BG_URL = "/landing/videos/header-bg.mp4";
 
 export function RevnueHero() {
   const [e, setE] = useState(0);
@@ -15,20 +24,31 @@ export function RevnueHero() {
   const [fit, setFit] = useState<"contain" | "cover">("cover");
   const [imgOk, setImgOk] = useState(true);
   const [videoOk, setVideoOk] = useState(true);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
-    const onScroll = () => {
+    let rafId = 0;
+    let lastE = -1;
+    const update = () => {
+      rafId = 0;
       const el = document.getElementById("header-root-container");
       if (!el) return;
       const top = -el.getBoundingClientRect().top;
       const denom = 0.8 * (el.offsetHeight - window.innerHeight);
-      setE(denom > 0 ? Math.min(Math.max(top / denom, 0), 1) : 0);
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const ratio = 16 / 9;
-      const contain = w / h >= ratio;
-      setFit(contain ? "contain" : "cover");
-      setO(contain ? (w / ratio - h) * (0.6222 - 0.5) : 0);
+      const newE = denom > 0 ? Math.min(Math.max(top / denom, 0), 1) : 0;
+      if (Math.abs(newE - lastE) > 0.001) {
+        lastE = newE;
+        setE(newE);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const ratio = 16 / 9;
+        const contain = w / h >= ratio;
+        setFit(contain ? "contain" : "cover");
+        setO(contain ? (w / ratio - h) * (0.6222 - 0.5) : 0);
+      }
+    };
+    const onScroll = () => {
+      if (!rafId) rafId = requestAnimationFrame(update);
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
@@ -36,11 +56,12 @@ export function RevnueHero() {
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
     };
   }, []);
 
   return (
-    <div id="header-root-container" className="relative w-full min-h-[220vh] bg-white">
+    <div id="header-root-container" className="relative w-full min-h-[220vh] max-md:min-h-[150vh] bg-white">
       <section
         id="header-section"
         className="sticky top-0 w-full h-screen overflow-hidden flex flex-col justify-center"
@@ -55,8 +76,9 @@ export function RevnueHero() {
               onError={() => setVideoOk(false)}
               className="w-full h-full object-cover select-none"
               src={HEADER_BG_URL}
+              poster="/landing/posters/header-bg.jpg"
             />
-            <div className="absolute inset-0 bg-white/10 backdrop-blur-[1px]" />
+            <div className="absolute inset-0 bg-white/10" />
           </div>
         )}
 
@@ -66,31 +88,31 @@ export function RevnueHero() {
               src={CHAIR_URL}
               alt="Astronaut sitting on a hill"
               onError={() => setImgOk(false)}
-              initial={{ scale: 4.2, opacity: 0 }}
-              animate={{ scale: 4 - 3 * e, y: o * e, opacity: 1 }}
+              initial={{ scale: isMobile ? 2.5 : 4.2, opacity: 0 }}
+              animate={{ scale: isMobile ? 2.5 - 1.5 * e : 4 - 3 * e, y: o * e, opacity: 1 }}
               transition={{
                 scale: { duration: 0.1, ease: "easeOut" },
                 y: { duration: 0.1, ease: "easeOut" },
                 opacity: { duration: 1.5, ease: "easeOut" },
               }}
               style={{ objectFit: fit }}
-              className="w-full h-full select-none"
+              className="w-full h-full select-none max-w-none"
             />
           </div>
         )}
 
-        <div className="relative z-20 w-full text-center bg-black/25 backdrop-blur-[1px] rounded-[32px] py-10 md:py-12 px-4 sm:px-8 md:px-12 xl:px-16">
+        <div className="relative z-20 w-full text-center bg-black/25 rounded-[32px] py-10 md:py-12 px-4 sm:px-8 md:px-12 xl:px-16">
           <div className="overflow-hidden py-4">
             <motion.h1
               initial={{ y: 150, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1], delay: 0.3 }}
-              className="relative select-none text-white text-center font-inclusive text-[40px] sm:text-[52px] md:text-[72px] lg:text-[96px] font-medium leading-[114%] tracking-[-2px] sm:tracking-[-4px] md:tracking-[-6px] lg:tracking-[-8px] drop-shadow-[0_4px_24px_rgba(0,0,0,0.45)]"
+              className="relative select-none text-white text-center font-inclusive text-[32px] sm:text-[52px] md:text-[72px] lg:text-[96px] font-medium leading-[114%] tracking-[-1.5px] sm:tracking-[-4px] md:tracking-[-6px] lg:tracking-[-8px] drop-shadow-[0_4px_24px_rgba(0,0,0,0.45)]"
             >
               <motion.span
                 className="inline-block"
-                animate={{ x: [-8, 8, -8], y: [8, -8, 8] }}
-                transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                animate={isMobile ? {} : { x: [-8, 8, -8], y: [8, -8, 8] }}
+                transition={{ duration: 8, repeat: isMobile ? 0 : Infinity, ease: "easeInOut" }}
               >
                 See the future of your money.
               </motion.span>

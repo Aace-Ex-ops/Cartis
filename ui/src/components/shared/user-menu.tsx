@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Repeat, ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -16,8 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
-import { gql } from "@/lib/gql";
-
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 type User = {
@@ -36,30 +34,8 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 
 export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: boolean }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
-  const [userType, setUserType] = useState(user.userType);
 
-  useEffect(() => {
-    let cancelled = false;
-    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
-      .then((d) => {
-        if (!cancelled && d.me?.userType) setUserType(d.me.userType);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const isBusiness = userType === "business" || userType === "seller";
-
-  async function switchType(next: "personal" | "business") {
-    try {
-      await gql<unknown>(`mutation { updateUserType(userType: "${next}") { id } }`);
-      window.location.reload();
-    } catch {
-      // keep current state; retry next open
-    }
-  }
+  const isBusiness = user.userType === "business" || user.userType === "seller";
 
   const initials = user.fullName
     ?.split(" ")
@@ -120,14 +96,6 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
               {PANELS[key].label}
             </DropdownMenuItem>
           ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => void switchType(isBusiness ? "personal" : "business")}
-            className="cursor-pointer"
-          >
-            <Repeat className="mr-2 h-4 w-4" />
-            {isBusiness ? "Switch to Personal finance" : "Switch to Business"}
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>

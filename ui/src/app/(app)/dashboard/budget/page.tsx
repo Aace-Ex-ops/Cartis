@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { SpendChart } from "@/components/consumer/spend-chart";
 import { TabGauge } from "@/components/consumer/tab-gauge";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
@@ -39,45 +40,36 @@ export default function BudgetPage() {
     reasoning: "AI Coach optimized your monthly spending tab based on last month's recurring bills, net liquidity, and a target 34% savings buffer.",
   });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void fetch(`${GATEWAY}/api/budget/suggest`, {
+  const load = useCallback(async () => {
+    // Fire AI suggestion first, then re-fetch budget data so chart reflects the new limit
+    await fetch(`${GATEWAY}/api/budget/suggest`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     })
       .then((r) => r.json() as Promise<AiResult>)
-      .then((result) => {
-        if (!cancelled) setAiResult(result);
-      })
+      .then((result) => setAiResult(result))
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) {
-          void gql<BudgetData>(`{ monthlyTab { limit spent } spending30d { day spend } }`)
-            .then((d) => {
-              if (cancelled) return;
-              const hasData = d.monthlyTab && d.monthlyTab.limit > 0;
-              setData({
-                monthlyTab: hasData ? d.monthlyTab : { limit: 75000, spent: 24850 },
-                spending30d: d.spending30d && d.spending30d.length > 0 ? d.spending30d : DUMMY_DAYS,
-              });
-            })
-            .catch(() => {
-              if (cancelled) return;
-              setData({
-                monthlyTab: { limit: 75000, spent: 24850 },
-                spending30d: DUMMY_DAYS,
-              });
+        void gql<BudgetData>(`{ monthlyTab { limit spent } spending30d { day spend } }`)
+          .then((d) => {
+            const hasData = d.monthlyTab && d.monthlyTab.limit > 0;
+            setData({
+              monthlyTab: hasData ? d.monthlyTab : { limit: 75000, spent: 24850 },
+              spending30d: d.spending30d && d.spending30d.length > 0 ? d.spending30d : DUMMY_DAYS,
             });
-        }
+          })
+          .catch(() => {
+            setData({
+              monthlyTab: { limit: 75000, spent: 24850 },
+              spending30d: DUMMY_DAYS,
+            });
+          });
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useLiveData(load, [load]);
 
   if (data === null) {
     return (

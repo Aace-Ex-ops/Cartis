@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { PiggyBank, Award, CheckCircle2, Clock, Ban } from "lucide-react";
 import { gql } from "@/lib/gql";
-import type { Verdict } from "@/lib/mock";
-import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
+import { useLiveData } from "@/lib/use-live-data";
 
 type Analysis = {
   analysisId: string;
@@ -84,19 +83,16 @@ function formatDate(iso: string): string {
 export default function PurchasesPage() {
   const [items, setItems] = useState<Analysis[] | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void gql<{ analysisHistory: Analysis[] }>(QUERY)
-      .then((d) => {
-        if (!cancelled) setItems(d.analysisHistory && d.analysisHistory.length > 0 ? d.analysisHistory : DUMMY_PURCHASES);
-      })
-      .catch(() => {
-        if (!cancelled) setItems(DUMMY_PURCHASES);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      const d = await gql<{ analysisHistory: Analysis[] }>(QUERY);
+      setItems(d.analysisHistory && d.analysisHistory.length > 0 ? d.analysisHistory : DUMMY_PURCHASES);
+    } catch {
+      setItems(DUMMY_PURCHASES);
+    }
   }, []);
+
+  useLiveData(load, [load]);
 
   if (items === null) {
     return (

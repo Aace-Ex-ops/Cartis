@@ -17,10 +17,12 @@ const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "1";
 
 export function DashboardShell({
   groups,
+  userType,
   upgrade,
   children,
 }: {
   groups: NavGroup[];
+  userType: string;
   upgrade?: { title: string; subtitle: string; href: string };
   children: React.ReactNode;
 }) {
@@ -65,6 +67,7 @@ export function DashboardShell({
             groups={groups}
             upgrade={upgrade}
             user={user}
+            userType={userType}
             collapsed={collapsed}
           />
         )}
