@@ -301,7 +301,7 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
     }
   }
 
-  return { accounts, transactions, income }
+  return { accounts, transactions, income, holdings }
 }
 
 type YodleeSyncPayload = {
