@@ -6,30 +6,22 @@ export function PricingInteraction({
   starterAnnual,
   proMonth,
   proAnnual,
-  onChange,
 }: {
   starterMonth: number;
   starterAnnual: number;
   proMonth: number;
   proAnnual: number;
-  onChange?: (active: number, period: number) => void;
 }) {
   const [active, setActive] = useState(0);
   const [period, setPeriod] = useState(0);
-
-  const handleChangePlan = (index: number) => {
-    setActive(index);
-    onChange?.(index, period);
-  };
-  const handleChangePeriod = (index: number) => {
-    setPeriod(index);
-    onChange?.(active, index);
-  };
 
   const prices = [
     { starter: starterMonth, pro: proMonth },
     { starter: starterAnnual, pro: proAnnual },
   ];
+
+  const handleChangePlan = (index: number) => setActive(index);
+  const handleChangePeriod = (index: number) => setPeriod(index);
 
   return (
     <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-3 rounded-[32px] border-2 bg-white p-3 shadow-md">
