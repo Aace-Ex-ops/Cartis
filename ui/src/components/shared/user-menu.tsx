@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -16,8 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
 import { SettingsPanel } from "@/components/consumer/settings-panel";
-import { gql } from "@/lib/gql";
-
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 type User = {
@@ -36,21 +34,8 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
 
 export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
-  const [userType, setUserType] = useState(user.userType);
 
-  useEffect(() => {
-    let cancelled = false;
-    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
-      .then((d) => {
-        if (!cancelled && d.me?.userType) setUserType(d.me.userType);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const isBusiness = userType === "business" || userType === "seller";
+  const isBusiness = user.userType === "business" || user.userType === "seller";
 
   const initials = user.fullName
     ?.split(" ")

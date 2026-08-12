@@ -31,7 +31,7 @@ const PERSONAL_NAV = [
       { id: "nav-goals", title: "Goals", href: "/dashboard/goals", icon: Target },
       { id: "nav-portfolio", title: "Portfolio", href: "/dashboard/portfolio", icon: Briefcase },
       { id: "nav-tools", title: "Tools", href: "/dashboard/tools", icon: Calculator },
-      { id: "nav-pricing", title: "Pricing", href: "/pricing", icon: CreditCard },
+      { id: "nav-subscription", title: "Subscription", href: "/dashboard/subscription", icon: CreditCard },
     ],
   },
 ];
@@ -45,6 +45,7 @@ const BUSINESS_NAV = [
       { id: "nav-tax", title: "GST & Tax", href: "/dashboard/tax", icon: Calculator },
       { id: "nav-cashflow", title: "Cash Flow", href: "/dashboard/cashflow", icon: Waves },
       { id: "nav-inventory", title: "Inventory", href: "/dashboard/inventory", icon: Package },
+      { id: "nav-subscription", title: "Subscription", href: "/dashboard/subscription", icon: CreditCard },
     ],
   },
 ];
