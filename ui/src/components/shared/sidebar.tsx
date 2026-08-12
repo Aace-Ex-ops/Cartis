@@ -22,10 +22,12 @@ export function Sidebar({
   groups,
   upgrade,
   user,
+  userType,
 }: {
   groups: NavGroup[];
   upgrade?: { title: string; subtitle: string; href: string };
   user?: { id: string; name: string; email: string; avatar: string };
+  userType?: string;
 }) {
   const pathname = usePathname();
 
@@ -34,7 +36,7 @@ export function Sidebar({
       {user && (
         <div className="px-0.5 pb-1">
           <UserMenu
-            user={{ fullName: user.name, email: user.email, avatarUrl: user.avatar, userType: "" }}
+            user={{ fullName: user.name, email: user.email, avatarUrl: user.avatar, userType: userType ?? "" }}
           />
         </div>
       )}

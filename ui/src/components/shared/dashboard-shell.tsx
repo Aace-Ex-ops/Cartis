@@ -8,10 +8,12 @@ import { getMe, type User } from "@/lib/auth";
 
 export function DashboardShell({
   groups,
+  userType,
   upgrade,
   children,
 }: {
   groups: NavGroup[];
+  userType: string;
   upgrade?: { title: string; subtitle: string; href: string };
   children: React.ReactNode;
 }) {
@@ -40,7 +42,7 @@ export function DashboardShell({
           collapsed ? "w-0 opacity-0" : "w-[260px] opacity-100"
         }`}
       >
-        {user && <Sidebar groups={groups} upgrade={upgrade} user={user} />}
+        {user && <Sidebar groups={groups} upgrade={upgrade} user={user} userType={userType} />}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">

@@ -84,6 +84,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <DashboardShell
       groups={groups}
+      userType={userType ?? "personal"}
       upgrade={
         isBusiness && !isEnterprise
           ? { title: effectivePlan === "trial" ? "Trial" : "Business", subtitle: "Team plan", href: "/dashboard" }
