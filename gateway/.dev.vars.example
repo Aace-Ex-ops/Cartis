@@ -1,0 +1,24 @@
+# Copy to .dev.vars and fill with the same values the Cloudflare Worker uses.
+# Ask the person who deployed the gateway for these (Cloudflare dashboard -> Workers -> cartis-gateway -> Settings -> Variables).
+
+# Google OAuth (must have http://localhost:8787/auth/callback added as an authorized redirect URI in Google Cloud Console)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Session signing secret (any long random string)
+WORKER_AUTH_SECRET=
+
+# Rust API backend on AWS
+BACKEND_URL=
+BACKEND_SECRET=
+
+# Polar billing (optional for local dev)
+POLAR_WEBHOOK_SECRET=
+POLAR_ACCESS_TOKEN=
+POLAR_API_URL=
+
+# Local dev only — allows the UI dev server (localhost:3000) to call this gateway cross-origin
+CORS_ALLOWED_ORIGIN=http://localhost:3000
+
+# Local dev only — after Google OAuth, land on the Next dev server instead of this worker
+AUTH_REDIRECT_BASE=http://localhost:3000
