@@ -2,70 +2,88 @@
 
 import { useCallback, useState } from "react";
 import { CashFlowChart } from "@/components/seller/cashflow-chart";
-import { TrendingUp } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
 import { useLiveData } from "@/lib/use-live-data";
 import { fetchSellerSeries, fmt, type SellerSeriesPoint } from "@/lib/seller";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
-
-const DUMMY_CASHFLOW: SellerSeriesPoint[] = [
-  { month: "Mar", income: 125000, expenses: 84000 },
-  { month: "Apr", income: 142000, expenses: 91000 },
-  { month: "May", income: 138000, expenses: 95000 },
-  { month: "Jun", income: 165000, expenses: 102000 },
-  { month: "Jul", income: 151000, expenses: 88000 },
-  { month: "Aug", income: 189000, expenses: 94000 },
-];
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function CashFlowPage() {
   const [data, setData] = useState<SellerSeriesPoint[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetchSellerSeries(6);
-      setData(res && res.length > 0 ? res : DUMMY_CASHFLOW);
+      setData(await fetchSellerSeries(6));
     } catch {
-      setData(DUMMY_CASHFLOW);
+      setFailed(true);
     }
   }, []);
 
   useLiveData(load, [load]);
+
+  if (failed) {
+    return (
+      <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-[13px] text-destructive">
+        Couldn&apos;t load your cash flow — refresh to try again.
+      </p>
+    );
+  }
 
   if (!data) {
     return (
       <div className="flex flex-col gap-6">
         <SkeletonHeading />
         <SkeletonCard className="h-[280px]" />
+        <div className="rounded-xl border border-border/50 bg-card p-4">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="mt-2 h-7 w-24" />
+          <Skeleton className="mt-2 h-3 w-52" />
+        </div>
       </div>
     );
   }
 
-  const seriesData = data.length > 0 ? data : DUMMY_CASHFLOW;
-
-  const avgIn = seriesData.reduce((s, m) => s + m.income, 0) / Math.max(seriesData.length, 1);
-  const avgOut = seriesData.reduce((s, m) => s + m.expenses, 0) / Math.max(seriesData.length, 1);
+  const avgIn = data.reduce((s, m) => s + m.income, 0) / Math.max(data.length, 1);
+  const avgOut = data.reduce((s, m) => s + m.expenses, 0) / Math.max(data.length, 1);
   const surplus = Math.round(avgIn - avgOut);
 
   return (
-    <div className="flex flex-col gap-6 text-[#132a13] pb-12">
+    <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-[#132a13] md:text-3xl">Cash Flow</h1>
-        <p className="mt-1 text-xs text-gray-500">Money in, money out, and net surplus velocity.</p>
+        <h1 className="text-2xl font-heading font-semibold tracking-tight text-foreground">Cash Flow</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Money in, money out, and what is left.</p>
       </div>
 
-      <CashFlowChart data={seriesData.map((m) => ({ month: m.month, in: m.income, out: m.expenses }))} />
+      {data.some((m) => m.expenses > m.income) && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-400/25 bg-amber-400/10 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <div className="flex flex-col">
+            <span className="text-[14px] text-foreground">Outflows exceeded inflows</span>
+            <span className="text-[12px] text-muted-foreground">
+              At least one month spent more than it earned — keep an eye on expenses.
+            </span>
+          </div>
+        </div>
+      )}
 
-      <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
-          <TrendingUp className="h-4 w-4 text-[#7ec151]" />
-          <h2 className="text-base font-bold text-[#132a13]">Average Monthly Net Surplus</h2>
-        </div>
-        <div className="mt-3 text-3xl font-black text-[#132a13] tabular-nums">
-          +{fmt(surplus)}
-        </div>
-        <p className="mt-1 text-xs text-gray-500">
-          Average monthly cash reserve remaining after all operational expenses over the last 6 months.
-        </p>
-      </div>
+      <CashFlowChart data={data.map((m) => ({ month: m.month, in: m.income, out: m.expenses }))} />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Surplus projection</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className={`text-2xl font-semibold ${surplus >= 0 ? "text-primary" : "text-destructive"}`}>
+            {surplus >= 0 ? "+" : ""}
+            {fmt(surplus)}
+          </div>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Average monthly surplus over the last 6 months.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

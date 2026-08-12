@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { Calculator, LineChart, Percent, TrendingUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
@@ -43,10 +46,10 @@ type Stock = {
 
 function ResultCard({ title, value, note }: { title: string; value: string; note?: string }) {
   return (
-    <div className="rounded-xl border border-[#7ec151]/20 bg-white p-4 shadow-sm">
-      <p className="text-xs font-bold text-gray-500">{title}</p>
-      <p className="mt-1 text-xl font-black text-[#132a13] tabular-nums">{value}</p>
-      {note && <p className="mt-1 text-xs text-gray-500 font-medium">{note}</p>}
+    <div className="rounded-lg border border-border/50 bg-background/60 p-3">
+      <p className="text-[11px] text-muted-foreground">{title}</p>
+      <p className="mt-0.5 text-lg font-semibold text-foreground">{value}</p>
+      {note && <p className="text-[11px] text-muted-foreground">{note}</p>}
     </div>
   );
 }
@@ -61,14 +64,7 @@ export default function ToolsPage() {
   const [busy, setBusy] = useState(false);
 
   const [ret, setRet] = useState({ current_age: "30", retire_age: "60", monthly_expense: "50000", monthly_sip: "10000" });
-  const [retOut, setRetOut] = useState<Retirement | null>({
-    projected_corpus: 35240000,
-    monthly_retirement_income: 117466,
-    monthly_retirement_income_today: 48500,
-    monthly_expense_today: 50000,
-    monthly_shortfall: 1500,
-    required_monthly_sip_for_full_cover: 12400,
-  });
+  const [retOut, setRetOut] = useState<Retirement | null>(null);
   const [retErr, setRetErr] = useState("");
 
   const [tax, setTax] = useState({ annual_income: "1200000", s80c: "150000", basic_da: "60000", hra: "24000", rent_paid: "20000" });
@@ -97,18 +93,8 @@ export default function ToolsPage() {
       const body = (await res.json()) as Retirement | { error: string };
       if (!res.ok || "error" in body) throw new Error((body as { error: string }).error ?? "failed");
       setRetOut(body as Retirement);
-    } catch {
-      const years = Math.max(1, (parseFloat(ret.retire_age) || 60) - (parseFloat(ret.current_age) || 30));
-      const monthlySip = parseFloat(ret.monthly_sip) || 10000;
-      const corpus = monthlySip * 12 * years * 2.8;
-      setRetOut({
-        projected_corpus: corpus,
-        monthly_retirement_income: Math.round(corpus * 0.04 / 12),
-        monthly_retirement_income_today: Math.round((corpus * 0.04 / 12) / Math.pow(1.06, years)),
-        monthly_expense_today: parseFloat(ret.monthly_expense) || 50000,
-        monthly_shortfall: 1500,
-        required_monthly_sip_for_full_cover: Math.round(monthlySip * 1.2),
-      });
+    } catch (e) {
+      setRetErr(String(e));
     } finally {
       setBusy(false);
     }
@@ -133,15 +119,8 @@ export default function ToolsPage() {
       const body = (await res.json()) as Tax | { error: string };
       if (!res.ok || "error" in body) throw new Error((body as { error: string }).error ?? "failed");
       setTaxOut(body as Tax);
-    } catch {
-      setTaxOut({
-        new_regime_tax: 75000,
-        old_regime_tax: 92500,
-        better_regime: "new",
-        saving_if_switch: 17500,
-        hra_exemption_used: 120000,
-        s80c_headroom: 0,
-      });
+    } catch (e) {
+      setTaxErr(String(e));
     } finally {
       setBusy(false);
     }
@@ -156,95 +135,82 @@ export default function ToolsPage() {
       const body = (await res.json()) as Stock;
       if (!res.ok || body.error) throw new Error(body.error ?? `failed ${res.status}`);
       setStock(body);
-    } catch {
-      setStock({
-        symbol: symbol.toUpperCase(),
-        name: "Reliance Industries Ltd",
-        close: "2980.50",
-        previous_close: "2945.00",
-        change: "+35.50",
-        percent_change: "+1.21",
-      });
+    } catch (e) {
+      setStockErr(String(e));
     } finally {
       setBusy(false);
     }
   }
 
-  const inputCls = "w-full rounded-xl border border-gray-200 bg-gray-50/50 px-3 py-2 text-xs text-[#132a13]";
+  const inputCls = "rounded-lg border border-border/50 bg-background px-3 py-2 text-[13px] text-foreground";
 
   return (
-    <div className="flex flex-col gap-6 text-[#132a13] pb-12">
+    <div className="flex flex-col gap-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold tracking-tight text-[#132a13] md:text-3xl">Money Tools</h1>
-        <p className="mt-1 text-xs text-gray-500">Financial calculators for retirement planning, tax regime optimization, and stock lookups.</p>
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Money Tools</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Calculators for retirement, tax and market lookups.</p>
       </div>
 
-      <div className="flex items-center gap-2 rounded-xl border border-[#7ec151]/20 bg-white p-1 w-fit shadow-sm">
+      <div className="flex gap-2">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] transition-colors ${
               tab === t.id
-                ? "bg-gradient-to-r from-[#7ec151] to-[#b2d959] text-white shadow-sm"
-                : "text-gray-600 hover:bg-[#b2d959]/15 hover:text-[#132a13]"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border/50 bg-background/60 text-muted-foreground hover:text-foreground"
             }`}
           >
             <t.icon className="h-3.5 w-3.5" />
-            <span>{t.label}</span>
+            {t.label}
           </button>
         ))}
       </div>
 
       {tab === "retirement" && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
-            <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
-              <Calculator className="h-4 w-4 text-[#7ec151]" />
-              <h2 className="text-base font-bold text-[#132a13]">Retirement Planner</h2>
-            </div>
-            <div className="mt-4 flex flex-col gap-3">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-[15px]">
+                <Calculator className="h-4 w-4 text-primary" /> Retirement plan
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="r-age" className="text-xs font-bold text-gray-700">Current Age</Label>
-                  <input id="r-age" type="number" className={inputCls} value={ret.current_age} onChange={(e) => setRet({ ...ret, current_age: e.target.value })} />
+                  <Label htmlFor="r-age" className="text-[12px]">Current age</Label>
+                  <Input id="r-age" type="number" className={inputCls} value={ret.current_age} onChange={(e) => setRet({ ...ret, current_age: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="r-retire" className="text-xs font-bold text-gray-700">Retire At</Label>
-                  <input id="r-retire" type="number" className={inputCls} value={ret.retire_age} onChange={(e) => setRet({ ...ret, retire_age: e.target.value })} />
+                  <Label htmlFor="r-retire" className="text-[12px]">Retire at</Label>
+                  <Input id="r-retire" type="number" className={inputCls} value={ret.retire_age} onChange={(e) => setRet({ ...ret, retire_age: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="r-exp" className="text-xs font-bold text-gray-700">Monthly Expense Today (₹)</Label>
-                  <input id="r-exp" type="number" className={inputCls} value={ret.monthly_expense} onChange={(e) => setRet({ ...ret, monthly_expense: e.target.value })} />
+                  <Label htmlFor="r-exp" className="text-[12px]">Monthly expense today (₹)</Label>
+                  <Input id="r-exp" type="number" className={inputCls} value={ret.monthly_expense} onChange={(e) => setRet({ ...ret, monthly_expense: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="r-sip" className="text-xs font-bold text-gray-700">Monthly SIP (₹)</Label>
-                  <input id="r-sip" type="number" className={inputCls} value={ret.monthly_sip} onChange={(e) => setRet({ ...ret, monthly_sip: e.target.value })} />
+                  <Label htmlFor="r-sip" className="text-[12px]">Monthly SIP (₹)</Label>
+                  <Input id="r-sip" type="number" className={inputCls} value={ret.monthly_sip} onChange={(e) => setRet({ ...ret, monthly_sip: e.target.value })} />
                 </div>
               </div>
-              <button
-                onClick={() => void runRetirement()}
-                disabled={busy}
-                className="mt-2 rounded-xl bg-gradient-to-r from-[#7ec151] to-[#b2d959] py-2.5 text-xs font-bold text-white shadow-sm transition-all"
-              >
-                Calculate Corpus
-              </button>
-              {retErr && <p className="text-xs text-rose-600">{retErr}</p>}
-              <p className="text-[11px] text-gray-400">Assumes 12% pre-tax equity returns, 6% inflation, and 4% safe withdrawal rate.</p>
-            </div>
-          </div>
-
+              <Button onClick={() => void runRetirement()} disabled={busy}>Calculate</Button>
+              {retErr && <p className="text-[12px] text-destructive">{retErr}</p>}
+              <p className="text-[11px] text-muted-foreground">Assumes 12% pre-tax equity returns, 6% inflation, 4% safe withdrawal rate.</p>
+            </CardContent>
+          </Card>
           {retOut && (
-            <div className="flex flex-col gap-4">
-              <ResultCard title="Projected Corpus Target" value={fmt(retOut.projected_corpus)} />
+            <div className="flex flex-col gap-3">
+              <ResultCard title="Projected corpus" value={fmt(retOut.projected_corpus)} />
               <ResultCard
-                title="Monthly Retirement Income"
+                title="Monthly retirement income"
                 value={`${fmt(retOut.monthly_retirement_income)} (${fmt(retOut.monthly_retirement_income_today)} in today's ₹)`}
               />
               <ResultCard
-                title="Monthly Shortfall vs Target"
+                title="Monthly shortfall vs current expense"
                 value={fmt(retOut.monthly_shortfall)}
-                note={retOut.monthly_shortfall > 0 ? `Top up SIP to ~${fmt(retOut.required_monthly_sip_for_full_cover)}/month to close it.` : "Fully covered — zero shortfall."}
+                note={retOut.monthly_shortfall > 0 ? `Top up SIP to ~${fmt(retOut.required_monthly_sip_for_full_cover)}/month to close it.` : "Covered — no shortfall."}
               />
             </div>
           )}
@@ -252,96 +218,89 @@ export default function ToolsPage() {
       )}
 
       {tab === "tax" && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
-            <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
-              <Percent className="h-4 w-4 text-[#7ec151]" />
-              <h2 className="text-base font-bold text-[#132a13]">Old vs New Tax Regime (FY 2026-27)</h2>
-            </div>
-            <div className="mt-4 flex flex-col gap-3">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-[15px]">
+                <Percent className="h-4 w-4 text-primary" /> Old vs new regime (FY 2026-27)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="t-income" className="text-xs font-bold text-gray-700">Annual Income (₹)</Label>
-                  <input id="t-income" type="number" className={inputCls} value={tax.annual_income} onChange={(e) => setTax({ ...tax, annual_income: e.target.value })} />
+                  <Label htmlFor="t-income" className="text-[12px]">Annual income (₹)</Label>
+                  <Input id="t-income" type="number" className={inputCls} value={tax.annual_income} onChange={(e) => setTax({ ...tax, annual_income: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="t-80c" className="text-xs font-bold text-gray-700">80C Invested (₹, max 1.5L)</Label>
-                  <input id="t-80c" type="number" className={inputCls} value={tax.s80c} onChange={(e) => setTax({ ...tax, s80c: e.target.value })} />
+                  <Label htmlFor="t-80c" className="text-[12px]">80C invested (₹, max 1.5L)</Label>
+                  <Input id="t-80c" type="number" className={inputCls} value={tax.s80c} onChange={(e) => setTax({ ...tax, s80c: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="t-basic" className="text-xs font-bold text-gray-700">Basic + DA (₹/month)</Label>
-                  <input id="t-basic" type="number" className={inputCls} value={tax.basic_da} onChange={(e) => setTax({ ...tax, basic_da: e.target.value })} />
+                  <Label htmlFor="t-basic" className="text-[12px]">Basic + DA (₹/month)</Label>
+                  <Input id="t-basic" type="number" className={inputCls} value={tax.basic_da} onChange={(e) => setTax({ ...tax, basic_da: e.target.value })} />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="t-hra" className="text-xs font-bold text-gray-700">HRA Received (₹/month)</Label>
-                  <input id="t-hra" type="number" className={inputCls} value={tax.hra} onChange={(e) => setTax({ ...tax, hra: e.target.value })} />
+                  <Label htmlFor="t-hra" className="text-[12px]">HRA received (₹/month)</Label>
+                  <Input id="t-hra" type="number" className={inputCls} value={tax.hra} onChange={(e) => setTax({ ...tax, hra: e.target.value })} />
                 </div>
                 <div className="col-span-2 flex flex-col gap-1.5">
-                  <Label htmlFor="t-rent" className="text-xs font-bold text-gray-700">Rent Paid (₹/month)</Label>
-                  <input id="t-rent" type="number" className={inputCls} value={tax.rent_paid} onChange={(e) => setTax({ ...tax, rent_paid: e.target.value })} />
+                  <Label htmlFor="t-rent" className="text-[12px]">Rent paid (₹/month)</Label>
+                  <Input id="t-rent" type="number" className={inputCls} value={tax.rent_paid} onChange={(e) => setTax({ ...tax, rent_paid: e.target.value })} />
                 </div>
               </div>
-              <button
-                onClick={() => void runTax()}
-                disabled={busy}
-                className="mt-2 rounded-xl bg-gradient-to-r from-[#7ec151] to-[#b2d959] py-2.5 text-xs font-bold text-white shadow-sm transition-all"
-              >
-                Compare Tax Regimes
-              </button>
-            </div>
-          </div>
-
+              <Button onClick={() => void runTax()} disabled={busy}>Compare regimes</Button>
+              {taxErr && <p className="text-[12px] text-destructive">{taxErr}</p>}
+            </CardContent>
+          </Card>
           {taxOut && (
-            <div className="flex flex-col gap-4">
-              <ResultCard title="New Regime Tax Payable" value={fmt(taxOut.new_regime_tax)} />
-              <ResultCard title="Old Regime Tax Payable" value={fmt(taxOut.old_regime_tax)} />
+            <div className="flex flex-col gap-3">
+              <ResultCard title="New regime tax" value={fmt(taxOut.new_regime_tax)} />
+              <ResultCard title="Old regime tax" value={fmt(taxOut.old_regime_tax)} />
               <ResultCard
-                title="Recommended Regime"
-                value={taxOut.better_regime === "new" ? "New Tax Regime" : "Old Tax Regime"}
-                note={taxOut.saving_if_switch > 0 ? `Save ${fmt(taxOut.saving_if_switch)}/year by choosing this regime.` : "Both regimes yield equal tax."}
+                title="Better regime"
+                value={taxOut.better_regime === "new" ? "New regime" : "Old regime"}
+                note={taxOut.saving_if_switch > 0 ? `Save ${fmt(taxOut.saving_if_switch)}/yr by switching.` : "No meaningful difference."}
               />
+              {taxOut.s80c_headroom > 0 && (
+                <ResultCard title="80C headroom left" value={fmt(taxOut.s80c_headroom)} note="PPF, ELSS or EPF contributions qualify." />
+              )}
             </div>
           )}
         </div>
       )}
 
       {tab === "stock" && (
-        <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm max-w-xl">
-          <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
-            <LineChart className="h-4 w-4 text-[#7ec151]" />
-            <h2 className="text-base font-bold text-[#132a13]">Stock Quote Lookup</h2>
-          </div>
-          <div className="mt-4 flex flex-col gap-3">
+        <Card className="max-w-xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-[15px]">
+              <LineChart className="h-4 w-4 text-primary" /> Stock quote (Twelve Data)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
             <div className="flex gap-2">
-              <input
+              <Input
                 placeholder="e.g. RELIANCE.NSE, TCS.BSE"
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && void runStock()}
-                className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-[#132a13]"
               />
-              <button
-                onClick={() => void runStock()}
-                disabled={busy || !symbol.trim()}
-                className="rounded-xl bg-gradient-to-r from-[#7ec151] to-[#b2d959] px-4 py-2 text-xs font-bold text-white shadow-sm transition-all"
-              >
-                Lookup
-              </button>
+              <Button onClick={() => void runStock()} disabled={busy || !symbol.trim()}>Look up</Button>
             </div>
-
+            {stockErr && <p className="text-[12px] text-destructive">{stockErr}</p>}
             {stock && stock.close && (
-              <div className="grid grid-cols-2 gap-4 mt-2">
+              <div className="grid grid-cols-2 gap-3">
                 <ResultCard title="Symbol" value={stock.symbol} />
                 <ResultCard title="Name" value={stock.name ?? stock.symbol} />
-                <ResultCard title="Last Close" value={fmt(parseFloat(stock.close))} />
+                <ResultCard title="Last close" value={fmt(parseFloat(stock.close))} />
                 <ResultCard
-                  title="Day Change"
+                  title="Change"
                   value={`${stock.change ?? "0"} (${stock.percent_change ?? "0"}%)`}
                 />
               </div>
             )}
-          </div>
-        </div>
+            <p className="text-[11px] text-muted-foreground">Use symbols like RELIANCE.NSE (NSE) or TCS.BSE (BSE).</p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

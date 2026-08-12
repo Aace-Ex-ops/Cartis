@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Search, CheckCircle2, Clock, Ban } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import type { Verdict } from "@/lib/mock";
 
-const VERDICT_STYLE: Record<Verdict, { label: string; cls: string; icon: React.ComponentType<{ className?: string }> }> = {
-  buy: { label: "Buy", cls: "bg-[#b2d959]/50 text-[#132a13] border-[#7ec151]/40 font-extrabold", icon: CheckCircle2 },
-  wait: { label: "Wait", cls: "bg-[#fed24f]/60 text-[#854d0e] border-[#fed24f] font-extrabold", icon: Clock },
-  skip: { label: "Skip", cls: "bg-rose-100 text-rose-800 border-rose-200 font-extrabold", icon: Ban },
+const VERDICT_STYLE: Record<Verdict, { label: string; cls: string }> = {
+  buy: { label: "Buy", cls: "bg-primary/15 text-primary hover:bg-primary/15" },
+  wait: { label: "Wait", cls: "bg-amber-500/15 text-amber-600 hover:bg-amber-500/15" },
+  skip: { label: "Skip", cls: "bg-destructive/15 text-destructive hover:bg-destructive/15" },
 };
 
 const FILTERS: ("all" | Verdict)[] = ["all", "buy", "wait", "skip"];
@@ -25,67 +26,49 @@ export function AnalysisList({ analyses }: {
   );
 
   return (
-    <div className="flex flex-col gap-4 text-[#132a13]">
-      {/* Controls Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 rounded-xl border border-[#7ec151]/20 bg-white p-1 shadow-sm">
-          {FILTERS.map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-bold capitalize transition-all ${
-                filter === f
-                  ? "bg-gradient-to-r from-[#7ec151] to-[#b2d959] text-white shadow-sm"
-                  : "text-gray-600 hover:bg-[#b2d959]/15 hover:text-[#132a13]"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-
-        <div className="relative w-full sm:w-64">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#7ec151]" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search products…"
-            className="w-full rounded-xl border border-[#7ec151]/20 bg-white py-2 pl-9 pr-3 text-xs text-[#132a13] placeholder:text-gray-400 shadow-sm transition-all focus:border-[#7ec151] focus:outline-none focus:ring-1 focus:ring-[#7ec151]"
-          />
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {FILTERS.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`rounded-md px-3 py-1.5 text-[13px] capitalize transition-colors ${
+              filter === f
+                ? "bg-foreground/10 font-medium text-foreground"
+                : "text-muted-foreground hover:bg-foreground/5"
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search products…"
+          className="ml-auto w-56"
+        />
       </div>
 
-      {/* Analysis List Container */}
-      <div className="flex flex-col divide-y divide-gray-100 rounded-2xl border border-[#7ec151]/20 bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col divide-y divide-border/50 rounded-xl border border-border/50 bg-card">
         {filtered.length === 0 && (
-          <div className="py-12 text-center text-xs text-gray-500">
-            No analysis verdicts match your search filter.
+          <div className="py-12 text-center text-[13px] text-muted-foreground">
+            No analyses match.
           </div>
         )}
         {filtered.map((a) => {
           const v = VERDICT_STYLE[a.verdict];
-          const VerdictIcon = v.icon;
           return (
-            <div
-              key={a.id}
-              className="flex flex-col gap-2 p-4 transition-colors hover:bg-[#b2d959]/10 sm:flex-row sm:items-center sm:justify-between sm:gap-6"
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <span className="text-sm font-bold text-[#132a13]">{a.product}</span>
-                  <span className="text-xs font-black tabular-nums text-[#132a13] bg-[#b2d959]/30 px-2 py-0.5 rounded-md border border-[#7ec151]/30">
-                    ₹{a.price.toLocaleString("en-IN")}
-                  </span>
+            <div key={a.id} className="flex flex-col gap-1 px-4 py-3.5 transition-colors hover:bg-foreground/[0.03] sm:flex-row sm:items-center sm:gap-4">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[14px] font-medium text-foreground">{a.product}</span>
+                  <span className="text-[13px] tabular-nums text-muted-foreground">₹{a.price.toLocaleString("en-IN")}</span>
                 </div>
-                <p className="text-xs text-gray-600 leading-relaxed">{a.summary}</p>
+                <span className="text-[12px] text-muted-foreground">{a.summary}</span>
               </div>
-
-              <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
-                <span className="text-[11px] font-semibold text-gray-400">{a.date}</span>
-                <div className={`flex items-center gap-1.5 rounded-xl border px-3 py-1 text-xs ${v.cls}`}>
-                  <VerdictIcon className="h-3.5 w-3.5" />
-                  <span>{v.label}</span>
-                </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[12px] text-muted-foreground">{a.date}</span>
+                <Badge className={`min-w-12 justify-center ${v.cls}`}>{v.label}</Badge>
               </div>
             </div>
           );
