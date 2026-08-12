@@ -117,7 +117,8 @@ impl QueryRoot {
                  FROM users u
                  LEFT JOIN ledger_entries l ON l.user_id = u.user_id
                     AND l.account_type = 'budget'
-                    AND l.created_at >= date_trunc('month', now())
+                    AND l.transaction_type = 'debit'
+                    AND COALESCE(l.transaction_date, l.created_at) >= date_trunc('month', now())
                  WHERE u.user_id::text = $1
                  GROUP BY u.user_id",
                 &[&uid],
@@ -134,10 +135,11 @@ impl QueryRoot {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
-                "SELECT to_char(created_at, 'DD') AS day, COALESCE(SUM(amount), 0)::float8 AS spend
+                "SELECT to_char(COALESCE(transaction_date, created_at), 'DD') AS day, COALESCE(SUM(amount), 0)::float8 AS spend
                  FROM ledger_entries
                  WHERE user_id::text = $1 AND account_type = 'budget'
-                   AND created_at >= now() - interval '30 days'
+                   AND transaction_type = 'debit'
+                   AND COALESCE(transaction_date, created_at) >= now() - interval '30 days'
                  GROUP BY 1 ORDER BY 1",
                 &[&uid],
             )
@@ -166,7 +168,7 @@ impl QueryRoot {
             .query(
                 "SELECT transaction_type, amount::float8, description, transaction_date::text, created_at::text
                  FROM ledger_entries WHERE user_id::text = $1
-                 ORDER BY created_at DESC LIMIT $2::int4",
+                 ORDER BY COALESCE(transaction_date, created_at) DESC LIMIT $2::int4",
                 &[&uid, &limit.unwrap_or(10)],
             )
             .await?;
@@ -1307,6 +1309,15 @@ impl MutationRoot {
                 account_id = Some(new_id);
             }
             last_balance = Some(acct.balance);
+        }
+
+        // Reflect the synced bank balance on the wallet card.
+        if let Some(balance) = last_balance {
+            tx.execute(
+                "UPDATE users SET wallet_balance = $2::text::numeric, updated_at = NOW()
+                 WHERE user_id::text = $1",
+                &[&uid, &balance.to_string()],
+            ).await?;
         }
 
         // Insert transactions

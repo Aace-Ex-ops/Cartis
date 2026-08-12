@@ -97,11 +97,11 @@ export function AaReconnect({ onSynced }: { onSynced?: () => void }) {
         method: "POST",
         credentials: "include",
       });
-      const body = (await res.json()) as { ok?: boolean; balance?: number; transactionCount?: number; error?: string };
+      const body = (await res.json()) as { ok?: boolean; balance?: number; transactionCount?: number; incomeCount?: number; error?: string };
       if (!res.ok || !body.ok) {
         setResult({ ok: false, message: body.error ?? "Re-sync failed" });
       } else {
-        setResult({ ok: true, message: `Synced ${body.transactionCount ?? 0} transactions · balance ₹${(body.balance ?? 0).toLocaleString("en-IN")}` });
+        setResult({ ok: true, message: `Synced ${body.transactionCount ?? 0} transactions · ${body.incomeCount ?? 0} income streams · balance ₹${(body.balance ?? 0).toLocaleString("en-IN")}` });
         onSynced?.();
       }
     } catch {
@@ -137,11 +137,11 @@ export function AaLinkRest({ onSynced }: { onSynced?: () => void }) {
         method: "POST",
         credentials: "include",
       });
-      const body = (await res.json()) as { ok?: boolean; balance?: number; transactionCount?: number; error?: string };
+      const body = (await res.json()) as { ok?: boolean; balance?: number; transactionCount?: number; incomeCount?: number; error?: string };
       if (!res.ok || !body.ok) {
         setResult({ ok: false, message: body.error ?? "Link failed" });
       } else {
-        setResult({ ok: true, message: `New account linked · synced ${body.transactionCount ?? 0} transactions · balance ₹${(body.balance ?? 0).toLocaleString("en-IN")}` });
+        setResult({ ok: true, message: `New account linked · synced ${body.transactionCount ?? 0} transactions · ${body.incomeCount ?? 0} income streams · balance ₹${(body.balance ?? 0).toLocaleString("en-IN")}` });
         onSynced?.();
       }
     } catch {

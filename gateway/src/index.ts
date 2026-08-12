@@ -289,7 +289,15 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
   return { accounts, transactions, income }
 }
 
-async function syncYodleeData(c: { env: Env }, userId: string) {
+type YodleeSyncPayload = {
+  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string }[]
+  transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]
+  income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]
+}
+
+// One shared Yodlee fetch (accounts + transactions + income) — the sandbox
+// world is shared (YODLEE_TEST_LOGIN), so the cron fetches once and fans out.
+async function fetchYodleeData(c: { env: Env }): Promise<YodleeSyncPayload> {
   const from = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10)
   const to = new Date().toISOString().slice(0, 10)
   const accountsRes = await yodleeFetch(c, '/accounts')
@@ -301,10 +309,20 @@ async function syncYodleeData(c: { env: Env }, userId: string) {
   const statuses = rawAccounts.map((a) => (a as { providerAccountStatus?: string }).providerAccountStatus ?? 'UNKNOWN')
   const refreshStatus = await refreshProviderAccounts(c, providerAccountIds, statuses)
   const txnsRes = await yodleeFetch(c, `/transactions?fromDate=${from}&toDate=${to}&top=500${providerAccountIds.length ? `&providerAccountId=${providerAccountIds.join(',')}` : ''}`)
-  const incomeRes = await yodleeFetch(c, `/income?fromDate=${from}&toDate=${to}`).catch(() => null)
-  const { accounts, transactions, income } = parseYodleeFetch({ account: rawAccounts, transaction: txnsRes.transaction as unknown[] | undefined, income: incomeRes?.income as unknown[] | undefined })
-  console.log(`[yodlee] accounts=${accounts.length} providerAccounts=${providerAccountIds.join(',')} paStatus=${refreshStatus} txns=${transactions.length} income=${income.length}`)
+  let income: unknown[] = []
+  try {
+    const incomeRes = await yodleeFetch(c, `/income?fromDate=${from}&toDate=${to}`)
+    income = incomeRes.income as unknown[] | undefined ?? []
+  } catch (e) {
+    // Income is best-effort (entitlement / fixture-dependent) — never fatal, but visible.
+    console.log('[yodlee] income fetch failed (continuing):', String(e))
+  }
+  const parsed = parseYodleeFetch({ account: rawAccounts, transaction: txnsRes.transaction as unknown[] | undefined, income })
+  console.log(`[yodlee] accounts=${parsed.accounts.length} providerAccounts=${providerAccountIds.join(',')} paStatus=${refreshStatus} txns=${parsed.transactions.length} income=${parsed.income.length}`)
+  return parsed
+}
 
+async function writeAaSync(c: { env: Env }, userId: string, data: YodleeSyncPayload) {
   const syncRes = (await backendGql(
     c,
     `mutation SyncAa($aaHandle: String!, $consentId: String!, $accounts: [AaAccountInput!]!, $transactions: [AaTxInput!]!, $income: [AaIncomeInput!]!) {
@@ -313,12 +331,10 @@ async function syncYodleeData(c: { env: Env }, userId: string) {
       }
     }`,
     userId,
-    { aaHandle: 'yodlee', consentId: 'yodlee', accounts, transactions, income },
+    { aaHandle: 'yodlee', consentId: 'yodlee', accounts: data.accounts, transactions: data.transactions, income: data.income },
   )) as { syncAaData?: { inserted: number; balance: number | null; accountId: string | null } }
-
   if (!syncRes?.syncAaData) throw new Error('Backend sync failed — no data written')
-  if (accounts.length === 0) throw new Error('No bank accounts found to sync — try again later')
-  return { accounts, transactions, syncRes }
+  return syncRes.syncAaData
 }
 
 function cookieToken(c: { req: { header: (n: string) => string | undefined } }) {
@@ -676,6 +692,144 @@ app.post('/api/email', async (c) => {
     return c.json({ error: `resend ${res.status}`, detail: body.slice(0, 300) }, 502)
   }
   return c.json({ ok: true })
+})
+
+// TEMP sweep: which sandbox login has transactions/income data. Remove after use.
+app.post('/api/internal/yodlee-sweep', async (c) => {
+  const secret = c.req.header('x-cartis-backend-secret')
+  if (!secret || secret !== c.env.BACKEND_SECRET) return c.json({ error: 'unauthorized' }, 401)
+  const { logins, deep, siteCreds, refresh } = (await c.req.json().catch(() => ({}))) as { logins?: string[]; deep?: boolean; siteCreds?: string[]; refresh?: boolean }
+  if (!logins?.length) return c.json({ error: 'logins required' }, 400)
+  const from = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10)
+  const to = new Date().toISOString().slice(0, 10)
+  const results: Record<string, unknown>[] = []
+  const fetchJ = async (token: string, path: string): Promise<{ status: number; json: Record<string, unknown> }> => {
+    const res = await fetch(`${c.env.YODLEE_BASE_URL}${path}`, { headers: { 'Authorization': `Bearer ${token}`, 'Api-Version': '1.1', 'Content-Type': 'application/json' } })
+    return { status: res.status, json: (await res.json().catch(() => ({}))) as Record<string, unknown> }
+  }
+  const tokenFor = async (login: string): Promise<string> => {
+    const cached = await c.env.SESSIONS.get(`yodlee:token:${login}`)
+    if (cached) return cached
+    const res = await fetch(`${c.env.YODLEE_BASE_URL}/auth/token`, {
+      method: 'POST',
+      headers: { 'loginName': login, 'Content-Type': 'application/x-www-form-urlencoded', 'Api-Version': '1.1' },
+      body: `clientId=${encodeURIComponent(c.env.YODLEE_CLIENT_ID)}&secret=${encodeURIComponent(c.env.YODLEE_SECRET)}`,
+    })
+    if (!res.ok) throw new Error(`Yodlee auth error ${res.status}: ${await res.text()}`)
+    const data = (await res.json()) as { token?: { accessToken?: string } }
+    if (!data?.token?.accessToken) throw new Error('No accessToken')
+    await c.env.SESSIONS.put(`yodlee:token:${login}`, data.token.accessToken, { expirationTtl: 1500 })
+    return data.token.accessToken
+  }
+  const linkAndCount = async (token: string, creds: [string, string], relinkPaId?: number): Promise<Record<string, unknown>> => {
+    const out: Record<string, unknown> = {}
+    let paId = relinkPaId
+    if (paId) {
+      const rel = await fetchJ(token, `/providerAccounts/${paId}`)
+      const update = await fetch(`${c.env.YODLEE_BASE_URL}/providerAccounts/${paId}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Api-Version': '1.1', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerAccount: { loginForm: [{ id: 1, value: creds[0] }, { id: 2, value: creds[1] }] } }),
+      })
+      out.relinkStatus = update.status
+    } else {
+      const prov = await fetchJ(token, '/providers/16441')
+      out.provStatus = prov.status
+      const vf = (p: unknown): string | undefined => {
+        void p
+        return undefined
+      }
+      void vf
+      let payload: unknown
+      const forms = Array.isArray(prov.json.provider) ? (prov.json.provider as { loginForm?: unknown }[])[0]?.loginForm : undefined
+      const lf = (Array.isArray(forms) ? forms[0] : undefined) as { id?: number; row?: { id?: number; field?: { id?: number; name?: string }[] }[] } | undefined
+      const fieldIds = lf?.row?.flatMap((r) => r.field ?? []).map((f) => f.id).filter((v): v is number => typeof v === 'number')
+      if (fieldIds && fieldIds.length >= 2) {
+        let u = 0
+        payload = { providerAccount: { loginForm: fieldIds.slice(0, 2).map((id) => ({ id, value: u++ === 0 ? creds[0] : creds[1] })) } }
+      } else {
+        payload = { providerAccount: { loginForm: [{ id: 1, value: creds[0] }, { id: 2, value: creds[1] }] } }
+      }
+      const createRes = await fetch(`${c.env.YODLEE_BASE_URL}/providerAccounts?providerId=16441`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Api-Version': '1.1', 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      out.createStatus = createRes.status
+      const createJson = (await createRes.json().catch(() => ({}))) as { providerAccount?: { id?: number }; error?: { message?: string } }
+      out.createError = JSON.stringify(createJson).slice(0, 400)
+      paId = createJson.providerAccount?.id
+      if (!paId) return out
+      out.paId = paId
+    }
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 5000))
+      const st = await fetchJ(token, `/providerAccounts?providerAccountIds=${paId}`)
+      const status = ((st.json.providerAccount ?? []) as { status?: string }[])[0]?.status
+      if (i === 0) out.firstStatus = status
+      if (['LOGIN_SUCCESS', 'FAILED', 'SUCCESS'].includes(status ?? '')) { out.finalStatus = status; break }
+    }
+    if (out.finalStatus !== 'LOGIN_SUCCESS' && out.finalStatus !== 'SUCCESS') { out.agg = 'no-success'; return out }
+    const txn = await fetchJ(token, `/transactions?fromDate=${from}&toDate=${to}&top=500&providerAccountId=${paId}`)
+    out.txns = ((txn.json.transaction ?? []) as unknown[]).length
+    const acc = await fetchJ(token, '/accounts')
+    out.accounts = ((acc.json.account ?? []) as unknown[]).length
+    const inc = await fetchJ(token, `/income?fromDate=${from}&toDate=${to}`)
+    out.incomeStatus = inc.status
+    out.income = ((inc.json.income ?? []) as unknown[]).length
+    return out
+  }
+  for (const login of logins) {
+    const out: Record<string, unknown> = { login }
+    try {
+      const token = await tokenFor(login)
+      const acc = await fetchJ(token, '/accounts')
+      out.accountsStatus = acc.status
+      out.accounts = ((acc.json.account ?? []) as unknown[]).length
+      const txn = await fetchJ(token, `/transactions?fromDate=${from}&toDate=${to}&top=500`)
+      out.txnsStatus = txn.status
+      out.txns = ((txn.json.transaction ?? []) as unknown[]).length
+      const inc = await fetchJ(token, `/income?fromDate=${from}&toDate=${to}`)
+      out.incomeStatus = inc.status
+      out.income = ((inc.json.income ?? []) as unknown[]).length
+      if (refresh) {
+        out.allTime = ((await (await fetch(`${c.env.YODLEE_BASE_URL}/transactions?top=500`, { headers: { 'Authorization': `Bearer ${token}`, 'Api-Version': '1.1' } })).json().catch(() => ({}))) as { transaction?: unknown[] }).transaction?.length ?? 0
+        const ids = ((acc.json.account ?? []) as { providerAccountId?: number }[])
+          .map((a) => a.providerAccountId).filter((v): v is number => typeof v === 'number')
+        const uniqIds = Array.from(new Set(ids))
+        const rf = await fetch(`${c.env.YODLEE_BASE_URL}/providerAccounts?providerAccountIds=${uniqIds.join(',')}`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}`, 'Api-Version': '1.1', 'Content-Type': 'application/json' },
+        })
+        out.refreshStatus = rf.status
+        const rfErr = (await rf.json().catch(() => ({}))) as { error?: { message?: string } }
+        if (!rf.ok) { out.refreshError = JSON.stringify(rfErr).slice(0, 300) }
+        if (rf.ok) {
+          for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 5000))
+            const st = await fetchJ(token, `/providerAccounts?providerAccountIds=${uniqIds.join(',')}`)
+            const statuses = ((st.json.providerAccount ?? []) as { status?: string }[]).map((p) => p.status)
+            out.poll = `${i}:${statuses.join('|')}`
+            if (statuses.every((s) => ['LOGIN_SUCCESS', 'SUCCESS', 'FAILED'].includes(s ?? ''))) break
+          }
+          const txn2 = await fetchJ(token, `/transactions?fromDate=${from}&toDate=${to}&top=500`)
+          out.txnsAfterRefresh = ((txn2.json.transaction ?? []) as unknown[]).length
+        }
+      }
+      if (deep) {
+        const creds = (siteCreds?.length === 2 ? siteCreds : [logins[0], logins[0]]) as [string, string]
+        out.deepCreate = await linkAndCount(token, creds)
+        const acc = await fetchJ(token, '/accounts')
+        const existing = ((acc.json.account ?? []) as { providerAccountId?: number }[])
+          .map((a) => a.providerAccountId).filter((v): v is number => typeof v === 'number')
+        out.deepRelink = existing.length ? await linkAndCount(token, creds, existing[0]) : 'no-existing'
+      }
+    } catch (e) {
+      out.error = String(e)
+    }
+    results.push(out)
+  }
+  return c.json({ results })
 })
 
 app.post('/api/session/refresh', auth, (c) => {
@@ -1181,12 +1335,15 @@ app.get('/api/aa/status/:consentId', auth, async (c) => {
 app.post('/api/aa/fetch', auth, async (c) => {
   const userId = c.get('session').user_id
   try {
-    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
+    const data = await fetchYodleeData(c)
+    if (data.accounts.length === 0) throw new Error('No bank accounts found to sync — try again later')
+    const syncRes = await writeAaSync(c, userId, data)
     return c.json({
       ok: true,
-      accounts,
-      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
-      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+      accounts: data.accounts,
+      balance: syncRes.balance ?? data.accounts[0]?.balance ?? null,
+      transactionCount: syncRes.inserted ?? data.transactions.length,
+      incomeCount: data.income.length,
     })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
@@ -1196,12 +1353,15 @@ app.post('/api/aa/fetch', auth, async (c) => {
 app.post('/api/aa/reconnect', auth, async (c) => {
   const userId = c.get('session').user_id
   try {
-    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
+    const data = await fetchYodleeData(c)
+    if (data.accounts.length === 0) throw new Error('No bank accounts found to sync — try again later')
+    const syncRes = await writeAaSync(c, userId, data)
     return c.json({
       ok: true,
-      accounts,
-      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
-      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+      accounts: data.accounts,
+      balance: syncRes.balance ?? data.accounts[0]?.balance ?? null,
+      transactionCount: syncRes.inserted ?? data.transactions.length,
+      incomeCount: data.income.length,
     })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
@@ -1238,12 +1398,14 @@ app.post('/api/aa/link-rest', auth, async (c) => {
     }
     if (status !== 'LOGIN_SUCCESS') throw new Error(`Link aggregation ${status} — try again in a minute`)
 
-    const { accounts, transactions, syncRes } = await syncYodleeData(c, userId)
+    const data = await fetchYodleeData(c)
+    const syncRes = await writeAaSync(c, userId, data)
     return c.json({
       ok: true,
-      accounts,
-      balance: syncRes?.syncAaData?.balance ?? accounts[0]?.balance ?? null,
-      transactionCount: syncRes?.syncAaData?.inserted ?? transactions.length,
+      accounts: data.accounts,
+      balance: syncRes.balance ?? data.accounts[0]?.balance ?? null,
+      transactionCount: syncRes.inserted ?? data.transactions.length,
+      incomeCount: data.income.length,
     })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
@@ -1667,4 +1829,44 @@ app.all('*', async (c) => {
   })
 })
 
-export default app
+// Daily Yodlee sync (05:30 UTC = 11:00 IST): fetch the shared sandbox world
+// once, fan out to every user with an AA connection.
+async function syncAll(env: Env) {
+  if (await env.SESSIONS.get('yodlee:cron:lock')) {
+    console.log('[yodlee] cron skipped — previous run in flight')
+    return
+  }
+  await env.SESSIONS.put('yodlee:cron:lock', '1', { expirationTtl: 1800 })
+  try {
+    const c = { env }
+    const usersRes = await fetch(`${env.BACKEND_URL}/api/internal/aa-users`, {
+      headers: { 'x-cartis-backend-secret': env.BACKEND_SECRET },
+    })
+    if (!usersRes.ok) throw new Error(`aa-users ${usersRes.status}`)
+    const uids = (await usersRes.json()) as string[]
+    if (uids.length === 0) {
+      console.log('[yodlee] cron: no AA users to sync')
+      return
+    }
+    const data = await fetchYodleeData(c)
+    for (const uid of uids) {
+      try {
+        await writeAaSync(c, uid, data)
+        console.log(`[yodlee] cron synced ${uid.slice(0, 8)}`)
+      } catch (e) {
+        console.log(`[yodlee] cron write failed ${uid.slice(0, 8)}:`, String(e))
+      }
+    }
+  } catch (e) {
+    console.log('[yodlee] cron failed:', String(e))
+  } finally {
+    await env.SESSIONS.delete('yodlee:cron:lock')
+  }
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(syncAll(env))
+  },
+}

@@ -70,6 +70,7 @@ async fn main() {
         .route("/api/admin/subscriptions", axum::routing::get(admin::subscriptions))
         .route("/api/admin/emails", axum::routing::get(admin::emails))
         .route("/api/admin/logins", axum::routing::get(admin::logins))
+        .route("/api/internal/aa-users", axum::routing::get(admin::aa_users))
         .route("/setu-proxy", post(setu_proxy))
         .route("/plan/update", post(plan_update))
         .with_state(state.clone())

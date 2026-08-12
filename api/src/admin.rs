@@ -277,3 +277,20 @@ pub async fn logins(
             .collect(),
     ))
 }
+
+// Internal (cron) route: user ids that have an AA connection — the daily
+// Yodlee sync fan-out list. Gated by the backend secret middleware in main.rs.
+pub async fn aa_users(State(state): State<Arc<AppState>>) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    let rows = state
+        .pg
+        .get()
+        .await
+        .map_err(db_err)?
+        .query(
+            "SELECT user_id::text FROM aa_connections ORDER BY last_fetched_at DESC",
+            &[],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(Json(rows.iter().map(|r| r.get(0)).collect()))
+}
