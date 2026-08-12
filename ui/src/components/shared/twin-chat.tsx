@@ -60,12 +60,35 @@ type PurchaseCapture = {
   explanation?: string;
 };
 
+type IncomeCapture = {
+  entry_type: string;
+  amount: number;
+  category: string;
+  description?: string;
+};
+
+type ExpenseCapture = {
+  entry_type: string;
+  amount: number;
+  category: string;
+  description?: string;
+};
+
+type InventoryCapture = {
+  name: string;
+  stock: number;
+  unit_cost?: number;
+};
+
 type Captures = {
   goal?: GoalCapture;
   holding?: HoldingCapture;
   profile?: ProfileCapture;
   budget?: BudgetCapture;
   purchase?: PurchaseCapture;
+  income?: IncomeCapture;
+  expense?: ExpenseCapture;
+  inventory?: InventoryCapture;
 };
 
 const GOAL_LABELS: Record<string, string> = {
@@ -456,6 +479,73 @@ export function TwinChat({
     }
   };
 
+  const saveIncome = async () => {
+    const income = captures.income;
+    if (!income) return;
+    try {
+      await gql(
+        `mutation($input: FinanceEntryInput!) {
+          addFinanceEntry(input: $input) { entryId }
+        }`,
+        {
+          input: {
+            entryType: income.entry_type,
+            amount: income.amount,
+            category: income.category,
+            description: income.description ?? income.category,
+            transactionDate: new Date().toISOString().slice(0, 10),
+          },
+        },
+      );
+      setCaptures((c) => ({ ...c, income: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
+    } catch {
+      setError("Couldn't record income — try again.");
+    }
+  };
+
+  const saveExpense = async () => {
+    const expense = captures.expense;
+    if (!expense) return;
+    try {
+      await gql(
+        `mutation($input: FinanceEntryInput!) {
+          addFinanceEntry(input: $input) { entryId }
+        }`,
+        {
+          input: {
+            entryType: expense.entry_type,
+            amount: expense.amount,
+            category: expense.category,
+            description: expense.description ?? expense.category,
+            transactionDate: new Date().toISOString().slice(0, 10),
+          },
+        },
+      );
+      setCaptures((c) => ({ ...c, expense: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
+    } catch {
+      setError("Couldn't record expense — try again.");
+    }
+  };
+
+  const saveInventory = async () => {
+    const item = captures.inventory;
+    if (!item) return;
+    try {
+      await gql(
+        `mutation($name: String!, $stock: Int!, $unitCost: Float!) {
+          addInventoryItem(sku: "SKU-${Date.now()}", name: $name, stock: $stock, reorderLevel: 0, unitCost: $unitCost) { itemId }
+        }`,
+        { name: item.name, stock: Math.floor(item.stock), unitCost: item.unit_cost ?? 0 },
+      );
+      setCaptures((c) => ({ ...c, inventory: undefined }));
+      window.dispatchEvent(new Event(DATA_CHANGED_EVENT));
+    } catch {
+      setError("Couldn't add to inventory — try again.");
+    }
+  };
+
   const runSuggestion = (s: { id: string; prompt: string }) => {
     setTool(s.id || null);
     void send(s.prompt);
@@ -600,8 +690,41 @@ export function TwinChat({
                   </div>
                 </div>
               ))}
-              {(captures.goal || captures.holding || captures.profile || captures.budget || captures.purchase) && (
+              {(captures.goal || captures.holding || captures.profile || captures.budget || captures.purchase || captures.income || captures.expense || captures.inventory) && (
                 <>
+                  {captures.income && (
+                    <CaptureCard
+                      title="Record income"
+                      meta={`${inr(captures.income.amount)} · ${captures.income.category}${
+                        captures.income.description ? ` — ${captures.income.description}` : ""
+                      }`}
+                      saveLabel="Save income"
+                      onSave={() => void saveIncome()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, income: undefined }))}
+                    />
+                  )}
+                  {captures.expense && (
+                    <CaptureCard
+                      title="Record expense"
+                      meta={`${inr(captures.expense.amount)} · ${captures.expense.category}${
+                        captures.expense.description ? ` — ${captures.expense.description}` : ""
+                      }`}
+                      saveLabel="Save expense"
+                      onSave={() => void saveExpense()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, expense: undefined }))}
+                    />
+                  )}
+                  {captures.inventory && (
+                    <CaptureCard
+                      title="Add to inventory"
+                      meta={`${captures.inventory.name} · ${Math.floor(captures.inventory.stock)} units${
+                        typeof captures.inventory.unit_cost === "number" ? ` @ ${inr(captures.inventory.unit_cost)}` : ""
+                      }`}
+                      saveLabel="Save item"
+                      onSave={() => void saveInventory()}
+                      onDismiss={() => setCaptures((c) => ({ ...c, inventory: undefined }))}
+                    />
+                  )}
                   {captures.purchase && (
                     <CaptureCard
                       title={captures.purchase.name}

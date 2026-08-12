@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useLiveData } from "@/lib/use-live-data";
 import {
   AlertTriangle,
   Download,
@@ -105,36 +106,35 @@ export default function AdvisorPage() {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [h, s, e] = await Promise.all([
-        fetch(`${GATEWAY}/api/advisor/health`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ businessType: type }),
-        }),
-        fetch(`${GATEWAY}/api/advisor/strategies`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ businessType: type }),
-        }),
-        fetch(`${GATEWAY}/api/advisor/entitlement`, { credentials: "include" }),
-      ]);
-      if (cancelled) return;
-      if (!h.ok) return setFailed(true);
-      setHealth((await h.json()) as Health);
-      if (s.ok) setStrategies((await s.json()) as Strategies);
-      if (e.ok) setPro(((await e.json()) as { plan?: string }).plan !== "free");
-    })().catch(() => {
-      if (!cancelled) setFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    const [h, s, e] = await Promise.all([
+      fetch(`${GATEWAY}/api/advisor/health`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ businessType: type }),
+      }),
+      fetch(`${GATEWAY}/api/advisor/strategies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ businessType: type }),
+      }),
+      fetch(`${GATEWAY}/api/advisor/entitlement`, { credentials: "include" }),
+    ]);
+    if (!h.ok) throw new Error("advisor unavailable");
+    setHealth((await h.json()) as Health);
+    if (s.ok) setStrategies((await s.json()) as Strategies);
+    if (e.ok) setPro(((await e.json()) as { plan?: string }).plan !== "free");
   }, [type]);
+
+  useLiveData(async () => {
+    try {
+      await load();
+    } catch {
+      setFailed(true);
+    }
+  }, [load]);
 
   useEffect(() => {
     let cancelled = false;

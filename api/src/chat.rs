@@ -594,6 +594,11 @@ const HOLDING_PROMPT: &str = "You extract one portfolio holding from a finance c
 const PROFILE_PROMPT: &str = "You extract financial profile facts from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the exchange states any of the user's financial details, return {\"profile\":{\"monthly_income\":<INR/month if stated>,\"monthly_spend\":<INR/month if stated>,\"investment_pct\":<0-100 if stated>,\"housing_cost\":<INR/month if stated>,\"dependents\":<integer if stated>,\"debt_emis\":<INR/month if stated>,\"monthly_tax\":<INR/month if stated>}} with only the stated fields. Otherwise return {}. Only values the USER themselves stated in their own words count — ignore amounts the assistant merely mentions (existing tab limits, remaining balances, suggested numbers). housing_cost and debt_emis are recurring monthly costs the user pays now (rent, EMI) — never a one-time goal or investment amount, and never a value from a savings goal. Never invent, compute, or default values — omit any field the user did not explicitly state, including investment_pct. Never treat a one-off purchase (e.g. \"bought a shampoo for 300\") as monthly_spend — monthly_spend is a recurring monthly amount the user declares, not a single transaction.";
 const BUDGET_PROMPT: &str = "You extract a monthly budget from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. Return {\"budget\":{\"limit\":<INR per month>}} ONLY if the USER explicitly set or agreed to a monthly spending budget (e.g. \"set my budget to 50k\", \"my limit is 30000\", \"keep it at 20k\"). Never extract a budget from the assistant's reply alone — mentions of an existing tab limit, remaining spend, or suggestions are not a budget the user set. Otherwise return {}.";
 const PURCHASE_PROMPT: &str = "You extract one consumer product purchase from a finance chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. If the user bought an everyday consumer product — toiletries, shampoo, groceries, food, clothes, shoes, electronics, appliances, household goods, or similar retail items — return {\"purchase\":{\"name\":\"<product name>\",\"price\":<INR>,\"verdict\":\"<good|warning|bad>\",\"explanation\":\"<one short line on whether the price is reasonable>\",}}. Otherwise return {}. Verdict reflects the exchange: good if the assistant raised no concern, warning if it flagged the cost against the budget, bad if it advised against. Never extract financial instruments (stocks, mutual funds, gold, FD — those are holdings), rent, bills, EMIs, or services. Only use numbers the user stated or the assistant computed; never invent prices.";
+const SELLER_PROMPT: &str = "You extract business finance events from a seller's chat exchange. Given the last user message and assistant reply, return ONLY a JSON object — no prose, no markdown fences. Distinguish direction: when the user SELLS, that is income; when the user BUYS goods/stock/materials for the business, that is an expense. Include any of these that apply:
+{\"income\":{\"amount\":<INR>,\"category\":\"<Product sales|Online orders|Wholesale|Other>\",\"description\":\"<one line>\"}} when the user records a SALE or business income event (e.g. \"sold 3 dresses for 500 each\", \"got 12000 from an online order\").
+{\"expense\":{\"entry_type\":\"<expense|cogs|salary|rent|other>\",\"amount\":<INR>,\"category\":\"<Materials|Payroll|Rent|Logistics|Utilities|Other>\",\"description\":\"<one line>\"}} when the user records a BUSINESS spend — buying stock, goods for resale, or raw material is cogs/Materials (e.g. \"bought 50 bottles of shampoo for the shop\", \"bought raw material for 1500\"); wages are salary/Payroll, premises are rent/Rent, anything else is expense/Other (e.g. \"paid 8000 salary\", \"paid 12000 shop rent\").
+{\"inventory\":{\"name\":\"<item>\",\"stock\":<qty>,\"unit_cost\":<INR per unit if known>}} when the user orders or restocks inventory (e.g. \"ordered 50 bottles of shampoo at 40 each\").
+Never extract personal consumer purchases (products bought for personal use, subscriptions, personal bills) as income/expense — those are purchases, not business events. Only use numbers the user stated or the assistant computed; never invent amounts. Return {} when nothing applies.";
 
 fn groq_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -734,12 +739,83 @@ fn validate_purchase(parsed: &serde_json::Value) -> Option<serde_json::Value> {
     Some(serde_json::Value::Object(out))
 }
 
+fn validate_income(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let income = parsed.get("income")?;
+    let amount = income.get("amount").and_then(|v| v.as_f64())?;
+    if amount <= 0.0 {
+        return None;
+    }
+    let category = income.get("category").and_then(|v| v.as_str()).unwrap_or("Other");
+    const CATS: [&str; 4] = ["Product sales", "Online orders", "Wholesale", "Other"];
+    let category = if CATS.contains(&category) { category } else { "Other" };
+    let mut out = serde_json::Map::new();
+    out.insert("entry_type".into(), serde_json::Value::String("revenue".to_string()));
+    out.insert("amount".into(), serde_json::Value::from(amount));
+    out.insert("category".into(), serde_json::Value::String(category.to_string()));
+    if let Some(desc) = income.get("description").and_then(|v| v.as_str()) {
+        if !desc.trim().is_empty() {
+            out.insert("description".into(), serde_json::Value::String(desc.trim().to_string()));
+        }
+    }
+    Some(serde_json::Value::Object(out))
+}
+
+fn validate_expense(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let expense = parsed.get("expense")?;
+    let amount = expense.get("amount").and_then(|v| v.as_f64())?;
+    if amount <= 0.0 {
+        return None;
+    }
+    let entry_type = expense.get("entry_type").and_then(|v| v.as_str()).unwrap_or("expense");
+    const KINDS: [&str; 5] = ["expense", "cogs", "salary", "rent", "other"];
+    if !KINDS.contains(&entry_type) {
+        return None;
+    }
+    let category = expense.get("category").and_then(|v| v.as_str()).unwrap_or("Other");
+    const CATS: [&str; 6] = ["Materials", "Payroll", "Rent", "Logistics", "Utilities", "Other"];
+    let category = if CATS.contains(&category) { category } else { "Other" };
+    let mut out = serde_json::Map::new();
+    out.insert("entry_type".into(), serde_json::Value::String(entry_type.to_string()));
+    out.insert("amount".into(), serde_json::Value::from(amount));
+    out.insert("category".into(), serde_json::Value::String(category.to_string()));
+    if let Some(desc) = expense.get("description").and_then(|v| v.as_str()) {
+        if !desc.trim().is_empty() {
+            out.insert("description".into(), serde_json::Value::String(desc.trim().to_string()));
+        }
+    }
+    Some(serde_json::Value::Object(out))
+}
+
+fn validate_inventory(parsed: &serde_json::Value) -> Option<serde_json::Value> {
+    let inventory = parsed.get("inventory")?;
+    let name = inventory.get("name")?.as_str()?;
+    if name.trim().is_empty() {
+        return None;
+    }
+    let stock = inventory.get("stock").and_then(|v| v.as_f64())?;
+    if stock <= 0.0 {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("name".into(), serde_json::Value::String(name.trim().to_string()));
+    out.insert("stock".into(), serde_json::Value::from(stock.floor()));
+    if let Some(cost) = inventory.get("unit_cost").and_then(|v| v.as_f64()) {
+        if cost > 0.0 {
+            out.insert("unit_cost".into(), serde_json::Value::from(cost));
+        }
+    }
+    Some(serde_json::Value::Object(out))
+}
+
 fn pack_captures(
     goal: Option<serde_json::Value>,
     holding: Option<serde_json::Value>,
     profile: Option<serde_json::Value>,
     budget: Option<serde_json::Value>,
     purchase: Option<serde_json::Value>,
+    income: Option<serde_json::Value>,
+    expense: Option<serde_json::Value>,
+    inventory: Option<serde_json::Value>,
 ) -> Option<serde_json::Value> {
     let mut out = serde_json::Map::new();
     if let Some(g) = goal {
@@ -755,10 +831,20 @@ fn pack_captures(
         out.insert("budget".into(), b);
     }
     if let Some(p) = purchase {
-        // Financial instruments win over consumer purchases (e.g. "bought Infosys shares").
-        if !out.contains_key("holding") {
+        // Seller exchanges (income/expense/inventory) win over the consumer-purchase
+        // reading — e.g. "sold 3 dresses for 500 each" is income, not a purchase.
+        if !out.contains_key("holding") && !out.contains_key("income") && !out.contains_key("expense") && !out.contains_key("inventory") {
             out.insert("purchase".into(), p);
         }
+    }
+    if let Some(i) = income {
+        out.insert("income".into(), i);
+    }
+    if let Some(e) = expense {
+        out.insert("expense".into(), e);
+    }
+    if let Some(i) = inventory {
+        out.insert("inventory".into(), i);
     }
     if out.is_empty() {
         None
@@ -809,14 +895,18 @@ async fn extract_captures(
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let (goal, holding, profile, budget, purchase) = tokio::join!(
+    let (goal, holding, profile, budget, purchase, seller) = tokio::join!(
         async { extract_json(account, token, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
         async { extract_json(account, token, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
         async { extract_json(account, token, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
         async { extract_json(account, token, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
         async { extract_json(account, token, PURCHASE_PROMPT, user_message, reply).await.and_then(|v| validate_purchase(&v)) },
+        async { extract_json(account, token, SELLER_PROMPT, user_message, reply).await },
     );
-    pack_captures(goal, holding, profile, budget, purchase)
+    let income = seller.as_ref().and_then(|v| validate_income(v));
+    let expense = seller.as_ref().and_then(|v| validate_expense(v));
+    let inventory = seller.as_ref().and_then(|v| validate_inventory(v));
+    pack_captures(goal, holding, profile, budget, purchase, income, expense, inventory)
 }
 
 async fn groq_json(
@@ -859,14 +949,18 @@ async fn extract_captures_groq(
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let (goal, holding, profile, budget, purchase) = tokio::join!(
+    let (goal, holding, profile, budget, purchase, seller) = tokio::join!(
         async { groq_json(client, model, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
         async { groq_json(client, model, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
         async { groq_json(client, model, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
         async { groq_json(client, model, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
         async { groq_json(client, model, PURCHASE_PROMPT, user_message, reply).await.and_then(|v| validate_purchase(&v)) },
+        async { groq_json(client, model, SELLER_PROMPT, user_message, reply).await },
     );
-    pack_captures(goal, holding, profile, budget, purchase)
+    let income = seller.as_ref().and_then(|v| validate_income(v));
+    let expense = seller.as_ref().and_then(|v| validate_expense(v));
+    let inventory = seller.as_ref().and_then(|v| validate_inventory(v));
+    pack_captures(goal, holding, profile, budget, purchase, income, expense, inventory)
 }
 
 // Groq chat: single non-streaming reply, same SSE contract as CF path.

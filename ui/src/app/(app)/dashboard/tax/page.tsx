@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { StatCard } from "@/components/seller/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarClock, CircleCheck } from "lucide-react";
+import { useLiveData } from "@/lib/use-live-data";
 import { fetchSellerDashboard, fmt, nextFiling, taxPeriod, type SellerDashboard } from "@/lib/seller";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
@@ -11,19 +12,15 @@ export default function TaxPage() {
   const [data, setData] = useState<SellerDashboard | null>(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchSellerDashboard()
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      setData(await fetchSellerDashboard());
+    } catch {
+      setFailed(true);
+    }
   }, []);
+
+  useLiveData(load, [load]);
 
   if (failed) {
     return (
