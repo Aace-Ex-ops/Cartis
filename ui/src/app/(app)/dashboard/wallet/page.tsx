@@ -124,7 +124,7 @@ export default function WalletPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {data === null && <div className="h-20 rounded-lg border border-border/50" />}
-          {data !== null && data.bankAccounts.length === 0 && (
+          {data !== null && (data.bankAccounts ?? []).length === 0 && (
             <p className="rounded-lg border border-border/50 bg-background/50 px-4 py-6 text-center text-[13px] text-muted-foreground">
               No bank connected yet — use Account Aggregator to link your bank.
             </p>
@@ -206,7 +206,7 @@ export default function WalletPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {data.ledgerTransactions.length === 0 && (
+          {(data.ledgerTransactions ?? []).length === 0 && (
             <p className="rounded-lg border border-border/50 bg-background/50 px-4 py-6 text-center text-[13px] text-muted-foreground">
               No transactions yet — they appear after linking a bank with transaction history.
             </p>
@@ -252,7 +252,7 @@ export default function WalletPage() {
               <div className="mt-0.5 text-[15px] font-semibold text-foreground">{row.value}</div>
             </div>
           ))}
-          {data.incomeStreams.length > 0 && (
+          {(data.incomeStreams ?? []).length > 0 && (
             <div className="col-span-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 sm:col-span-3">
               <div className="text-[11px] font-medium uppercase tracking-wide text-primary">Income sources</div>
               <div className="mt-1 flex flex-wrap gap-2">
