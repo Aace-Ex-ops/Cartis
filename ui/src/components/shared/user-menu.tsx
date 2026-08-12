@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Repeat, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -52,15 +52,6 @@ export function UserMenu({ user }: { user: User }) {
 
   const isBusiness = userType === "business" || userType === "seller";
 
-  async function switchType(next: "personal" | "business") {
-    try {
-      await gql<unknown>(`mutation { updateUserType(userType: "${next}") { id } }`);
-      window.location.reload();
-    } catch {
-      // keep current state; retry next open
-    }
-  }
-
   const initials = user.fullName
     ?.split(" ")
     .map((n) => n[0])
@@ -106,14 +97,6 @@ export function UserMenu({ user }: { user: User }) {
               {PANELS[key].label}
             </DropdownMenuItem>
           ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => void switchType(isBusiness ? "personal" : "business")}
-            className="cursor-pointer"
-          >
-            <Repeat className="mr-2 h-4 w-4" />
-            {isBusiness ? "Switch to Personal finance" : "Switch to Business"}
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>
