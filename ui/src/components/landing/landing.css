@@ -25,31 +25,6 @@
   -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 15%, #000 85%, transparent 100%);
 }
 
-.x-fade-top {
-  mask-image: linear-gradient(to top, #000 60%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to top, #000 60%, transparent 100%);
-}
-.x-fade-bottom {
-  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
-}
-.x-fade-top-soft {
-  mask-image: linear-gradient(to top, #000 75%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to top, #000 75%, transparent 100%);
-}
-.x-fade-bottom-soft {
-  mask-image: linear-gradient(to bottom, #000 75%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent 100%);
-}
-.x-fade-top-deep {
-  mask-image: linear-gradient(to top, #000 35%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to top, #000 35%, transparent 100%);
-}
-.x-fade-bottom-deep {
-  mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 35%, transparent 100%);
-}
-
 .landing-shine {
   background-image: linear-gradient(
     105deg,

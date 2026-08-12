@@ -35,22 +35,19 @@ export function RevnueOverview() {
   return (
     <section
       id="overview-section"
-      className="relative w-full h-screen min-h-[600px] md:min-h-[800px] flex items-start justify-end overflow-visible"
+      className="relative w-full h-screen min-h-[600px] md:min-h-[800px] flex items-start justify-end overflow-hidden"
       style={{ paddingTop: 96, paddingBottom: 96 }}
     >
-      <div className="absolute inset-0 w-full h-full z-0 overflow-visible pointer-events-none">
-        <div className="absolute inset-0 bg-black x-fade-top" />
-        <div className="absolute inset-x-0 top-0 -bottom-[18vh] x-fade-bottom-deep overflow-hidden">
-          <video
-            ref={videoRef}
-            loop
-            muted
-            playsInline
-            className="w-full h-full object-cover select-none pointer-events-none"
-            src={BG_VIDEO}
-            poster="/landing/posters/overview-bg.jpg"
-          />
-        </div>
+      <div className="absolute inset-0 w-full h-full z-0 overflow-hidden pointer-events-none">
+        <video
+          ref={videoRef}
+          loop
+          muted
+          playsInline
+          className="w-full h-full object-cover select-none pointer-events-none"
+          src={BG_VIDEO}
+          poster="/landing/posters/overview-bg.jpg"
+        />
         <div className="absolute inset-0 bg-white/5" />
       </div>
       <div className="relative z-10 w-full h-full flex items-start justify-end px-4 sm:px-8 md:px-12 xl:px-16">
