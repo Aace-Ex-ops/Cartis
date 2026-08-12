@@ -1355,10 +1355,13 @@ impl MutationRoot {
                     _ => "other",
                 };
                 let name = h.description.as_deref().unwrap_or(h.symbol.as_deref().unwrap_or("Holding"));
+                let avg_price = h.cost_basis.filter(|_| h.quantity > 0.0).map(|c| format!("{:.2}", c / h.quantity)).filter(|s| !s.is_empty()).unwrap_or_else(|| "0".to_string());
+                let current_price = if h.price > 0.0 { format!("{:.2}", h.price) } else { "0".to_string() };
+                let qty_str = if h.quantity > 0.0 { h.quantity.to_string() } else { "0".to_string() };
                 tx.execute(
                     "INSERT INTO holdings (user_id, asset_type, name, quantity, avg_price, current_price, as_of)
                      VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::numeric, now()::date)",
-                    &[&uid, &asset_type, &name, &h.quantity.to_string(), &h.cost_basis.map(|c| format!("{:.2}", c / h.quantity)).unwrap_or_default(), &h.price.to_string()],
+                    &[&uid, &asset_type, &name, &qty_str, &avg_price, &current_price],
                 ).await?;
             }
         }
