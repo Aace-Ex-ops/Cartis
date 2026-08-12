@@ -50,6 +50,7 @@ const instrumentSerif = Instrument_Serif({
 export const metadata: Metadata = {
   title: "Cartis — AI Financial Coach",
   description: "Buy with confidence. Cartis analyzes products against your financial health.",
+  icons: [{ rel: "icon", url: "/favicon.png", type: "image/png" }],
 };
 
 export default function RootLayout({
