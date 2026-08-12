@@ -1,5 +1,6 @@
 {
   "name": "cartis-gateway",
+  "account_id": "10112875ad4b991b430e4a8ed79124a7",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-30",
   "kv_namespaces": [
@@ -22,9 +23,6 @@
     "YODLEE_BASE_URL": "https://sandbox.api.yodlee.com/ysl",
     "YODLEE_FASTLINK_URL": "https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink"
   },
-  "routes": [
-    { "pattern": "cartis.dpdns.org", "custom_domain": true }
-  ],
   "workers_dev": true,
   "observability": {
     "enabled": true
