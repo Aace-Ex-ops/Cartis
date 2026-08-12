@@ -14,6 +14,13 @@ type Env = {
   POLAR_WEBHOOK_SECRET: string
   POLAR_ACCESS_TOKEN: string
   POLAR_API_URL: string
+  SETU_CLIENT_ID: string
+  SETU_CLIENT_SECRET: string
+  SETU_PRODUCT_INSTANCE_ID: string
+  EXA_API_KEY?: string
+  AWS_ACCESS_KEY_ID: string
+  AWS_SECRET_ACCESS_KEY: string
+  AWS_REGION: string
   RESEND_API_KEY?: string
   EMAIL_FROM?: string
   YODLEE_CLIENT_ID: string
@@ -22,6 +29,8 @@ type Env = {
   YODLEE_TEST_LOGIN: string
   YODLEE_BASE_URL: string
   YODLEE_FASTLINK_URL: string
+  CORS_ALLOWED_ORIGIN?: string
+  AUTH_REDIRECT_BASE?: string
   YODLEE_CONFIG_NAME?: string
 }
 
@@ -63,6 +72,22 @@ async function verifyState(c: { env: { WORKER_AUTH_SECRET: string } }, state: st
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { session: Session; sessionToken: string; aiModel?: string } }>()
+
+// Optional CORS for local dev (UI dev server on a different origin). No-op in production.
+app.use('*', async (c, next) => {
+  const origin = c.env.CORS_ALLOWED_ORIGIN
+  if (origin) {
+    c.header('Access-Control-Allow-Origin', origin)
+    c.header('Access-Control-Allow-Credentials', 'true')
+    c.header('Vary', 'Origin')
+    if (c.req.method === 'OPTIONS') {
+      c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+      c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+      return c.body(null, 204)
+    }
+  }
+  await next()
+})
 
 async function sha256Hex(input: string) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
@@ -466,7 +491,8 @@ app.get('/auth/start', async (c) => {
 
 app.get('/auth/callback', async (c) => {
   c.header('Cache-Control', 'no-store')
-  if (c.req.query('error')) return c.redirect('/signin?error=google_denied')
+  const base = c.env.AUTH_REDIRECT_BASE ?? ''
+  if (c.req.query('error')) return c.redirect(`${base}/signin?error=google_denied`)
   const code = c.req.query('code')
   const state = c.req.query('state')
   if (!code || !state) return c.json({ error: 'missing code or state' }, 400)
@@ -500,8 +526,8 @@ app.get('/auth/callback', async (c) => {
   } catch {
     existing = null
   }
-  if (intent === 'signin' && !existing?.googleUserByEmail) return c.redirect('/signup?error=no_account')
-  if (intent === 'signup' && existing?.googleUserByEmail) return c.redirect('/signin?error=already_exists')
+  if (intent === 'signin' && !existing?.googleUserByEmail) return c.redirect(`${base}/signup?error=no_account`)
+  if (intent === 'signup' && existing?.googleUserByEmail) return c.redirect(`${base}/signin?error=already_exists`)
 
   let data: { upsertGoogleUser?: { userId?: string | null; created?: boolean } | null }
   try {
@@ -534,7 +560,7 @@ app.get('/auth/callback', async (c) => {
   await addUserSession(c, session.user_id, sessionToken)
 
   c.header('Set-Cookie', `session=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL}`)
-  return c.redirect(created ? '/onboarding' : '/dashboard')
+  return c.redirect(`${base}/${created ? 'onboarding' : 'dashboard'}`)
 })
 
 app.post('/auth/signup', async (c) => {

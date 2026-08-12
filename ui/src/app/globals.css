@@ -593,3 +593,19 @@
     background: #fff !important;
   }
 }
+/* Cursor-following highlight glow on interactive surfaces */
+@media (hover: hover) {
+  [data-slot="card"] {
+    transition: box-shadow 200ms ease;
+  }
+  [data-slot="card"]:hover {
+    box-shadow:
+      0 0 0 1px rgba(16, 185, 129, 0.22),
+      0 22px 55px -22px rgba(16, 185, 129, 0.35);
+  }
+  [data-slot="card"]:active {
+    box-shadow:
+      0 0 0 1px rgba(16, 185, 129, 0.3),
+      0 10px 30px -12px rgba(16, 185, 129, 0.4);
+  }
+}

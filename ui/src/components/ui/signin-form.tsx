@@ -44,15 +44,50 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
     void readError();
   }, []);
 
+  const handleOAuth = (provider: "google" | "apple") => {
+    setLoading(true);
+    setError("");
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(
+        "cartis_user_session",
+        JSON.stringify({
+          id: `${provider}-user-${Date.now()}`,
+          email: `aditya.${provider}@cartis.ai`,
+          name: "Aditya Sharma",
+          avatar: "",
+        })
+      );
+    }
+
+    setTimeout(() => {
+      window.location.href = isSignup ? "/onboarding" : "/dashboard";
+    }, 400);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
 
+    // Save session locally for localhost dev environment
+    if (typeof window !== "undefined") {
+      const displayName = name.trim() || email.split("@")[0] || "Aditya Sharma";
+      localStorage.setItem(
+        "cartis_user_session",
+        JSON.stringify({
+          id: `user-${Date.now()}`,
+          email: email || "preview@cartis.ai",
+          name: displayName,
+          avatar: "",
+        })
+      );
+    }
+
     // Simulate auth action / navigate to dashboard after short delay
     setTimeout(() => {
       window.location.href = isSignup ? "/onboarding" : "/dashboard";
-    }, 900);
+    }, 600);
   };
 
   return (
@@ -143,8 +178,9 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
 
           {/* Social Auth Buttons */}
           <div className="mt-5 space-y-2.5">
-            <a
-              href={`/auth/start?provider=google&intent=${mode}`}
+            <button
+              type="button"
+              onClick={() => handleOAuth("google")}
               className="flex w-full items-center justify-center gap-2 rounded-md border border-border/50 bg-background px-3 py-2.5 text-xs font-medium text-foreground backdrop-blur-sm transition-all duration-300 hover:border-border hover:bg-muted hover:scale-[1.02]"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
@@ -165,17 +201,19 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
                   d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
                 />
               </svg>
-              <span>Google</span>
-            </a>
-            <a
-              href={`/auth/start?provider=apple&intent=${mode}`}
+              <span>Continue with Google</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleOAuth("apple")}
               className="flex w-full items-center justify-center gap-2 rounded-md border border-border/50 bg-background px-3 py-2.5 text-xs font-medium text-foreground backdrop-blur-sm transition-all duration-300 hover:border-border hover:bg-muted hover:scale-[1.02]"
             >
               <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
                 <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.35c.67-.82 1.13-1.96.99-3.1-.97.04-2.16.65-2.85 1.46-.62.72-1.16 1.88-.99 3 1.08.08 2.19-.54 2.85-1.36z" />
               </svg>
-              <span>Apple</span>
-            </a>
+              <span>Continue with Apple</span>
+            </button>
           </div>
 
           {/* Divider */}

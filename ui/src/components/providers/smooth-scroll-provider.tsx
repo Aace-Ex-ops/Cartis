@@ -4,41 +4,53 @@ import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import Lenis from "@studio-freight/lenis";
 
+const APP_ROUTES = ["/dashboard", "/seller", "/onboarding"];
+
 export function SmoothScrollProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const lenisRef = useRef<Lenis | null>(null);
-  const isLanding = pathname === "/";
 
   useEffect(() => {
-    if (isLanding) return;
-    const lenis = new Lenis({
-      duration: 0.8,
-      easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smoothWheel: true,
-      wheelMultiplier: 0.9,
-      touchMultiplier: 1.6,
-    });
-    lenisRef.current = lenis;
+    const isAppRoute = APP_ROUTES.some((r) => pathname.startsWith(r));
 
-    let animationFrameId: number;
-    function raf(time: number) {
-      lenis.raf(time);
-      animationFrameId = requestAnimationFrame(raf);
+    if (isAppRoute) {
+      if (lenisRef.current) {
+        lenisRef.current.destroy();
+        lenisRef.current = null;
+      }
+      document.documentElement.style.removeProperty("overflow");
+      document.body.style.removeProperty("overflow");
+      return;
     }
-    animationFrameId = requestAnimationFrame(raf);
 
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      lenis.destroy();
-      lenisRef.current = null;
-    };
-  }, [isLanding]);
+    if (!lenisRef.current) {
+      const lenis = new Lenis({
+        duration: 1.2,
+        easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+        smoothWheel: true,
+        wheelMultiplier: 0.9,
+        touchMultiplier: 1.6,
+      });
+      lenisRef.current = lenis;
 
-  useEffect(() => {
-    if (isLanding || !lenisRef.current) return;
-    lenisRef.current.scrollTo(0, { immediate: true });
-    lenisRef.current.resize();
-  }, [pathname, isLanding]);
+      let animationFrameId: number;
+      function raf(time: number) {
+        if (lenisRef.current) {
+          lenisRef.current.raf(time);
+          animationFrameId = requestAnimationFrame(raf);
+        }
+      }
+      animationFrameId = requestAnimationFrame(raf);
+
+      return () => {
+        cancelAnimationFrame(animationFrameId);
+        if (lenisRef.current) {
+          lenisRef.current.destroy();
+          lenisRef.current = null;
+        }
+      };
+    }
+  }, [pathname]);
 
   return <>{children}</>;
 }
