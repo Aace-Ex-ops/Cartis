@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { CashFlowChart } from "@/components/seller/cashflow-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
+import { useLiveData } from "@/lib/use-live-data";
 import { fetchSellerSeries, fmt, type SellerSeriesPoint } from "@/lib/seller";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,19 +13,15 @@ export default function CashFlowPage() {
   const [data, setData] = useState<SellerSeriesPoint[] | null>(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchSellerSeries(6)
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      setData(await fetchSellerSeries(6));
+    } catch {
+      setFailed(true);
+    }
   }, []);
+
+  useLiveData(load, [load]);
 
   if (failed) {
     return (

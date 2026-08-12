@@ -86,7 +86,9 @@ impl QueryRoot {
                         dependents, debt_emis::float8,
                         monthly_tax::float8,
                         ai_model, business_name,
-                        email_notifications, business_type
+                        email_notifications, business_type,
+                        plan, trial_ends_at::text,
+                        COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan
                  FROM users WHERE user_id::text = $1",
                 &[&uid],
             )
@@ -155,6 +157,33 @@ impl QueryRoot {
             )
             .await?;
         Ok(rows.iter().map(BankAccount::from_row).collect())
+    }
+
+    #[graphql(name = "ledgerTransactions")]
+    async fn ledger_transactions(&self, ctx: &Context<'_>, limit: Option<i32>) -> Result<Vec<LedgerTx>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT transaction_type, amount::float8, description, transaction_date::text, created_at::text
+                 FROM ledger_entries WHERE user_id::text = $1
+                 ORDER BY created_at DESC LIMIT $2::int4",
+                &[&uid, &limit.unwrap_or(10)],
+            )
+            .await?;
+        Ok(rows.iter().map(LedgerTx::from_row).collect())
+    }
+
+    #[graphql(name = "incomeStreams")]
+    async fn income_streams(&self, ctx: &Context<'_>) -> Result<Vec<IncomeStream>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let rows = pg(ctx).get().await?
+            .query(
+                "SELECT account_ref, source, frequency, amount::float8, currency, from_date::text, to_date::text
+                 FROM income_streams WHERE user_id::text = $1 ORDER BY from_date DESC",
+                &[&uid],
+            )
+            .await?;
+        Ok(rows.iter().map(IncomeStream::from_row).collect())
     }
 
     async fn banks(&self, ctx: &Context<'_>) -> Result<Vec<Bank>> {
@@ -688,6 +717,7 @@ async fn generate_alerts(uid: &str, pool: &deadpool_postgres::Pool) -> Result<()
             .await?;
         if let Some(to) = &user_email {
             crate::email::send_email(
+                pool,
                 to,
                 "Cartis Budget Alert",
                 &format!("<p>{message}</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
@@ -707,11 +737,21 @@ impl MutationRoot {
             .query_opt(
                 "INSERT INTO users (email, full_name, avatar_url, oauth_provider)
                  VALUES ($1, $2, $3, 'google')
-                 ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name, avatar_url = EXCLUDED.avatar_url
+                 ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name, avatar_url = EXCLUDED.avatar_url, last_login_at = NOW()
                  RETURNING user_id::text, (xmax = 0) AS created",
                 &[&email, &full_name, &avatar_url],
             )
             .await?;
+        if let Some(r) = &row {
+            if r.get::<_, bool>(1) {
+                crate::email::send_email(
+                    pg(ctx),
+                    &email,
+                    "Welcome to Cartis!",
+                    &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
+                ).await;
+            }
+        }
         Ok(row.map(|r| UpsertedUser { user_id: r.get(0), created: r.get(1) }))
     }
 
@@ -753,6 +793,7 @@ impl MutationRoot {
             .await?;
         if row.is_some() {
             crate::email::send_email(
+                pg(ctx),
                 &email,
                 "Welcome to Cartis!",
                 &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
@@ -775,6 +816,9 @@ impl MutationRoot {
         if Argon2::default().verify_password(password.as_bytes(), &parsed).is_err() {
             return Ok(None);
         }
+        let _ = pg(ctx).get().await?
+            .execute("UPDATE users SET last_login_at = NOW() WHERE email = $1", &[&email])
+            .await;
         Ok(Some(AuthUser {
             user_id: row.get(0),
             full_name: row.get(2),
@@ -830,7 +874,9 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications, business_type",
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
                 &[
                     &uid,
                     &monthly_income.map(|v| v.to_string()),
@@ -860,7 +906,9 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications, business_type",
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
                 &[&uid, &model],
             )
             .await?;
@@ -890,7 +938,9 @@ impl MutationRoot {
         let row = pg(ctx).get().await?
             .query_one(
                 "UPDATE users SET user_type = $2, business_name = COALESCE($3, business_name),
-                                   business_type = COALESCE($4, business_type)
+                                   business_type = COALESCE($4, business_type),
+                                   plan = CASE WHEN $2::varchar = 'business' AND COALESCE(plan, 'free') = 'free' THEN 'trial' ELSE plan END,
+                                   trial_ends_at = CASE WHEN $2::varchar = 'business' AND COALESCE(plan, 'free') = 'free' THEN now() + interval '7 days' ELSE trial_ends_at END
                  WHERE user_id::text = $1
                  RETURNING user_id::text, email, full_name, avatar_url, user_type,
                            wallet_balance::float8, monthly_tab_limit::float8,
@@ -900,8 +950,37 @@ impl MutationRoot {
                            investment_pct::float8, housing_cost::float8,
                            dependents, debt_emis::float8,
                            monthly_tax::float8, ai_model, business_name,
-                           email_notifications, business_type",
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
                 &[&uid, &user_type, &business_name, &business_type],
+            )
+            .await?;
+        Ok(User::from_row(row))
+    }
+
+    async fn set_plan(&self, ctx: &Context<'_>, plan: String) -> Result<User> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        // enterprise has no self-serve checkout — owner sets it directly
+        let plan = match plan.as_str() {
+            "enterprise" => "enterprise",
+            _ => return Err("only the enterprise plan can be self-activated".into()),
+        };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "UPDATE users SET plan = $2, trial_ends_at = NULL WHERE user_id::text = $1
+                 RETURNING user_id::text, email, full_name, avatar_url, user_type,
+                           wallet_balance::float8, monthly_tab_limit::float8,
+                           annual_deferred_limit::float8, financial_health_score,
+                           coach_adherence_score::float8,
+                           monthly_income::float8, monthly_spend::float8,
+                           investment_pct::float8, housing_cost::float8,
+                           dependents, debt_emis::float8,
+                           monthly_tax::float8, ai_model, business_name,
+                           email_notifications, business_type,
+                           plan, trial_ends_at::text,
+                           COALESCE(CASE WHEN trial_ends_at > now() THEN 'trial' END, plan) AS effective_plan",
+                &[&uid, &plan],
             )
             .await?;
         Ok(User::from_row(row))
@@ -1090,6 +1169,7 @@ impl MutationRoot {
                         let email: String = row.get(0);
                         let bal_str = synced_balance.map(|b| format!(" · Balance ₹{b:.0}")).unwrap_or_default();
                         crate::email::send_email(
+                            pg(ctx),
                             &email,
                             "New Transactions Synced",
                             &format!("<p>{inserted} new transaction(s) synced{bal_str}.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/dashboard'>Open Dashboard</a></p>"),
@@ -1159,6 +1239,7 @@ impl MutationRoot {
         consent_id: String,
         accounts: Vec<AaAccountInput>,
         transactions: Vec<AaTxInput>,
+        income: Vec<AaIncomeInput>,
     ) -> Result<SyncResult> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let mut conn = pg(ctx).get().await?;
@@ -1194,13 +1275,14 @@ impl MutationRoot {
                 .await?
                 .get(0);
 
-            // Upsert bank_account
+            // Upsert bank_account (keyed on the Yodlee account ref so multiple
+            // accounts under one bank don't collapse into a single row)
             let existing: Option<String> = tx
                 .query_opt(
                     "SELECT account_id::text FROM bank_accounts
-                     WHERE user_id::text = $1 AND bank_id::text = $2
+                     WHERE user_id::text = $1 AND masked_account_number = COALESCE($2, '')
                      ORDER BY created_at DESC LIMIT 1",
-                    &[&uid, &bank_id],
+                    &[&uid, &acct.account_ref],
                 )
                 .await?
                 .map(|r| r.get(0));
@@ -1208,17 +1290,17 @@ impl MutationRoot {
             if let Some(ref aid) = existing {
                 tx.execute(
                     "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now()
-                     WHERE account_id = $1",
+                     WHERE account_id::text = $1",
                     &[aid, &acct.balance.to_string(), &acct.fip_id],
                 ).await?;
                 account_id = Some(aid.clone());
             } else {
                 let new_id: String = tx
                     .query_one(
-                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, last_sync_at)
-                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, now())
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, last_sync_at)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), now())
                          RETURNING account_id::text",
-                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string()],
+                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref],
                     )
                     .await?
                     .get(0);
@@ -1235,13 +1317,43 @@ impl MutationRoot {
             ).to_string();
             let res = tx
                 .execute(
-                    "INSERT INTO ledger_entries (user_id, account_type, transaction_type, amount, idempotency_key)
-                     VALUES ($1::text::uuid, 'budget', $2, $3::text::numeric, $4)
+                    "INSERT INTO ledger_entries (user_id, account_type, transaction_type, amount, idempotency_key, description, transaction_date)
+                     VALUES ($1::text::uuid, 'budget', $2, $3::text::numeric, $4, $5, $6)
                      ON CONFLICT (idempotency_key) DO NOTHING",
-                    &[&uid, &txn.txn_type, &txn.amount.to_string(), &key],
+                    &[&uid, &txn.txn_type, &txn.amount.to_string(), &key, &txn.narration, &txn.timestamp],
                 )
                 .await?;
             inserted += res;
+        }
+
+        // Upsert income streams (best-effort; no streams = no-op)
+        for inc in &income {
+            tx.execute(
+                "INSERT INTO income_streams (user_id, account_ref, source, frequency, amount, currency, from_date, to_date)
+                 VALUES ($1::text::uuid, COALESCE($2, ''), COALESCE($3, ''), COALESCE($4, 'MONTHLY'), $5::text::numeric, COALESCE($6, 'INR'), COALESCE($7, ''), COALESCE($8, ''))
+                 ON CONFLICT (user_id, source, from_date, frequency) DO UPDATE SET
+                    amount = EXCLUDED.amount, to_date = EXCLUDED.to_date, account_ref = EXCLUDED.account_ref",
+                &[&uid, &inc.account_ref, &inc.source, &inc.frequency, &inc.amount.to_string(), &inc.currency, &inc.from_date, &inc.to_date],
+            ).await?;
+        }
+
+        // Auto-fill monthly income from synced streams (only if unset — manual value wins)
+        let monthly_income: f64 = income.iter().map(|inc| {
+            let base = inc.amount;
+            match inc.frequency.as_deref() {
+                Some("WEEKLY") => base * 52.0 / 12.0,
+                Some("YEARLY") | Some("ANNUAL") => base / 12.0,
+                Some("QUARTERLY") => base / 3.0,
+                Some("DAILY") => base * 365.0 / 12.0,
+                _ => base,
+            }
+        }).sum();
+        if monthly_income > 0.0 {
+            tx.execute(
+                "UPDATE users SET monthly_income = $2::text::numeric, updated_at = NOW()
+                 WHERE user_id::text = $1 AND monthly_income IS NULL",
+                &[&uid, &monthly_income.to_string()],
+            ).await?;
         }
 
         tx.commit().await?;
@@ -1265,7 +1377,7 @@ impl MutationRoot {
         let row = pg(ctx).get().await?
             .query_one(
                 "INSERT INTO financial_goals (user_id, goal_type, name, target_amount, current_amount, target_date)
-                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::date)
+                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::date)
                  RETURNING goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text",
                 &[&uid, &goal_type, &name, &target_amount.to_string(), &current_amount.unwrap_or(0.0).to_string(), &target_date],
             )
@@ -1289,7 +1401,7 @@ impl MutationRoot {
                     current_amount = COALESCE($3::text::numeric, current_amount),
                     target_amount = COALESCE($4::text::numeric, target_amount),
                     name = COALESCE($5, name),
-                    target_date = COALESCE($6::date, target_date),
+                    target_date = COALESCE($6::text::date, target_date),
                     updated_at = now()
                  WHERE goal_id::text = $1 AND user_id::text = $2
                  RETURNING goal_id::text, goal_type, name, target_amount::float8, current_amount::float8, target_date::text, created_at::text",
@@ -1324,9 +1436,17 @@ impl MutationRoot {
         let row = pg(ctx).get().await?
             .query_one(
                 "INSERT INTO holdings (user_id, asset_type, name, quantity, avg_price, current_price, as_of)
-                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, $5::text::numeric, $6::text::numeric, $7::date)
+                 VALUES ($1::text::uuid, $2, $3, $4::text::numeric, NULLIF($5, '')::numeric, NULLIF($6, '')::numeric, NULLIF($7, '')::date)
                  RETURNING holding_id::text, asset_type, name, quantity::float8, avg_price::float8, current_price::float8, as_of::text, created_at::text",
-                &[&uid, &asset_type, &name, &quantity.to_string(), &avg_price.map(|v| v.to_string()), &current_price.map(|v| v.to_string()), &as_of],
+                &[
+                    &uid,
+                    &asset_type,
+                    &name,
+                    &quantity.to_string(),
+                    &avg_price.map(|v| v.to_string()).unwrap_or_default(),
+                    &current_price.map(|v| v.to_string()).unwrap_or_default(),
+                    &as_of.unwrap_or_default(),
+                ],
             )
             .await?;
         Ok(Holding::from_row(&row))
@@ -1398,6 +1518,38 @@ impl MutationRoot {
             .await?;
         Ok(res > 0)
     }
+
+    async fn add_purchase(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        price: f64,
+        verdict: String,
+        explanation: Option<String>,
+    ) -> Result<bool> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let verdict = verdict.to_lowercase();
+        if !["good", "warning", "bad"].contains(&verdict.as_str()) {
+            return Err("invalid verdict".into());
+        }
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO products (name, site_url, site_name, price)
+                 VALUES ($1, 'twin-chat://', 'Twin Chat', $2::text::numeric)
+                 RETURNING product_id::text",
+                &[&name, &price.to_string()],
+            )
+            .await?;
+        let product_id: String = row.get(0);
+        pg(ctx).get().await?
+            .execute(
+                "INSERT INTO analysis_log (analysis_id, user_id, product_id, verdict, explanation)
+                 VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, $3, $4)",
+                &[&uid, &product_id, &verdict, &explanation],
+            )
+            .await?;
+        Ok(true)
+    }
 }
 
 struct User {
@@ -1422,6 +1574,9 @@ struct User {
     business_name: Option<String>,
     email_notifications: bool,
     business_type: String,
+    plan: String,
+    trial_ends_at: Option<String>,
+    effective_plan: String,
 }
 
 #[Object]
@@ -1447,6 +1602,9 @@ impl User {
     async fn business_name(&self) -> Option<&str> { self.business_name.as_deref() }
     async fn email_notifications(&self) -> bool { self.email_notifications }
     async fn business_type(&self) -> &str { &self.business_type }
+    async fn plan(&self) -> &str { &self.plan }
+    async fn trial_ends_at(&self) -> Option<&str> { self.trial_ends_at.as_deref() }
+    async fn effective_plan(&self) -> &str { &self.effective_plan }
 }
 
 struct AuthUser {
@@ -1497,6 +1655,9 @@ impl User {
             business_name: r.get(18),
             email_notifications: r.get(19),
             business_type: r.get(20),
+            plan: r.get(21),
+            trial_ends_at: r.get(22),
+            effective_plan: r.get(23),
         }
     }
 }
@@ -1550,6 +1711,70 @@ struct BankAccount {
     balance: Option<f64>,
     last_sync_at: Option<String>,
     is_primary: bool,
+}
+
+struct LedgerTx {
+    txn_type: String,
+    amount: f64,
+    description: Option<String>,
+    transaction_date: Option<String>,
+    created_at: Option<String>,
+}
+
+#[Object]
+impl LedgerTx {
+    async fn txn_type(&self) -> &str { &self.txn_type }
+    async fn amount(&self) -> f64 { self.amount }
+    async fn description(&self) -> Option<&str> { self.description.as_deref() }
+    async fn transaction_date(&self) -> Option<&str> { self.transaction_date.as_deref() }
+    async fn created_at(&self) -> Option<&str> { self.created_at.as_deref() }
+}
+
+impl LedgerTx {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            txn_type: r.get(0),
+            amount: r.get(1),
+            description: r.get(2),
+            transaction_date: r.get(3),
+            created_at: r.get(4),
+        }
+    }
+}
+
+struct IncomeStream {
+    account_ref: Option<String>,
+    source: Option<String>,
+    frequency: Option<String>,
+    amount: f64,
+    currency: Option<String>,
+    from_date: Option<String>,
+    to_date: Option<String>,
+}
+
+#[Object]
+impl IncomeStream {
+    async fn account_ref(&self) -> Option<&str> { self.account_ref.as_deref() }
+    async fn source(&self) -> Option<&str> { self.source.as_deref() }
+    async fn frequency(&self) -> Option<&str> { self.frequency.as_deref() }
+    async fn amount(&self) -> f64 { self.amount }
+    async fn currency(&self) -> Option<&str> { self.currency.as_deref() }
+    async fn from_date(&self) -> Option<&str> { self.from_date.as_deref() }
+    async fn to_date(&self) -> Option<&str> { self.to_date.as_deref() }
+}
+
+impl IncomeStream {
+    fn from_row(r: &tokio_postgres::Row) -> Self {
+        Self {
+            account_ref: r.get(0),
+            source: r.get(1),
+            frequency: r.get(2),
+            amount: r.get(3),
+            currency: r.get(4),
+            from_date: r.get(5),
+            to_date: r.get(6),
+        }
+    }
 }
 
 #[Object]
@@ -1790,6 +2015,7 @@ struct AaAccountInput {
     bank_name: Option<String>,
     balance: f64,
     fip_id: Option<String>,
+    account_ref: Option<String>,
 }
 
 #[derive(async_graphql::InputObject)]
@@ -1799,6 +2025,17 @@ struct AaTxInput {
     amount: f64,
     narration: Option<String>,
     timestamp: Option<String>,
+}
+
+#[derive(async_graphql::InputObject)]
+struct AaIncomeInput {
+    account_ref: Option<String>,
+    source: Option<String>,
+    frequency: Option<String>,
+    amount: f64,
+    currency: Option<String>,
+    from_date: Option<String>,
+    to_date: Option<String>,
 }
 
 struct AaConnection {

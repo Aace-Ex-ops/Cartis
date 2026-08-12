@@ -101,7 +101,7 @@ export function OnboardingForm() {
       <Step>
         <StepHeading
           title="Step 1 · Who are you?"
-          body="Personal finance, or run a business too? You can switch anytime."
+          body="Personal finance, or run a business too? Business starts with a free 7-day trial."
         />
         <div className="grid grid-cols-2 gap-3">
           <button
@@ -144,7 +144,7 @@ export function OnboardingForm() {
       <Step>
         <StepHeading
           title="Step 2 · Connect your bank"
-          body="Select a demo persona to link your bank account. No passwords needed."
+          body="One click — we pull balances and transactions from your linked bank account into Cartis. No passwords needed."
         />
         <AaConnect onSynced={() => setSynced(true)} />
         {synced && (

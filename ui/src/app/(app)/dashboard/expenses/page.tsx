@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
+import { useLiveData } from "@/lib/use-live-data";
 import { CategoryPie } from "@/components/seller/category-pie";
 import { EntryForm } from "@/components/seller/entry-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,14 +38,7 @@ export default function ExpensesPage() {
     }
   }, []);
 
-  const loaded = useRef(false);
-
-  useEffect(() => {
-    if (!loaded.current) {
-      load();
-      loaded.current = true;
-    }
-  }, [load]);
+  useLiveData(load, [load]);
 
   async function remove(entryId: string) {
     await gql(`mutation { deleteFinanceEntry(entryId: "${entryId}") }`);

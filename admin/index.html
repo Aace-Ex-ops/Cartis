@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cartis Admin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2358a6ff'/><text x='8' y='11.5' font-size='9' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'>C</text></svg>">
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --bad:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--border); }
+  header h1 { font-size:16px; margin:0; }
+  header h1 span { color:var(--muted); font-weight:400; }
+  nav { display:flex; gap:8px; }
+  nav button { background:none; border:none; color:var(--muted); padding:8px 12px; cursor:pointer; font-size:13px; border-radius:6px; }
+  nav button.active { color:var(--text); background:var(--panel); }
+  nav button:hover { color:var(--text); }
+  main { padding:20px; max-width:1100px; margin:0 auto; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .stat { display:inline-block; margin-right:24px; }
+  .stat b { display:block; font-size:24px; }
+  .stat span { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  tr:hover td { background:#1c2129; }
+  input { background:#0d1117; border:1px solid var(--border); color:var(--text); border-radius:6px; padding:8px 10px; font-size:13px; }
+  .btn { background:var(--accent); color:#fff; border:none; border-radius:6px; padding:8px 16px; cursor:pointer; font-size:13px; }
+  .btn:hover { opacity:.9; }
+  .err { color:var(--bad); }
+  .ok { color:var(--ok); }
+  .badge { padding:2px 8px; border-radius:10px; font-size:11px; }
+  .badge.sent { background:rgba(63,185,80,.15); color:var(--ok); }
+  .badge.failed { background:rgba(248,81,73,.15); color:var(--bad); }
+  .hidden { display:none; }
+  #login { max-width:340px; margin:80px auto; }
+  #login form { display:flex; flex-direction:column; gap:10px; }
+  .flex { display:flex; gap:10px; align-items:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cartis <span>admin</span></h1>
+  <nav id="nav" class="hidden">
+    <button data-tab="users" class="active">Users</button>
+    <button data-tab="subscriptions">Subscriptions</button>
+    <button data-tab="emails">Email log</button>
+    <button data-tab="logins">Logins/day</button>
+    <button data-tab="admins">Admins</button>
+    <button id="logout">Logout</button>
+  </nav>
+</header>
+
+<div id="login">
+  <div class="card">
+    <h2>Admin sign in</h2>
+    <form id="loginForm">
+      <input type="email" id="lemail" placeholder="admin email" required>
+      <input type="password" id="lpassword" placeholder="password" required>
+      <button class="btn" type="submit">Sign in</button>
+      <span id="loginErr" class="err"></span>
+    </form>
+  </div>
+</div>
+
+<main id="main" class="hidden">
+  <section id="tab-users">
+    <div class="card"><div class="stat"><b id="uTotal">–</b><span>users</span></div></div>
+    <div class="card" style="overflow-x:auto"><table id="usersTable">
+      <thead><tr><th>Email</th><th>Name</th><th>Provider</th><th>Type</th><th>Wallet</th><th>Created</th><th>Last login</th><th>Emails</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section id="tab-subscriptions" class="hidden">
+    <div class="card" style="overflow-x:auto"><table id="subsTable">
+      <thead><tr><th>Email</th><th>Amount</th><th>Method</th><th>Status</th><th>Date</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section id="tab-emails" class="hidden">
+    <div class="card" style="overflow-x:auto"><table id="emailsTable">
+      <thead><tr><th>ID</th><th>To</th><th>Subject</th><th>Status</th><th>Sent</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section id="tab-logins" class="hidden">
+    <div class="card" style="overflow-x:auto"><table id="loginsTable">
+      <thead><tr><th>Day</th><th>Logins</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <section id="tab-admins" class="hidden">
+    <div class="card">
+      <h3>Add dashboard admin</h3>
+      <form id="adminForm" class="flex">
+        <input type="email" id="aemail" placeholder="email" required>
+        <input type="password" id="apassword" placeholder="password (min 8)" required>
+        <button class="btn" type="submit">Add</button>
+      </form>
+      <span id="adminMsg"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+const LS_KEY = "cartis_admin_token";
+let token = localStorage.getItem(LS_KEY) || "";
+
+async function api(path, opts = {}) {
+  const res = await fetch("/api/admin" + path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", ...(token ? { "x-admin-token": token } : {}), ...(opts.headers || {}) },
+  });
+  if (res.status === 401 && !path.startsWith("/login")) {
+    logout();
+    throw new Error("session expired");
+  }
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(t || res.statusText);
+  }
+  return res.json();
+}
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+const fmt = (v) => v == null ? "–" : v;
+
+function showLogin(show) {
+  document.getElementById("login").classList.toggle("hidden", !show);
+  document.getElementById("main").classList.toggle("hidden", show);
+  document.getElementById("nav").classList.toggle("hidden", show);
+}
+
+async function refresh() {
+  const active = document.querySelector("nav button.active")?.dataset.tab;
+  const [users, subs, emails, logins] = await Promise.all([
+    api("/users"), api("/subscriptions"), api("/emails"), api("/logins"),
+  ]);
+  document.getElementById("uTotal").textContent = users.length;
+
+  document.getElementById("usersTable").querySelector("tbody").innerHTML = users.map(u => `
+    <tr><td>${esc(u.email)}</td><td>${esc(u.full_name)}</td><td>${esc(u.oauth_provider)}</td>
+    <td>${esc(u.user_type)}/${esc(u.business_type)}</td><td>₹${fmt(u.wallet_balance)}</td>
+    <td>${esc(fmt(u.created_at))}</td><td>${esc(fmt(u.last_login_at))}</td>
+    <td>${u.email_notifications ? "on" : "off"}</td></tr>`).join("");
+
+  document.getElementById("subsTable").querySelector("tbody").innerHTML = subs.map(s => `
+    <tr><td>${esc(s.email)}</td><td>₹${fmt(s.amount)}</td><td>${esc(s.payment_method)}</td>
+    <td>${esc(s.status)}</td><td>${esc(fmt(s.created_at))}</td></tr>`).join("");
+
+  document.getElementById("emailsTable").querySelector("tbody").innerHTML = emails.map(e => `
+    <tr><td>${e.id}</td><td>${esc(e.to_email)}</td><td>${esc(e.subject)}</td>
+    <td><span class="badge ${e.status.toLowerCase()}">${esc(e.status)}</span></td><td>${esc(fmt(e.created_at))}</td></tr>`).join("");
+
+  document.getElementById("loginsTable").querySelector("tbody").innerHTML = logins.map(l => `
+    <tr><td>${esc(l.day)}</td><td>${l.logins}</td></tr>`).join("");
+
+  if (active) showTab(active);
+}
+
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
+}
+
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  document.getElementById("loginErr").textContent = "";
+  try {
+    const r = await api("/login", { method: "POST", body: JSON.stringify({ email: document.getElementById("lemail").value, password: document.getElementById("lpassword").value }) });
+    token = r.token;
+    localStorage.setItem(LS_KEY, token);
+    showLogin(false);
+    refresh().catch(() => {});
+  } catch (err) { document.getElementById("loginErr").textContent = err.message; }
+});
+
+document.getElementById("adminForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  document.getElementById("adminMsg").textContent = "";
+  try {
+    await api("/admins", { method: "POST", body: JSON.stringify({ email: document.getElementById("aemail").value, password: document.getElementById("apassword").value }) });
+    document.getElementById("adminMsg").className = "ok";
+    document.getElementById("adminMsg").textContent = "admin added";
+    e.target.reset();
+  } catch (err) {
+    document.getElementById("adminMsg").className = "err";
+    document.getElementById("adminMsg").textContent = err.message;
+  }
+});
+
+document.querySelectorAll("nav button[data-tab]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+function logout() {
+  token = "";
+  localStorage.removeItem(LS_KEY);
+  showLogin(true);
+}
+
+document.getElementById("logout").addEventListener("click", logout);
+
+(async () => {
+  if (!token) { showLogin(true); return; }
+  showLogin(false);
+  try { await refresh(); } catch { showLogin(true); }
+})();
+</script>
+</body>
+</html>

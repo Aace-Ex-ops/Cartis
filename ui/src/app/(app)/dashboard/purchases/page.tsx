@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import type { Verdict } from "@/lib/mock";
 import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
@@ -38,19 +39,16 @@ function formatDate(iso: string): string {
 export default function PurchasesPage() {
   const [items, setItems] = useState<Analysis[] | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void gql<{ analysisHistory: Analysis[] }>(QUERY)
-      .then((d) => {
-        if (!cancelled) setItems(d.analysisHistory);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      const d = await gql<{ analysisHistory: Analysis[] }>(QUERY);
+      setItems(d.analysisHistory);
+    } catch {
+      setItems([]);
+    }
   }, []);
+
+  useLiveData(load, [load]);
 
   if (items === null) {
     return (

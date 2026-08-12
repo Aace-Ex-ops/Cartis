@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLiveData } from "@/lib/use-live-data";
 import { fetchSellerCategories, fmt, currentMonth, type SellerCategory } from "@/lib/seller";
 import { SkeletonHeading } from "@/components/shared/dashboard-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,22 +22,17 @@ export default function PnLPage() {
   const [expenses, setExpenses] = useState<SellerCategory[] | null>(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all([fetchSellerCategories("revenue"), fetchSellerCategories("expense")])
-      .then(([i, e]) => {
-        if (!cancelled) {
-          setIncome(i);
-          setExpenses(e);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    try {
+      const [i, e] = await Promise.all([fetchSellerCategories("revenue"), fetchSellerCategories("expense")]);
+      setIncome(i);
+      setExpenses(e);
+    } catch {
+      setFailed(true);
+    }
   }, []);
+
+  useLiveData(load, [load]);
 
   if (failed) {
     return (

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SpendChart } from "@/components/consumer/spend-chart";
 import { TabGauge } from "@/components/consumer/tab-gauge";
 import { gql } from "@/lib/gql";
+import { useLiveData } from "@/lib/use-live-data";
 import { SkeletonHeading, SkeletonCard } from "@/components/shared/dashboard-skeleton";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
@@ -24,38 +25,26 @@ export default function BudgetPage() {
   const [data, setData] = useState<BudgetData | null>(null);
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
+  const load = useCallback(async () => {
     // Fire AI suggestion first, then re-fetch budget data so chart reflects the new limit
-    void fetch(`${GATEWAY}/api/budget/suggest`, {
+    await fetch(`${GATEWAY}/api/budget/suggest`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     })
       .then((r) => r.json() as Promise<AiResult>)
-      .then((result) => {
-        if (!cancelled) setAiResult(result);
-      })
+      .then((result) => setAiResult(result))
       .catch(() => {})
       .finally(() => {
         // Always re-fetch the budget data (even if AI failed, get current state)
-        if (!cancelled) {
-          void gql<BudgetData>(`{ monthlyTab { limit spent } spending30d { day spend } }`)
-            .then((d) => {
-              if (!cancelled) setData(d);
-            })
-            .catch(() => {
-              if (!cancelled) setData({ monthlyTab: { limit: 0, spent: 0 }, spending30d: [] });
-            });
-        }
+        void gql<BudgetData>(`{ monthlyTab { limit spent } spending30d { day spend } }`)
+          .then((d) => setData(d))
+          .catch(() => setData({ monthlyTab: { limit: 0, spent: 0 }, spending30d: [] }));
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useLiveData(load, [load]);
 
   if (data === null) {
     return (
