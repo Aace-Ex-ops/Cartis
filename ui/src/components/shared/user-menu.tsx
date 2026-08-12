@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Repeat, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -34,23 +34,15 @@ const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = 
   settings: { label: "Settings", panel: SettingsPanel },
 };
 
-export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: boolean }) {
+export function UserMenu({ user }: { user: User }) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [userType, setUserType] = useState(user.userType);
-  const [effectivePlan, setEffectivePlan] = useState("free");
-  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void gql<{
-      me?: { userType?: string; effectivePlan?: string; trialEndsAt?: string | null } | null;
-    }>("{ me { userType effectivePlan trialEndsAt } }")
+    void gql<{ me?: { userType?: string } | null }>("{ me { userType } }")
       .then((d) => {
-        if (!cancelled) {
-          if (d.me?.userType) setUserType(d.me.userType);
-          setEffectivePlan(d.me?.effectivePlan ?? "free");
-          setTrialEndsAt(d.me?.trialEndsAt ?? null);
-        }
+        if (!cancelled && d.me?.userType) setUserType(d.me.userType);
       })
       .catch(() => {});
     return () => {
@@ -58,10 +50,16 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
     };
   }, []);
 
-  const planLabel =
-    effectivePlan === "trial"
-      ? `Trial · ${trialEndsAt ? new Date(trialEndsAt).toLocaleDateString() : ""}`.trim()
-      : ({ free: "Free", pro: "Pro", max: "Max", team_standard: "Team · Standard", team_premium: "Team · Premium", enterprise: "Enterprise" } as Record<string, string>)[effectivePlan] ?? "Free";
+  const isBusiness = userType === "business" || userType === "seller";
+
+  async function switchType(next: "personal" | "business") {
+    try {
+      await gql<unknown>(`mutation { updateUserType(userType: "${next}") { id } }`);
+      window.location.reload();
+    } catch {
+      // keep current state; retry next open
+    }
+  }
 
   const initials = user.fullName
     ?.split(" ")
@@ -76,35 +74,21 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          {collapsed ? (
-            <button
-              title={user.fullName}
-              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl p-1 transition-all hover:bg-white/10 focus:outline-none"
-            >
-              <Avatar className="h-9 w-9 shrink-0 rounded-xl bg-primary text-primary-foreground shadow-md border border-white/20">
+          <button className="flex w-full cursor-pointer items-center justify-between rounded-[6px] px-2 py-2 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <Avatar className="h-8 w-8 shrink-0 rounded-[6px] bg-primary text-primary-foreground">
                 <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
-                <AvatarFallback className="bg-primary text-xs font-bold text-primary-foreground">
+                <AvatarFallback className="bg-primary text-[13px] font-semibold text-primary-foreground">
                   {initials}
                 </AvatarFallback>
               </Avatar>
-            </button>
-          ) : (
-            <button className="flex w-full cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 focus:outline-none">
-              <span className="flex min-w-0 items-center gap-2.5">
-                <Avatar className="h-8 w-8 shrink-0 rounded-lg bg-primary text-primary-foreground border border-white/15">
-                  <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
-                  <AvatarFallback className="bg-primary text-[12px] font-semibold text-primary-foreground">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-[13px] font-medium text-foreground">{user.fullName}</span>
-                  <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
-                </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-[13px] font-medium text-foreground">{user.fullName}</span>
+                <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
               </span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/50" />
-            </button>
-          )}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <div className="flex items-center gap-2 px-2 py-1.5">
@@ -113,7 +97,7 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
               <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
             <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              {planLabel}
+              {isBusiness ? "Business" : "Personal finance"}
             </span>
           </div>
           <DropdownMenuSeparator />
@@ -123,6 +107,13 @@ export function UserMenu({ user, collapsed = false }: { user: User; collapsed?: 
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => void switchType(isBusiness ? "personal" : "business")}
+            className="cursor-pointer"
+          >
+            <Repeat className="mr-2 h-4 w-4" />
+            {isBusiness ? "Switch to Personal finance" : "Switch to Business"}
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { window.location.href = `${GATEWAY}/auth/logout`; }} className="text-destructive focus:text-destructive">
             Sign out
           </DropdownMenuItem>

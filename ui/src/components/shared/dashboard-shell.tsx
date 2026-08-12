@@ -6,15 +6,6 @@ import { Sidebar, type NavGroup } from "@/components/shared/sidebar";
 import { HeaderBar } from "@/components/shared/header-bar";
 import { getMe, type User } from "@/lib/auth";
 
-const DEMO_USER: User = {
-  id: "demo-user",
-  email: "preview@cartis.ai",
-  name: "Aditya Sharma",
-  avatar: "",
-};
-
-const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "1";
-
 export function DashboardShell({
   groups,
   upgrade,
@@ -28,20 +19,10 @@ export function DashboardShell({
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // Ensure clean light background matching Color Hunt #FDFEF7 palette
-    document.documentElement.classList.remove("dark");
-    document.documentElement.style.removeProperty("overflow");
-    document.body.style.removeProperty("overflow");
-    document.body.style.overflow = "auto";
-
     let cancelled = false;
     void getMe().then((me) => {
       if (cancelled) return;
       if (!me) {
-        if (isDemo) {
-          setUser(DEMO_USER);
-          return;
-        }
         window.location.href = "/";
         return;
       }
@@ -53,30 +34,21 @@ export function DashboardShell({
   }, []);
 
   return (
-    <div className="relative flex min-h-screen w-full bg-[#fdfef7] text-[#132a13] font-sans">
-      {/* Sticky Sidebar Rail */}
-      <aside
-        className={`sticky top-0 h-screen shrink-0 transition-all duration-300 ease-in-out z-20 ${
-          collapsed ? "w-[72px]" : "w-[260px]"
+    <div className="flex h-screen overflow-hidden bg-background">
+      <div
+        className={`shrink-0 overflow-hidden transition-all duration-300 ${
+          collapsed ? "w-0 opacity-0" : "w-[260px] opacity-100"
         }`}
       >
-        {user && (
-          <Sidebar
-            groups={groups}
-            upgrade={upgrade}
-            user={user}
-            collapsed={collapsed}
-          />
-        )}
-      </aside>
+        {user && <Sidebar groups={groups} upgrade={upgrade} user={user} />}
+      </div>
 
-      {/* Main Content Column */}
-      <div className="relative z-10 flex min-h-screen min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <HeaderBar
           leading={
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="rounded-full p-1.5 text-gray-500 transition-colors hover:bg-[#b2d959]/20 hover:text-[#7ec151]"
+              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {collapsed ? (
@@ -87,9 +59,7 @@ export function DashboardShell({
             </button>
           }
         />
-        <main className="w-full flex-1 p-6 md:p-8">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto p-6 md:p-8">{children}</main>
       </div>
     </div>
   );
