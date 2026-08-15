@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Target,
-  Briefcase,
   Calculator,
   Package,
 } from "lucide-react";
@@ -18,7 +17,6 @@ const PERSONAL_NAV = [
       { id: "nav-home", title: "Home", href: "/dashboard", icon: LayoutDashboard },
       { id: "nav-purchases", title: "Purchase Tracker", href: "/dashboard/purchases", icon: ShoppingCart },
       { id: "nav-goals", title: "Goals", href: "/dashboard/goals", icon: Target },
-      { id: "nav-portfolio", title: "Portfolio", href: "/dashboard/portfolio", icon: Briefcase },
       { id: "nav-tools", title: "Tools", href: "/dashboard/tools", icon: Calculator },
     ],
   },
