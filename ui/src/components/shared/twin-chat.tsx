@@ -265,12 +265,15 @@ export function TwinChat({
         method: "DELETE",
         credentials: "include",
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setError("Couldn't delete this chat — try again.");
+        return;
+      }
+      setConfirmDeleteId(null);
       if (activeId === id) newChat();
-      else setConfirmDeleteId(null);
       void loadSessions();
     } catch {
-      // ignore
+      setError("Couldn't delete this chat — try again.");
     }
   };
 
@@ -568,11 +571,16 @@ export function TwinChat({
             )}
             {sessions.map((s) => {
               const active = s.session_id === activeId;
+              const armed = confirmDeleteId === s.session_id;
               return (
                 <div
                   key={s.session_id}
                   className={`group relative mb-0.5 flex items-center rounded-md transition-colors ${
-                    active ? "bg-primary/10" : "hover:bg-foreground/5"
+                    armed
+                      ? "bg-destructive/10 ring-1 ring-destructive/40"
+                      : active
+                        ? "bg-primary/10"
+                        : "hover:bg-foreground/5"
                   }`}
                 >
                   {renamingId === s.session_id ? (
@@ -584,11 +592,16 @@ export function TwinChat({
                         if (e.key === "Enter") void renameSession(s.session_id);
                         if (e.key === "Escape") setRenamingId(null);
                       }}
+                      onBlur={() => {
+                        if (renamingTitle.trim() && renamingTitle.trim() !== s.title)
+                          void renameSession(s.session_id);
+                        else setRenamingId(null);
+                      }}
                       className="h-7 border-0 px-2 text-[12px] shadow-none focus-visible:ring-1"
                     />
                   ) : (
                     <button
-                      onClick={() => void openSession(s.session_id)}
+                      onClick={() => (armed ? setConfirmDeleteId(null) : void openSession(s.session_id))}
                       className="min-w-0 flex-1 px-2 py-1.5 text-left"
                     >
                       <span className={`block truncate text-[12px] ${active ? "font-medium text-foreground" : "text-foreground/80"}`}>
@@ -600,15 +613,30 @@ export function TwinChat({
                     </button>
                   )}
                   {renamingId !== s.session_id && (
-                    <div className="absolute right-1 hidden items-center gap-0.5 group-hover:flex">
-                      {confirmDeleteId === s.session_id ? (
-                        <button
-                          onClick={() => void deleteSession(s.session_id)}
-                          className="rounded-md bg-destructive/15 p-1 text-destructive"
-                          aria-label="Confirm delete session"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                    <div
+                      className={`absolute right-1 items-center gap-0.5 ${
+                        armed ? "flex" : "hidden group-hover:flex"
+                      }`}
+                    >
+                      {armed ? (
+                        <>
+                          <button
+                            onClick={() => void deleteSession(s.session_id)}
+                            className="rounded-md bg-destructive/20 p-1 text-destructive"
+                            aria-label="Confirm delete session"
+                            title="Confirm delete"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="rounded-md p-1 text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                            aria-label="Cancel delete session"
+                            title="Cancel"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </>
                       ) : (
                         <>
                           <button

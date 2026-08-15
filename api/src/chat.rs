@@ -114,6 +114,14 @@ pub async fn chat_stream(
         return json_err(StatusCode::BAD_REQUEST, "message required");
     }
 
+    match crate::usage::bump(&state, &uid, "ai_chat").await {
+        Ok(true) => {}
+        Ok(false) => return json_err(StatusCode::TOO_MANY_REQUESTS, "daily AI chat limit reached — upgrade for more"),
+        Err(e) => {
+            eprintln!("usage gate error: {e}");
+        }
+    }
+
     let conn = match state.pg.get().await {
         Ok(c) => c,
         Err(e) => {
@@ -1038,8 +1046,16 @@ async fn groq_stream(
         send(sse(&ev.to_string())).await;
     }
 
-    if let Some(capture) = extract_captures_groq(&client, &model, &user_message, &full).await {
-        send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
+    if match crate::usage::bump(&state, &uid, "ai_capture").await {
+        Ok(ok) => ok,
+        Err(e) => {
+            eprintln!("usage capture gate error: {e}");
+            false
+        }
+    } {
+        if let Some(capture) = extract_captures_groq(&client, &model, &user_message, &full).await {
+            send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
+        }
     }
     persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
     send(sse("[DONE]")).await;
@@ -1099,6 +1115,13 @@ async fn push_supermemory(
         Ok(k) if !k.is_empty() => k,
         _ => return,
     };
+    match crate::usage::bump(&state, &uid, "sm_push").await {
+        Ok(true) => {}
+        _ => {
+            eprintln!("supermemory push skipped: daily storage limit");
+            return;
+        }
+    }
     let entity_context = match state.pg.get().await {
         Ok(conn) => {
             let name: Option<String> = conn

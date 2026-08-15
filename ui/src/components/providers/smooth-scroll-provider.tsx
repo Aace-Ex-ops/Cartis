@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import Lenis from "@studio-freight/lenis";
 
-const APP_ROUTES = ["/dashboard", "/onboarding", "/seller"];
+const APP_ROUTES = ["/dashboard", "/seller", "/onboarding"];
 
 export function SmoothScrollProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

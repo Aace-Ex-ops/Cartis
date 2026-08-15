@@ -27,12 +27,22 @@ type User = {
 
 type PanelKey = "subscription" | "settings";
 
-const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType }> = {
+const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType<{ effectivePlan?: string; userType?: string }> }> = {
   subscription: { label: "Subscription", panel: SubscriptionPanel },
   settings: { label: "Settings", panel: SettingsPanel },
 };
 
-export function UserMenu({ user }: { user: User }) {
+export function UserMenu({
+  user,
+  collapsed = false,
+  effectivePlan,
+  userType,
+}: {
+  user: User;
+  collapsed?: boolean;
+  effectivePlan?: string;
+  userType?: string;
+}) {
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
 
   const isBusiness = user.userType === "business" || user.userType === "seller";
@@ -45,26 +55,41 @@ export function UserMenu({ user }: { user: User }) {
     .toUpperCase() ?? "…";
 
   const ActivePanel = openPanel ? PANELS[openPanel].panel : null;
+  const panelProps = { effectivePlan: effectivePlan ?? "free", userType: userType ?? user.userType };
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button className="flex w-full cursor-pointer items-center justify-between rounded-[6px] px-2 py-2 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none">
-            <span className="flex min-w-0 items-center gap-2.5">
-              <Avatar className="h-8 w-8 shrink-0 rounded-[6px] bg-primary text-primary-foreground">
+          {collapsed ? (
+            <button
+              title={user.fullName}
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl p-1 transition-all hover:bg-white/10 focus:outline-none"
+            >
+              <Avatar className="h-9 w-9 shrink-0 rounded-xl bg-primary text-primary-foreground shadow-md border border-white/20">
                 <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
-                <AvatarFallback className="bg-primary text-[13px] font-semibold text-primary-foreground">
+                <AvatarFallback className="bg-primary text-xs font-bold text-primary-foreground">
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-[13px] font-medium text-foreground">{user.fullName}</span>
-                <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+            </button>
+          ) : (
+            <button className="flex w-full cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 focus:outline-none">
+              <span className="flex min-w-0 items-center gap-2.5">
+                <Avatar className="h-8 w-8 shrink-0 rounded-lg bg-primary text-primary-foreground border border-white/15">
+                  <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
+                  <AvatarFallback className="bg-primary text-[12px] font-semibold text-primary-foreground">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-[13px] font-medium text-foreground">{user.fullName}</span>
+                  <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+                </span>
               </span>
-            </span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/50" />
-          </button>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+            </button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           <div className="flex items-center gap-2 px-2 py-1.5">
@@ -91,7 +116,7 @@ export function UserMenu({ user }: { user: User }) {
       <Dialog open={openPanel !== null} onOpenChange={(v) => { if (!v) setOpenPanel(null); }}>
         <DialogContent className="max-w-3xl h-[min(640px,calc(100vh-3rem))] flex flex-col overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col">
-            {ActivePanel && <ActivePanel />}
+            {ActivePanel && <ActivePanel {...panelProps} />}
           </div>
         </DialogContent>
       </Dialog>

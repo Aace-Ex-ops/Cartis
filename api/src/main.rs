@@ -21,6 +21,7 @@ mod chat;
 mod email;
 mod graphql;
 mod insights;
+mod usage;
 
 pub struct AppState {
     pub pg: deadpool_postgres::Pool,
@@ -44,6 +45,11 @@ async fn main() {
         admin_tokens: Mutex::new(HashSet::new()),
     });
     bootstrap_admin(&state).await;
+    if let Ok(conn) = state.pg.get().await {
+        if let Err(e) = conn.batch_execute(usage::DDL).await {
+            eprintln!("usage table init error: {e}");
+        }
+    }
     let schema = Schema::build(graphql::QueryRoot, graphql::MutationRoot, EmptySubscription)
         .data(state.clone())
         .finish();

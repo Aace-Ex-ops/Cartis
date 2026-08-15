@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString, rand_core::OsRng};
-use argon2::{Argon2, PasswordVerifier};
 use async_graphql::{Context, Object, Result};
 
 use crate::chat::purge_supermemory;
@@ -162,14 +160,15 @@ impl QueryRoot {
     }
 
     #[graphql(name = "ledgerTransactions")]
-    async fn ledger_transactions(&self, ctx: &Context<'_>, limit: Option<i32>) -> Result<Vec<LedgerTx>> {
+    async fn ledger_transactions(&self, ctx: &Context<'_>, limit: Option<i32>, search: Option<String>) -> Result<Vec<LedgerTx>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
                 "SELECT transaction_type, amount::float8, description, transaction_date::text, created_at::text
                  FROM ledger_entries WHERE user_id::text = $1
+                   AND ($3::text IS NULL OR description ILIKE '%' || $3::text || '%')
                  ORDER BY COALESCE(transaction_date, created_at) DESC LIMIT $2::int4",
-                &[&uid, &limit.unwrap_or(10)],
+                &[&uid, &limit.unwrap_or(10), &search],
             )
             .await?;
         Ok(rows.iter().map(LedgerTx::from_row).collect())
@@ -201,7 +200,7 @@ impl QueryRoot {
         crate::insights::query(state, &uid, &role).await
     }
 
-    async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>) -> Result<Vec<AnalysisLog>> {
+    async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>, search: Option<String>) -> Result<Vec<AnalysisLog>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
@@ -210,9 +209,10 @@ impl QueryRoot {
                         al.user_action, al.created_at::text
                  FROM analysis_log al JOIN products p ON p.product_id = al.product_id
                  WHERE al.user_id::text = $1
+                   AND ($4::text IS NULL OR p.name ILIKE '%' || $4::text || '%')
                  ORDER BY al.created_at DESC
                  LIMIT $2 OFFSET $3",
-                &[&uid, &(limit.unwrap_or(50) as i64), &(offset.unwrap_or(0) as i64)],
+                &[&uid, &(limit.unwrap_or(50) as i64), &(offset.unwrap_or(0) as i64), &search],
             )
             .await?;
         Ok(rows.iter().map(AnalysisLog::from_row).collect())
@@ -776,58 +776,6 @@ impl MutationRoot {
         Ok(true)
     }
 
-    async fn signup(&self, ctx: &Context<'_>, email: String, full_name: String, password: String) -> Result<Option<String>> {
-        if !email.contains('@') || password.len() < 8 {
-            return Err("invalid email or password (min 8 chars)".into());
-        }
-        let salt = SaltString::generate(&mut OsRng);
-        let hash = Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| e.to_string())?
-            .to_string();
-        let row = pg(ctx).get().await?
-            .query_opt(
-                "INSERT INTO users (email, full_name, oauth_provider, password_hash)
-                 VALUES ($1, $2, 'password', $3)
-                 ON CONFLICT (email) DO NOTHING RETURNING user_id::text",
-                &[&email, &full_name, &hash],
-            )
-            .await?;
-        if row.is_some() {
-            crate::email::send_email(
-                pg(ctx),
-                &email,
-                "Welcome to Cartis!",
-                &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
-            ).await;
-        }
-        Ok(row.map(|r| r.get(0)))
-    }
-
-    async fn login(&self, ctx: &Context<'_>, email: String, password: String) -> Result<Option<AuthUser>> {
-        let row = pg(ctx).get().await?
-            .query_opt(
-                "SELECT user_id::text, password_hash, full_name, avatar_url
-                 FROM users WHERE email = $1 AND oauth_provider = 'password' AND password_hash IS NOT NULL",
-                &[&email],
-            )
-            .await?;
-        let Some(row) = row else { return Ok(None) };
-        let hash: String = row.get(1);
-        let parsed = PasswordHash::new(&hash).map_err(|e| e.to_string())?;
-        if Argon2::default().verify_password(password.as_bytes(), &parsed).is_err() {
-            return Ok(None);
-        }
-        let _ = pg(ctx).get().await?
-            .execute("UPDATE users SET last_login_at = NOW() WHERE email = $1", &[&email])
-            .await;
-        Ok(Some(AuthUser {
-            user_id: row.get(0),
-            full_name: row.get(2),
-            avatar_url: row.get(3),
-        }))
-    }
-
     async fn set_monthly_tab_limit(&self, ctx: &Context<'_>, limit: f64) -> Result<MonthlyTab> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let row = pg(ctx).get().await?
@@ -920,6 +868,11 @@ impl MutationRoot {
     async fn refresh_coach_insights(&self, ctx: &Context<'_>, role: String) -> Result<Vec<crate::insights::Insight>> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let state = ctx.data_unchecked::<Arc<AppState>>();
+        match crate::usage::bump(state, &uid, "ai_insights").await {
+            Ok(true) => {}
+            Ok(false) => return Err("daily insights limit reached — upgrade for more".into()),
+            Err(e) => eprintln!("usage insights gate error: {e}"),
+        }
         crate::insights::refresh(state, &uid, &role).await
     }
 
@@ -1645,19 +1598,6 @@ impl User {
     async fn plan(&self) -> &str { &self.plan }
     async fn trial_ends_at(&self) -> Option<&str> { self.trial_ends_at.as_deref() }
     async fn effective_plan(&self) -> &str { &self.effective_plan }
-}
-
-struct AuthUser {
-    user_id: String,
-    full_name: String,
-    avatar_url: Option<String>,
-}
-
-#[Object]
-impl AuthUser {
-    async fn user_id(&self) -> &str { &self.user_id }
-    async fn full_name(&self) -> &str { &self.full_name }
-    async fn avatar_url(&self) -> Option<&str> { self.avatar_url.as_deref() }
 }
 
 struct UpsertedUser {
