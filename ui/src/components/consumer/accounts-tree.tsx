@@ -23,76 +23,52 @@ const fmt = (n: number) => {
   return `${isNeg ? "-" : ""}₹${abs.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 };
 
-const INITIAL_GROUPS: CategoryGroup[] = [
-  {
-    id: "banking",
-    title: "Banking",
-    total: 3947.5,
-    items: [
-      {
-        id: "savings-parent",
-        name: "Savings",
-        amount: 3947.5,
-        subItems: [
-          { id: "s1", name: "Sam Lee Savings", amount: 3947.5 },
-          { id: "s2", name: "Savings Goals", amount: 1980.0 },
-          { id: "s3", name: "Available Balance", amount: 1967.5 },
-        ],
-      },
-    ],
-  },
-  {
-    id: "investments",
-    title: "Investments",
-    total: 48620.05,
-    items: [
-      {
-        id: "brokerage-parent",
-        name: "Brokerage",
-        amount: 48620.05,
-        subItems: [{ id: "inv1", name: "Sam Lee Stock Portfolio", amount: 48620.05 }],
-      },
-    ],
-  },
-  {
-    id: "assets",
-    title: "Assets",
-    total: 1500000.0,
-    items: [
-      {
-        id: "realestate-parent",
-        name: "Real Estate",
-        amount: 1500000.0,
-        subItems: [{ id: "asset1", name: "1226 University Dr, Menlo Park, C...", amount: 1500000.0 }],
-      },
-    ],
-  },
-  {
-    id: "liabilities",
-    title: "Liabilities",
-    total: -1455000.0,
-    items: [
-      {
-        id: "home-loan-parent",
-        name: "Home Loan",
-        amount: -1455000.0,
-        subItems: [{ id: "lia1", name: "Home Loan", amount: -1455000.0 }],
-      },
-    ],
-  },
-];
+export type BankAccount = {
+  accountId: string;
+  bankName: string;
+  balance: number | null;
+};
 
-export function AccountsTree({ totalNetWorth }: { totalNetWorth: number }) {
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    banking: true,
-    investments: true,
-    assets: true,
-    liabilities: true,
-    "savings-parent": true,
-    "brokerage-parent": true,
-    "realestate-parent": true,
-    "home-loan-parent": true,
-  });
+export type Holding = {
+  holdingId: string;
+  assetType: string;
+  name: string;
+  quantity: number | null;
+  currentPrice: number | null;
+};
+
+function buildGroups(accounts: BankAccount[], holdings: Holding[]): CategoryGroup[] {
+  const groups: CategoryGroup[] = [];
+  if (accounts.length > 0) {
+    groups.push({
+      id: "banking",
+      title: "Banking",
+      total: accounts.reduce((s, a) => s + (a.balance ?? 0), 0),
+      items: accounts.map((a) => ({
+        id: `bank-${a.accountId}`,
+        name: a.bankName,
+        amount: a.balance ?? 0,
+      })),
+    });
+  }
+  if (holdings.length > 0) {
+    groups.push({
+      id: "investments",
+      title: "Investments",
+      total: holdings.reduce((s, h) => s + (h.quantity ?? 0) * (h.currentPrice ?? 0), 0),
+      items: holdings.map((h) => ({
+        id: `holding-${h.holdingId}`,
+        name: h.name,
+        amount: (h.quantity ?? 0) * (h.currentPrice ?? 0),
+      })),
+    });
+  }
+  return groups;
+}
+
+export function AccountsTree({ accounts, holdings, totalNetWorth }: { accounts: BankAccount[]; holdings: Holding[]; totalNetWorth: number }) {
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const groups = buildGroups(accounts, holdings);
 
   const toggle = (id: string) => {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -122,7 +98,7 @@ export function AccountsTree({ totalNetWorth }: { totalNetWorth: number }) {
 
       {/* Accounts Collapsible Tree */}
       <div className="mt-2 flex flex-col gap-1 overflow-y-auto max-h-[640px] pr-1 [scrollbar-width:none]">
-        {INITIAL_GROUPS.map((group) => {
+        {groups.map((group) => {
           const isGroupOpen = !!openGroups[group.id];
           return (
             <div key={group.id} className="flex flex-col">

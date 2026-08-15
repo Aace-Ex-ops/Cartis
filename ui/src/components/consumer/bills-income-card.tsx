@@ -2,45 +2,24 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-export function BillsIncomeCard() {
-  const items = [
-    {
-      id: "b1",
-      badge: "U",
-      badgeBg: "bg-[#b2d959]/40 text-[#132a13] border-[#7ec151]/30",
-      dateTag: "today",
-      title: "Uber",
-      amount: "+₹ 10.00",
-      amountColor: "text-[#7ec151]",
-    },
-    {
-      id: "b2",
-      badge: "O",
-      badgeBg: "bg-[#fed24f]/50 text-[#854d0e] border-[#fed24f]",
-      dateTag: "in 5 days",
-      title: "Online Course Sale",
-      amount: "+₹ 150.00",
-      amountColor: "text-[#854d0e]",
-    },
-    {
-      id: "b3",
-      badge: "O",
-      badgeBg: "bg-[#fed24f]/50 text-[#854d0e] border-[#fed24f]",
-      dateTag: "on May 26, 2026",
-      title: "Online Course Sale",
-      amount: "+₹ 150.00",
-      amountColor: "text-[#854d0e]",
-    },
-    {
-      id: "b4",
-      badge: "R",
-      badgeBg: "bg-[#7ec151]/20 text-[#132a13] border-[#7ec151]/30",
-      dateTag: "on Jun 1, 2026",
-      title: "Rocket Mortgage",
-      amount: "₹ 5,000.00",
-      amountColor: "text-[#132a13]",
-    },
-  ];
+export type IncomeStream = {
+  source: string;
+  frequency: string;
+  amount: number;
+  currency: string;
+  fromDate: string | null;
+};
+
+export function BillsIncomeCard({ streams }: { streams: IncomeStream[] }) {
+  const items = streams.slice(0, 4).map((s) => ({
+    id: s.source + s.frequency + s.amount,
+    badge: "₹",
+    badgeBg: "bg-[#b2d959]/40 text-[#132a13] border-[#7ec151]/30",
+    dateTag: s.frequency,
+    title: s.source,
+    amount: `+₹${s.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+    amountColor: "text-[#7ec151]",
+  }));
 
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm transition-all duration-300">

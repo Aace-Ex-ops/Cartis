@@ -2,24 +2,49 @@
 
 import { useEffect, useState } from "react";
 import { Sparkles, SlidersHorizontal } from "lucide-react";
-import { AccountsTree } from "@/components/consumer/accounts-tree";
+import { AccountsTree, type BankAccount, type Holding } from "@/components/consumer/accounts-tree";
 import { NetWorthChart } from "@/components/consumer/net-worth-chart";
-import { RecentTransactionsCard } from "@/components/consumer/recent-transactions-card";
-import { BillsIncomeCard } from "@/components/consumer/bills-income-card";
-import { IncomeSpendingSummary } from "@/components/consumer/income-spending-summary";
+import { RecentTransactionsCard, type LedgerTx } from "@/components/consumer/recent-transactions-card";
+import { BillsIncomeCard, type IncomeStream } from "@/components/consumer/bills-income-card";
+import { IncomeSpendingSummary, type SpendingDay } from "@/components/consumer/income-spending-summary";
 import { getMe, type User } from "@/lib/auth";
+import { gql } from "@/lib/gql";
+
+type HomeData = {
+  bankAccounts: BankAccount[];
+  holdings: Holding[];
+  ledgerTransactions: LedgerTx[];
+  incomeStreams: IncomeStream[];
+  spending30d: SpendingDay[];
+  me: { monthlyIncome: number | null; monthlySpend: number | null } | null;
+};
+
+const QUERY = `{
+  bankAccounts { accountId bankName balance }
+  holdings { holdingId assetType name quantity currentPrice }
+  ledgerTransactions(limit: 5) { txnType amount description transactionDate }
+  incomeStreams { source frequency amount currency fromDate }
+  spending30d { day spend }
+  me { monthlyIncome monthlySpend }
+}`;
 
 export function PersonalDashboard() {
   const [user, setUser] = useState<User | null>(null);
+  const [data, setData] = useState<HomeData | null>(null);
 
   useEffect(() => {
     void getMe().then((u) => {
       if (u) setUser(u);
     });
+    void gql<HomeData>(QUERY)
+      .then(setData)
+      .catch(() => setData(null));
   }, []);
 
   const firstName = user?.name ? user.name.split(" ")[0] : "Sam";
-  const totalNetWorth = 97567.55;
+  const bankBalance = (data?.bankAccounts ?? []).reduce((s, a) => s + (a.balance ?? 0), 0);
+  const holdingsValue = (data?.holdings ?? []).reduce((s, h) => s + (h.quantity ?? 0) * (h.currentPrice ?? 0), 0);
+  const totalNetWorth = bankBalance + holdingsValue;
 
   return (
     <div className="relative flex flex-col gap-6 text-[#132a13] pb-12">
@@ -39,7 +64,7 @@ export function PersonalDashboard() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Left Column: Accounts Tree Panel */}
         <div className="lg:col-span-1">
-          <AccountsTree totalNetWorth={totalNetWorth} />
+          <AccountsTree accounts={data?.bankAccounts ?? []} holdings={data?.holdings ?? []} totalNetWorth={totalNetWorth} />
         </div>
 
         {/* Right Column: Net Worth, Transactions, Bills, Income & Spending */}
@@ -49,12 +74,16 @@ export function PersonalDashboard() {
 
           {/* Transactions & Bills Row */}
           <div className="grid gap-6 sm:grid-cols-2">
-            <RecentTransactionsCard />
-            <BillsIncomeCard />
+            <RecentTransactionsCard transactions={data?.ledgerTransactions ?? []} />
+            <BillsIncomeCard streams={data?.incomeStreams ?? []} />
           </div>
 
           {/* Income & Spending Summary Row */}
-          <IncomeSpendingSummary />
+          <IncomeSpendingSummary
+            monthlyIncome={data?.me?.monthlyIncome ?? null}
+            monthlySpend={data?.me?.monthlySpend ?? null}
+            spending30d={data?.spending30d ?? []}
+          />
         </div>
       </div>
 

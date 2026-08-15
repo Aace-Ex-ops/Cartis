@@ -2,16 +2,18 @@
 
 import { BarChart, Bar, ResponsiveContainer, XAxis, Tooltip } from "recharts";
 
-const MONTHLY_DATA = [
-  { month: "Dec", income: 12500, spend: 4200 },
-  { month: "Jan", income: 14200, spend: 5100 },
-  { month: "Feb", income: 11800, spend: 3800 },
-  { month: "Mar", income: 16500, spend: 6200 },
-  { month: "Apr", income: 15100, spend: 4900 },
-  { month: "May", income: 18900, spend: 5006.5 },
-];
+export type SpendingDay = { day: string; spend: number };
 
-export function IncomeSpendingSummary() {
+export function IncomeSpendingSummary({ monthlyIncome, monthlySpend, spending30d }: { monthlyIncome: number | null; monthlySpend: number | null; spending30d: SpendingDay[] }) {
+  const weekly = spending30d.length > 0
+    ? Array.from({ length: 5 }, (_, w) => {
+        const days = spending30d.filter((d) => parseInt(d.day, 10) >= w * 7 + 1 && parseInt(d.day, 10) <= w * 7 + 7);
+        return { label: `Wk ${w + 1}`, spend: days.reduce((s, d) => s + d.spend, 0) };
+      })
+    : [];
+  const income = monthlyIncome ?? 0;
+  const spend = monthlySpend ?? 0;
+
   return (
     <div className="grid gap-6 sm:grid-cols-2">
       {/* Income Card */}
@@ -19,20 +21,20 @@ export function IncomeSpendingSummary() {
         <div className="flex items-center justify-between pb-2 border-b border-gray-100">
           <div>
             <h3 className="text-base font-bold text-[#132a13]">Income</h3>
-            <p className="text-xs text-gray-500">Recent 6 Months</p>
+            <p className="text-xs text-gray-500">Monthly</p>
           </div>
-          <span className="text-lg font-black text-[#7ec151] tabular-nums">₹18,900.00</span>
+          <span className="text-lg font-black text-[#7ec151] tabular-nums">₹{income.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
         </div>
 
         <div className="mt-4 h-32 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={MONTHLY_DATA}>
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#7ec151" }} axisLine={false} tickLine={false} />
+            <BarChart data={weekly}>
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#7ec151" }} axisLine={false} tickLine={false} />
               <Tooltip
-                formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, "Income"]}
+                formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, "Spending"]}
                 contentStyle={{ backgroundColor: "#ffffff", borderColor: "#7ec151", borderRadius: 12, color: "#132a13" }}
               />
-              <Bar dataKey="income" fill="#b2d959" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="spend" fill="#b2d959" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -43,15 +45,15 @@ export function IncomeSpendingSummary() {
         <div className="flex items-center justify-between pb-2 border-b border-gray-100">
           <div>
             <h3 className="text-base font-bold text-[#132a13]">Spending</h3>
-            <p className="text-xs text-gray-500">Recent 6 Months</p>
+            <p className="text-xs text-gray-500">Monthly</p>
           </div>
-          <span className="text-lg font-black text-[#132a13] tabular-nums">₹5,006.50</span>
+          <span className="text-lg font-black text-[#132a13] tabular-nums">₹{spend.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
         </div>
 
         <div className="mt-4 h-32 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={MONTHLY_DATA}>
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#7ec151" }} axisLine={false} tickLine={false} />
+            <BarChart data={weekly}>
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#7ec151" }} axisLine={false} tickLine={false} />
               <Tooltip
                 formatter={(v) => [`₹${Number(v).toLocaleString("en-IN")}`, "Spending"]}
                 contentStyle={{ backgroundColor: "#ffffff", borderColor: "#7ec151", borderRadius: 12, color: "#132a13" }}

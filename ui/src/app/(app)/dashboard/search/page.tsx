@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight, PackageSearch, SearchX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -173,9 +172,7 @@ function SearchResults() {
                 {analyses.map((a) => (
                   <div key={a.analysisId} className="flex items-center gap-4 py-3">
                     <div className="flex min-w-0 flex-1 flex-col">
-                      <Link href="/dashboard/analysis" className="truncate text-[14px] font-medium text-foreground hover:underline">
-                        {a.productName}
-                      </Link>
+                      <span className="truncate text-[14px] font-medium text-foreground">{a.productName}</span>
                       <span className="text-[12px] text-muted-foreground">{a.explanation || day(a.createdAt)}</span>
                     </div>
                     <span className="text-[13px] text-muted-foreground">{fmt(a.price)}</span>
