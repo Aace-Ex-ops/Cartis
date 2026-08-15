@@ -57,10 +57,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isBusiness = userType === "business" || userType === "seller";
   const isEnterprise = effectivePlan === "enterprise";
   const groups = isEnterprise
-    ? BUSINESS_NAV.map((g) => ({
-        ...g,
-        items: g.items.filter((i) => i.id !== "nav-home"),
-      })).concat(PERSONAL_NAV)
+    ? (PERSONAL_NAV).concat(
+        BUSINESS_NAV.map((g) => ({
+          ...g,
+          items: g.items.filter((i) => i.id !== "nav-home"),
+        })),
+      )
     : isBusiness
       ? BUSINESS_NAV
       : PERSONAL_NAV;
