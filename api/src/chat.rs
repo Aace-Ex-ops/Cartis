@@ -289,7 +289,10 @@ async fn memory_context(state: &Arc<AppState>, uid: &str, message: &str) -> Stri
         .await
     {
         Ok(r) => r.get(0),
-        Err(_) => return String::new(),
+        Err(e) => {
+            eprintln!("memory: exists query failed: {e}");
+            return String::new();
+        }
     };
     if !has_memories {
         return String::new();
@@ -314,12 +317,17 @@ async fn memory_context(state: &Arc<AppState>, uid: &str, message: &str) -> Stri
         .await
     {
         Ok(r) => r,
-        Err(_) => return String::new(),
+        Err(e) => {
+            eprintln!("memory: embed call failed: {e}");
+            return String::new();
+        }
     };
     if !res.status().is_success() {
+        eprintln!("memory: embed status {}", res.status().as_u16());
         return String::new();
     }
     let Ok(json) = res.json::<serde_json::Value>().await else {
+        eprintln!("memory: embed json parse failed");
         return String::new();
     };
     let Some(embedding) = json
@@ -331,6 +339,7 @@ async fn memory_context(state: &Arc<AppState>, uid: &str, message: &str) -> Stri
                 .collect::<Vec<f64>>()
         })
     else {
+        eprintln!("memory: embed response shape unexpected");
         return String::new();
     };
     let vec_sql = embedding
@@ -345,20 +354,24 @@ async fn memory_context(state: &Arc<AppState>, uid: &str, message: &str) -> Stri
     let rows = match conn
         .query(
             "SELECT content, to_char(created_at, 'YYYY-MM-DD') FROM chat_memories
-             WHERE user_id::text = $1
-             ORDER BY embedding <=> $2::vector
+             WHERE user_id::text = $1::text
+             ORDER BY embedding <=> $2::text::vector
              LIMIT 4",
             &[&uid, &format!("[{vec_sql}]")],
         )
         .await
     {
         Ok(r) => r,
-        Err(_) => return String::new(),
+        Err(e) => {
+            eprintln!("memory: recall query failed: {e}");
+            return String::new();
+        }
     };
+    eprintln!("memory: recall got {} rows", rows.len());
     if rows.is_empty() {
         return String::new();
     }
-    let parts: Vec<String> = rows
+let parts: Vec<String> = rows
         .iter()
         .map(|r| {
             let content: String = r.get(0);
@@ -1525,7 +1538,7 @@ async fn build_context(
         }
         let purchases = conn
             .query(
-                "SELECT p.name, p.price::float8, a.verdict, a.created_at::date
+                "SELECT p.name, p.price::float8, a.verdict, to_char(a.created_at, 'YYYY-MM-DD')
                  FROM analysis_log a JOIN products p ON p.product_id = a.product_id
                  WHERE a.user_id::text = $1 AND p.site_name = 'Twin Chat'
                  ORDER BY a.created_at DESC LIMIT 5",
@@ -1547,7 +1560,7 @@ async fn build_context(
         }
         let entries = conn
             .query(
-                "SELECT amount::float8, category, description, to_char(transaction_date, 'YYYY-MM-DD')
+                "SELECT amount::float8, COALESCE(description, payee), to_char(COALESCE(transaction_date, created_at), 'YYYY-MM-DD')
                  FROM ledger_entries
                  WHERE user_id::text = $1 AND account_type = 'budget'
                  ORDER BY created_at DESC LIMIT 5",
@@ -1559,15 +1572,9 @@ async fn build_context(
                 .iter()
                 .map(|r| {
                     let amount: f64 = r.get(0);
-                    let category: Option<String> = r.get(1);
-                    let description: Option<String> = r.get(2);
-                    let date: String = r.get(3);
-                    let desc = description.unwrap_or_default();
-                    format!(
-                        "₹{amount:.0} {} ({})",
-                        if desc.is_empty() { category.unwrap_or_default() } else { desc },
-                        date
-                    )
+                    let label: String = r.get(1);
+                    let date: String = r.get(2);
+                    format!("₹{amount:.0} {label} ({date})")
                 })
                 .collect();
             l.push(format!("Recent entries: {}", parts.join(" | ")));
