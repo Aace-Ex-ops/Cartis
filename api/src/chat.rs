@@ -29,6 +29,15 @@ struct ChatRequest {
 
 const TOOLS: [&str; 4] = ["tax", "retirement", "budget", "stock"];
 
+// Groq chat model: llama-3.3-70b-versatile is the free tier; llama-4-scout on
+// Groq needs a paid Groq plan. Swap this constant when that flips.
+const GROQ_CHAT_MODEL: &str = "llama-3.3-70b-versatile";
+const GROQ_EXTRACT_MODEL: &str = "llama-3.3-70b-versatile";
+
+fn groq_key() -> Option<String> {
+    env::var("GROQ_API_KEY").ok().filter(|k| !k.is_empty())
+}
+
 fn tool_system(tool: &str) -> Option<&'static str> {
     match tool {
         "tax" => Some(
@@ -373,6 +382,43 @@ pub async fn transcribe(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("audio/wav")
         .to_string();
+    if let Some(key) = groq_key() {
+        let audio = body.to_vec();
+        let part = match reqwest::multipart::Part::bytes(audio.clone())
+            .file_name("audio.webm")
+            .mime_str(&content_type)
+        {
+            Ok(p) => p,
+            Err(_) => reqwest::multipart::Part::bytes(audio).file_name("audio.webm"),
+        };
+        let form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("model", "whisper-large-v3-turbo")
+            .text("response_format", "json");
+        let res = match reqwest::Client::new()
+            .post("https://api.groq.com/openai/v1/audio/transcriptions")
+            .bearer_auth(&key)
+            .multipart(form)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return json_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("ai error: {e}"))
+            }
+        };
+        let json: serde_json::Value = match res.json().await {
+            Ok(j) => j,
+            Err(_) => return json_err(StatusCode::BAD_GATEWAY, "ai bad response"),
+        };
+        return match json.get("text").and_then(|t| t.as_str()) {
+            Some(text) => (StatusCode::OK, Json(serde_json::json!({ "text": text }))).into_response(),
+            None => json_err(
+                StatusCode::BAD_GATEWAY,
+                &json.to_string().chars().take(200).collect::<String>(),
+            ),
+        };
+    }
     let res = match reqwest::Client::new()
         .post(&url)
         .bearer_auth(&token)
@@ -778,23 +824,32 @@ async fn persist_and_stream(
 
     send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
 
-    let token = match crate::insights::ai_token().await {
-        Ok(t) => t,
-        Err(e) => {
-            send(sse(&format!(r#"{{"error":"{e}"}}"#))).await;
-            return;
-        }
+    let is_groq = groq_key().is_some();
+    let (url, bearer) = if is_groq {
+        (
+            "https://api.groq.com/openai/v1/chat/completions".to_string(),
+            groq_key().unwrap(),
+        )
+    } else {
+        let token = match crate::insights::ai_token().await {
+            Ok(t) => t,
+            Err(e) => {
+                send(sse(&format!(r#"{{"error":"{e}"}}"#))).await;
+                return;
+            }
+        };
+        let account = match env::var("CF_ACCOUNT_ID") {
+            Ok(a) if !a.is_empty() => a,
+            _ => {
+                send(sse(r#"{"error":"CF_ACCOUNT_ID not set"}"#)).await;
+                return;
+            }
+        };
+        (
+            format!("https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"),
+            token,
+        )
     };
-    let account = match env::var("CF_ACCOUNT_ID") {
-        Ok(a) if !a.is_empty() => a,
-        _ => {
-            send(sse(r#"{"error":"CF_ACCOUNT_ID not set"}"#)).await;
-            return;
-        }
-    };
-    let url = format!(
-        "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}"
-    );
 
     let llm_messages: Vec<serde_json::Value> = std::iter::once(serde_json::json!({
         "role": "system",
@@ -806,11 +861,14 @@ async fn persist_and_stream(
     }))
     .collect();
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "messages": llm_messages,
         "stream": true,
         "max_tokens": 1024,
     });
+    if is_groq {
+        payload["model"] = serde_json::json!(GROQ_CHAT_MODEL);
+    }
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(90))
@@ -825,7 +883,7 @@ async fn persist_and_stream(
 
     let res = match client
         .post(&url)
-        .bearer_auth(&token)
+        .bearer_auth(&bearer)
         .header("x-session-affinity", &session_id)
         .json(&payload)
         .send()
@@ -861,7 +919,7 @@ async fn persist_and_stream(
                 continue;
             }
             if data == "[DONE]" {
-                if let Some(capture) = extract_captures(&account, &token, &user_message, &full).await {
+                if let Some(capture) = extract_captures(is_groq, &user_message, &full).await {
                     send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
                 }
                 persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
@@ -886,7 +944,7 @@ async fn persist_and_stream(
         }
         buf.clear();
     }
-    if let Some(capture) = extract_captures(&account, &token, &user_message, &full).await {
+    if let Some(capture) = extract_captures(is_groq, &user_message, &full).await {
         send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
     }
     persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
@@ -1153,32 +1211,48 @@ fn pack_captures(
 }
 
 async fn extract_json(
-    account: &str,
-    token: &str,
+    groq: bool,
     system: &str,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
-    let url = format!(
-        "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/meta/llama-3.1-8b-instruct-fp8"
-    );
-    let payload = serde_json::json!({
+    let (url, key) = if groq {
+        (
+            "https://api.groq.com/openai/v1/chat/completions".to_string(),
+            groq_key()?,
+        )
+    } else {
+        let account = env::var("CF_ACCOUNT_ID").ok()?;
+        (
+            format!(
+                "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/meta/llama-3.1-8b-instruct-fp8"
+            ),
+            crate::insights::ai_token().await.ok()?,
+        )
+    };
+    let mut payload = serde_json::json!({
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": format!("USER: {user_message}\n\nASSISTANT: {reply}")},
         ],
         "max_tokens": 200,
     });
+    if groq {
+        payload["model"] = serde_json::json!(GROQ_EXTRACT_MODEL);
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
         .ok()?;
-    let res = client.post(&url).bearer_auth(token).json(&payload).send().await.ok()?;
+    let res = client.post(&url).bearer_auth(key).json(&payload).send().await.ok()?;
     if !res.status().is_success() {
         return None;
     }
     let body: serde_json::Value = res.json().await.ok()?;
-    let text = body.pointer("/result/response").and_then(|r| r.as_str())?;
+    let text = body
+        .pointer("/choices/0/message/content")
+        .or_else(|| body.pointer("/result/response"))
+        .and_then(|r| r.as_str())?;
     let text = text
         .trim()
         .trim_start_matches("```json")
@@ -1189,18 +1263,17 @@ async fn extract_json(
 }
 
 async fn extract_captures(
-    account: &str,
-    token: &str,
+    groq: bool,
     user_message: &str,
     reply: &str,
 ) -> Option<serde_json::Value> {
     let (goal, holding, profile, budget, purchase, seller) = tokio::join!(
-        async { extract_json(account, token, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
-        async { extract_json(account, token, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
-        async { extract_json(account, token, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
-        async { extract_json(account, token, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
-        async { extract_json(account, token, PURCHASE_PROMPT, user_message, reply).await.and_then(|v| validate_purchase(&v)) },
-        async { extract_json(account, token, SELLER_PROMPT, user_message, reply).await },
+        async { extract_json(groq, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
+        async { extract_json(groq, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
+        async { extract_json(groq, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
+        async { extract_json(groq, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
+        async { extract_json(groq, PURCHASE_PROMPT, user_message, reply).await.and_then(|v| validate_purchase(&v)) },
+        async { extract_json(groq, SELLER_PROMPT, user_message, reply).await },
     );
     let income = seller.as_ref().and_then(|v| validate_income(v));
     let expense = seller.as_ref().and_then(|v| validate_expense(v));
