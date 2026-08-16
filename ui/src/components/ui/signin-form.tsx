@@ -32,24 +32,24 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
       {/* Back to Home button */}
       <Link
         href="/"
-        className="fixed top-6 left-6 z-20 flex items-center gap-2 rounded-md border border-border/50 bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-all duration-300 hover:bg-muted hover:scale-105"
+        className="fixed top-6 left-6 z-20 flex items-center gap-2 rounded-full border border-border/50 bg-background/80 px-4 py-2 text-xs font-medium text-foreground backdrop-blur-md transition-all duration-300 hover:bg-muted"
       >
         <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
         <span>Home</span>
       </Link>
 
       {/* Main Card Container */}
-      <div className="relative w-full max-w-md">
+      <div className="relative w-full max-w-lg">
         <motion.div
           initial={{ opacity: 0, y: 20, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-          className="rounded-lg border border-border/50 bg-card p-6 shadow-sm sm:p-7"
+          className="rounded-2xl border border-border/50 bg-card p-8 shadow-xl shadow-black/[0.04] sm:p-10"
         >
           {/* Header Brand & Mode Switcher */}
           <div className="flex flex-col items-center text-center">
             <Link href="/" className="group flex items-center gap-2 transition-transform duration-300 hover:scale-105">
-              <div className="relative flex h-8 w-8 items-center justify-center rounded border border-primary/20 bg-primary/5 shadow-sm backdrop-blur-md">
+              <div className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/5 shadow-sm backdrop-blur-md">
                 <span className="text-sm font-black text-primary drop-shadow-sm">
                   C
                 </span>
@@ -58,17 +58,17 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
             </Link>
 
             {/* Mode Switcher Tabs */}
-            <div className="mt-5 flex w-full rounded-md border border-border/50 bg-muted/50 p-0.5 backdrop-blur-sm">
+            <div className="mt-6 flex w-full rounded-full border border-border/50 bg-muted/50 p-1 backdrop-blur-sm">
               <button
                 type="button"
                 onClick={() => setMode("signin")}
-                className="relative flex-1 py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
+                className="relative flex-1 rounded-full py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
                 style={{ color: !isSignup ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))" }}
               >
                 {!isSignup && (
                   <motion.div
                     layoutId="activeAuthTab"
-                    className="absolute inset-0 rounded-md bg-background border border-primary/30 shadow-sm"
+                    className="absolute inset-0 rounded-full bg-background border border-primary/30 shadow-sm"
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -77,13 +77,13 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
               <button
                 type="button"
                 onClick={() => setMode("signup")}
-                className="relative flex-1 py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
+                className="relative flex-1 rounded-full py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
                 style={{ color: isSignup ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))" }}
               >
                 {isSignup && (
                   <motion.div
                     layoutId="activeAuthTab"
-                    className="absolute inset-0 rounded-md bg-background border border-primary/30 shadow-sm"
+                    className="absolute inset-0 rounded-full bg-background border border-primary/30 shadow-sm"
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -91,10 +91,10 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
               </button>
             </div>
 
-            <h1 className="mt-5 text-xl font-normal tracking-tight text-foreground sm:text-2xl">
+            <h1 className="mt-6 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               {isSignup ? "Start your journey" : "Welcome back"}
             </h1>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               {isSignup
                 ? "Get honest purchase verdicts before every checkout."
                 : "Real-time balance, budget radar, and price trends."}
@@ -106,7 +106,7 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
             <motion.div
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-4 flex items-center gap-2 rounded-md border border-red-200/50 bg-red-50/50 px-3 py-2.5 text-xs text-red-600 dark:text-red-400"
+              className="mt-6 flex items-center gap-2 rounded-lg border border-red-200/50 bg-red-50/50 px-3 py-2.5 text-xs text-red-600 dark:text-red-400"
             >
               <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
               <span>{error}</span>
@@ -114,12 +114,12 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
           )}
 
           {/* Google Auth */}
-          <div className="mt-5">
+          <div className="mt-8">
             <a
               href={`/auth/start?provider=google&intent=${mode}`}
-              className="flex w-full items-center justify-center gap-2 rounded-md border border-border/50 bg-background px-3 py-2.5 text-xs font-medium text-foreground backdrop-blur-sm transition-all duration-300 hover:border-border hover:bg-muted hover:scale-[1.02]"
+              className="flex w-full items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground shadow-sm transition-all duration-300 hover:bg-muted hover:border-border/80"
             >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
+              <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path
                   fill="#EA4335"
                   d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
@@ -141,8 +141,30 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
             </a>
           </div>
 
+          {/* Divider */}
+          <div className="mt-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+              or
+            </span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <div className="mt-6 flex flex-col items-center gap-1.5 text-center">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {isSignup ? "Already have an account?" : "New to Cartis?"}{" "}
+              <button
+                type="button"
+                onClick={() => setMode(isSignup ? "signin" : "signup")}
+                className="font-semibold text-primary hover:underline"
+              >
+                {isSignup ? "Sign in" : "Create an account"}
+              </button>
+            </p>
+          </div>
+
           {/* Security Footer Badge */}
-          <div className="mt-6 flex items-center justify-center gap-1.5 border-t border-border/50 pt-4 text-center text-[10px] font-normal text-muted-foreground">
+          <div className="mt-8 flex items-center justify-center gap-1.5 border-t border-border/50 pt-5 text-center text-[10px] font-normal text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-primary/70" />
             <span>Bank-grade encryption</span>
           </div>
