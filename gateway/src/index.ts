@@ -734,9 +734,10 @@ app.post('/api/coach/chat', auth, async (c) => {
     session_id?: string
     mode?: string
     tool?: string
+    image?: string
     message?: string
   }
-  if (!body.message?.trim()) return c.json({ error: 'message required' }, 400)
+  if (!body.message?.trim() && !body.image) return c.json({ error: 'message required' }, 400)
   try {
     const res = await fetch(`${c.env.BACKEND_URL}/chat/stream`, {
       method: 'POST',
@@ -749,6 +750,7 @@ app.post('/api/coach/chat', auth, async (c) => {
         session_id: body.session_id,
         mode: body.mode,
         tool: body.tool,
+        image: body.image,
         message: body.message,
       }),
     })
@@ -762,6 +764,25 @@ app.post('/api/coach/chat', auth, async (c) => {
     c.header('content-type', 'text/event-stream')
     c.header('cache-control', 'no-cache')
     return c.body(res.body as unknown as ReadableStream)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/coach/transcribe', auth, async (c) => {
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/transcribe`, {
+      method: 'POST',
+      headers: {
+        'content-type': c.req.header('content-type') ?? 'audio/wav',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: c.req.raw.body as unknown as ReadableStream,
+    })
+    const json = (await res.json().catch(() => null)) as { text?: string; error?: string } | null
+    if (!res.ok || !json?.text) return c.json({ error: json?.error ?? `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json({ text: json.text })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }

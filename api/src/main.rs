@@ -62,6 +62,7 @@ async fn main() {
         .route("/health", get(|| async { "ok" }))
         .route("/graphql", get(graphiql).post(graphql_handler))
         .route("/chat/stream", post(chat::chat_stream))
+        .route("/chat/transcribe", post(chat::transcribe))
         .route(
             "/chat/sessions",
             get(chat::list_sessions).post(chat::create_session),
@@ -88,7 +89,8 @@ async fn main() {
         .layer(axum::middleware::from_fn_with_state(
             backend_secret.clone(),
             require_backend_secret,
-        ));
+        ))
+        .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024));
 
     let addr = format!("0.0.0.0:{port}");
     println!("cartis-api listening on http://{addr}");

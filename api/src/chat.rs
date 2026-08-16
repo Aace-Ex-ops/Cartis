@@ -22,6 +22,8 @@ struct ChatRequest {
     mode: Option<String>,
     #[serde(default)]
     tool: Option<String>,
+    #[serde(default)]
+    image: Option<String>,
     message: String,
 }
 
@@ -110,7 +112,12 @@ pub async fn chat_stream(
         Err(_) => return json_err(StatusCode::BAD_REQUEST, "invalid json"),
     };
     let message = req.message.trim().to_string();
-    if message.is_empty() {
+    let has_image = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty());
+    if message.is_empty() && !has_image {
         return json_err(StatusCode::BAD_REQUEST, "message required");
     }
 
@@ -129,6 +136,41 @@ pub async fn chat_stream(
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
         }
     };
+
+    let image = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(img) = &image {
+        if !img.starts_with("data:image/")
+            || !["png", "jpeg", "jpg", "webp", "gif"]
+                .iter()
+                .any(|e| img.starts_with(&format!("data:image/{e};base64,")))
+        {
+            return json_err(
+                StatusCode::BAD_REQUEST,
+                "image must be a base64 data URL (png/jpeg/webp/gif)",
+            );
+        }
+        if img.len() > 10_000_000 {
+            return json_err(StatusCode::BAD_REQUEST, "image too large");
+        }
+        let plan: String = match conn
+            .query_one("SELECT plan FROM users WHERE user_id::text = $1", &[&uid])
+            .await
+        {
+            Ok(r) => r.get(0),
+            Err(_) => "free".to_string(),
+        };
+        if plan == "free" {
+            return json_err(
+                StatusCode::PAYMENT_REQUIRED,
+                "Image input is a Pro feature — upgrade to use it",
+            );
+        }
+    }
 
     // Resolve session: verify ownership if given, else create one.
     let sid = req
@@ -228,6 +270,9 @@ pub async fn chat_stream(
     if let Some(t) = tool_system(&tool) {
         system = format!("{t}\n\n{system}");
     }
+    if image.is_some() {
+        system = format!("{system}\n\nThe user attached a photo. If it shows a purchase (receipt, invoice, or product photo): extract each product bought (name, quantity, price if visible) and, in seller mode, list which items should be added to inventory. Never invent values not visible in the image — say clearly what you cannot read.");
+    }
 
     let mut llm_history = history;
     llm_history.push(Msg {
@@ -245,6 +290,7 @@ pub async fn chat_stream(
         session_id.clone(),
         uid,
         message,
+        image,
         mode,
     ));
 
@@ -255,6 +301,103 @@ pub async fn chat_stream(
         .header("cache-control", "no-cache")
         .body(Body::from_stream(stream))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn llm_content(m: &Msg, image: Option<&str>) -> serde_json::Value {
+    match image {
+        Some(url) if m.role == "user" => serde_json::json!([
+            { "type": "text", "text": m.content },
+            { "type": "image_url", "image_url": { "url": url } }
+        ]),
+        _ => serde_json::json!(m.content),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TranscribeRequest {
+    audio: String,
+}
+
+pub async fn transcribe(
+    state: State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    if body.len() > 12_000_000 {
+        return json_err(StatusCode::BAD_REQUEST, "audio too large");
+    }
+    if !headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("audio/")
+    {
+        return json_err(StatusCode::BAD_REQUEST, "content-type must be audio/*");
+    }
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("transcribe db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    let plan: String = match conn
+        .query_one("SELECT plan FROM users WHERE user_id::text = $1", &[&uid])
+        .await
+    {
+        Ok(r) => r.get(0),
+        Err(_) => "free".to_string(),
+    };
+    if plan == "free" {
+        return json_err(
+            StatusCode::PAYMENT_REQUIRED,
+            "Voice input is a Max feature — upgrade to use it",
+        );
+    }
+    let token = match crate::insights::ai_token().await {
+        Ok(t) => t,
+        Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+    };
+    let account = match env::var("CF_ACCOUNT_ID") {
+        Ok(a) if !a.is_empty() => a,
+        _ => return json_err(StatusCode::INTERNAL_SERVER_ERROR, "CF_ACCOUNT_ID not set"),
+    };
+    let url = format!(
+        "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/openai/whisper-large-v3-turbo"
+    );
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("audio/wav")
+        .to_string();
+    let res = match reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(&token)
+        .header("content-type", &content_type)
+        .body(body.to_vec())
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("ai error: {e}")),
+    };
+    let json: serde_json::Value = match res.json().await {
+        Ok(j) => j,
+        Err(_) => return json_err(StatusCode::BAD_GATEWAY, "ai bad response"),
+    };
+    if let Some(text) = json.pointer("/result/text").and_then(|t| t.as_str()) {
+        return (StatusCode::OK, Json(serde_json::json!({ "text": text }))).into_response();
+    }
+    if let Some(err) = json.pointer("/errors/0/message").and_then(|t| t.as_str()) {
+        return json_err(StatusCode::BAD_GATEWAY, err);
+    }
+    json_err(
+        StatusCode::BAD_GATEWAY,
+        &json.to_string().chars().take(200).collect::<String>(),
+    )
 }
 
 async fn load_history(
@@ -626,6 +769,7 @@ async fn persist_and_stream(
     session_id: String,
     uid: String,
     user_message: String,
+    image: Option<String>,
     mode: String,
 ) {
     let send = |data: String| async {
@@ -656,8 +800,9 @@ async fn persist_and_stream(
         "role": "system",
         "content": system,
     }))
-    .chain(messages.iter().map(|m| {
-        serde_json::json!({ "role": m.role, "content": m.content })
+    .chain(messages.iter().enumerate().map(|(i, m)| {
+        let is_last_user = i == messages.len() - 1 && m.role == "user";
+        serde_json::json!({ "role": m.role, "content": llm_content(m, image.as_deref().filter(|_| is_last_user)) })
     }))
     .collect();
 
@@ -1615,6 +1760,17 @@ async fn build_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_content_only_on_last_user_message() {
+        let m = Msg { role: "user".to_string(), content: "hi".to_string() };
+        let parts = llm_content(&m, Some("data:image/png;base64,abc"));
+        let json = serde_json::to_string(&parts).unwrap();
+        assert!(json.contains("image_url") && json.contains("data:image/png;base64,abc"));
+        assert!(!serde_json::to_string(&llm_content(&m, None)).unwrap().contains("image_url"));
+        let a = Msg { role: "assistant".to_string(), content: "yo".to_string() };
+        assert!(!serde_json::to_string(&llm_content(&a, Some("data:image/png;base64,abc"))).unwrap().contains("image_url"));
+    }
 
     #[test]
     fn tier_maps_by_window() {

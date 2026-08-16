@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Pencil, Plus, Send, Trash2, User, X } from "lucide-react";
+import { Bot, ImagePlus, Mic, Pencil, Plus, Send, Square, Trash2, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ModelSwitcher } from "@/components/shared/model-switcher";
@@ -184,6 +184,8 @@ export function TwinChat({
     { role: "assistant", content: welcome },
   ]);
   const [input, setInput] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -193,6 +195,9 @@ export function TwinChat({
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mountedRef = useRef(true);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -219,7 +224,11 @@ export function TwinChat({
   }, [messages, busy]);
 
   useEffect(() => {
-    return () => abortRef.current?.abort();
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+      mediaRecorderRef.current?.stop();
+    };
   }, []);
 
   useEffect(() => {
@@ -296,9 +305,10 @@ export function TwinChat({
 
   const send = async (promptOverride?: string) => {
     const content = (promptOverride ?? input).trim();
-    if (!content || busy) return;
+    if ((!content && !image) || busy) return;
     setMessages((m) => [...m, { role: "user" as const, content }]);
     setInput("");
+    setImage(null);
     setBusy(true);
     setError("");
     const controller = new AbortController();
@@ -309,7 +319,7 @@ export function TwinChat({
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ session_id: activeId ?? undefined, mode, tool: tool ?? undefined, message: content }),
+        body: JSON.stringify({ session_id: activeId ?? undefined, mode, tool: tool ?? undefined, image: image ?? undefined, message: content }),
       });
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -374,6 +384,67 @@ export function TwinChat({
       setError("Chat failed — try again.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onPickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      setError("Please choose an image file.");
+      return;
+    }
+    if (f.size > 7_000_000) {
+      setError("Image too large — max 7MB.");
+      return;
+    }
+    const rd = new FileReader();
+    rd.onload = () => setImage(rd.result as string);
+    rd.readAsDataURL(f);
+  };
+
+  const toggleMic = async () => {
+    if (recording) {
+      mediaRecorderRef.current?.stop();
+      setRecording(false);
+      return;
+    }
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        try {
+          const res = await fetch(`${GATEWAY}/api/coach/transcribe`, {
+            method: "POST",
+            headers: { "Content-Type": blob.type || "audio/webm" },
+            credentials: "include",
+            body: blob,
+          });
+          const json = (await res.json().catch(() => null)) as { text?: string; error?: string } | null;
+          if (!mountedRef.current) return;
+          if (!res.ok || !json?.text) {
+            setError(json?.error ?? "Transcription failed — try again.");
+            return;
+          }
+          const text = json.text;
+          setInput((i) => (i ? `${i} ${text}` : text));
+        } catch {
+          if (mountedRef.current) setError("Transcription failed — try again.");
+        }
+      };
+      mediaRecorderRef.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      setError("Microphone unavailable — check browser permission.");
     }
   };
 
@@ -844,7 +915,49 @@ export function TwinChat({
           <div className="mb-1.5 flex items-center justify-between px-1">
             <ModelSwitcher />
           </div>
+          {image && (
+            <div className="mb-1.5 flex items-center gap-2 px-1">
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border/60">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={image} alt="attachment" className="h-full w-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setImage(null)}
+                  className="absolute -right-1 -top-1 rounded-full bg-background p-0.5 text-muted-foreground hover:text-destructive"
+                  aria-label="Remove image"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              <span className="text-[12px] text-muted-foreground">Image attached (Pro)</span>
+            </div>
+          )}
           <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background p-2 transition-colors focus-within:border-primary/40">
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={onPickImage}
+            />
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={busy}
+              title="Attach image (Pro — receipt or product photo)"
+            >
+              <ImagePlus className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant={recording ? "destructive" : "ghost"}
+              onClick={() => void toggleMic()}
+              disabled={busy}
+              title={recording ? "Stop recording" : "Record voice message"}
+            >
+              {recording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-4 w-4" />}
+            </Button>
             <textarea
               ref={textareaRef}
               rows={1}
@@ -860,7 +973,7 @@ export function TwinChat({
               disabled={busy}
               className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent px-1 py-0.5 text-[13px] outline-none placeholder:text-muted-foreground"
             />
-            <Button size="icon" onClick={() => void send()} disabled={busy || !input.trim()}>
+            <Button size="icon" onClick={() => void send()} disabled={busy || (!input.trim() && !image)}>
               <Send className="h-4 w-4" />
             </Button>
           </div>
