@@ -63,7 +63,7 @@ pub struct RenameSessionRequest {
     title: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SessionOut {
     session_id: String,
     mode: String,
@@ -71,7 +71,7 @@ struct SessionOut {
     updated_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct MessageOut {
     role: String,
     content: String,
@@ -188,15 +188,22 @@ pub async fn chat_stream(
     drop(conn);
 
     let seller = mode == "seller";
+    let ctx_key = format!("cartis:{uid}:chat_context:{seller}");
+    let cached_ctx = state.redis.get(&ctx_key).await;
     let (context, memories, history) = tokio::join!(
         async {
-            match build_context(&state, &uid, seller).await {
+            if let Some(c) = cached_ctx {
+                return c;
+            }
+            let c = match build_context(&state, &uid, seller).await {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("chat context error: {e}");
                     "No data available.".to_string()
                 }
-            }
+            };
+            state.redis.set(&ctx_key, &c, 60).await;
+            c
         },
         memory_context(&state, &uid, &message),
         async {
@@ -405,13 +412,16 @@ pub async fn create_session(
         )
         .await
     {
-        Ok(r) => Json(SessionOut {
-            session_id: r.get(0),
-            mode: r.get(1),
-            title: r.get(2),
-            updated_at: r.get(3),
-        })
-        .into_response(),
+        Ok(r) => {
+            state.redis.del(&[&format!("cartis:{uid}:chat_sessions")]).await;
+            Json(SessionOut {
+                session_id: r.get(0),
+                mode: r.get(1),
+                title: r.get(2),
+                updated_at: r.get(3),
+            })
+            .into_response()
+        }
         Err(e) => {
             eprintln!("chat session create error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -442,7 +452,16 @@ pub async fn delete_session(
         .await
     {
         Ok(0) => json_err(StatusCode::NOT_FOUND, "session not found"),
-        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(_) => {
+            state
+                .redis
+                .del(&[
+                    &format!("cartis:{uid}:chat_sessions"),
+                    &format!("cartis:{session_id}:chat_messages"),
+                ])
+                .await;
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) => {
             eprintln!("chat session delete error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -477,13 +496,16 @@ pub async fn rename_session(
         )
         .await
     {
-        Ok(Some(r)) => Json(SessionOut {
-            session_id: r.get(0),
-            mode: r.get(1),
-            title: r.get(2),
-            updated_at: r.get(3),
-        })
-        .into_response(),
+        Ok(Some(r)) => {
+            state.redis.del(&[&format!("cartis:{uid}:chat_sessions")]).await;
+            Json(SessionOut {
+                session_id: r.get(0),
+                mode: r.get(1),
+                title: r.get(2),
+                updated_at: r.get(3),
+            })
+            .into_response()
+        }
         Ok(None) => json_err(StatusCode::NOT_FOUND, "session not found"),
         Err(e) => {
             eprintln!("chat session rename error: {e}");
@@ -499,6 +521,12 @@ pub async fn list_sessions(
     let Some(uid) = uid_from(&headers) else {
         return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
     };
+    let key = format!("cartis:{uid}:chat_sessions");
+    if let Some(cached) = state.redis.get(&key).await {
+        if let Ok(json) = serde_json::from_str::<Vec<SessionOut>>(&cached) {
+            return Json(json).into_response();
+        }
+    }
     let conn = match state.pg.get().await {
         Ok(c) => c,
         Err(e) => {
@@ -513,17 +541,21 @@ pub async fn list_sessions(
         )
         .await
     {
-        Ok(rows) => Json(
-            rows.iter()
+        Ok(rows) => {
+            let out: Vec<SessionOut> = rows
+                .iter()
                 .map(|r| SessionOut {
                     session_id: r.get(0),
                     mode: r.get(1),
                     title: r.get(2),
                     updated_at: r.get(3),
                 })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+                .collect();
+            if let Ok(json) = serde_json::to_string(&out) {
+                state.redis.set(&key, &json, 30).await;
+            }
+            Json(out).into_response()
+        }
         Err(e) => {
             eprintln!("chat sessions error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -539,6 +571,12 @@ pub async fn session_messages(
     let Some(uid) = uid_from(&headers) else {
         return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
     };
+    let key = format!("cartis:{session_id}:chat_messages");
+    if let Some(cached) = state.redis.get(&key).await {
+        if let Ok(json) = serde_json::from_str::<Vec<MessageOut>>(&cached) {
+            return Json(json).into_response();
+        }
+    }
     let conn = match state.pg.get().await {
         Ok(c) => c,
         Err(e) => {
@@ -553,16 +591,20 @@ pub async fn session_messages(
         )
         .await
     {
-        Ok(rs) => Json(
-            rs.iter()
+        Ok(rs) => {
+            let out: Vec<MessageOut> = rs
+                .iter()
                 .map(|r| MessageOut {
                     role: r.get(0),
                     content: r.get(1),
                     created_at: r.get(2),
                 })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+                .collect();
+            if let Ok(json) = serde_json::to_string(&out) {
+                state.redis.set(&key, &json, 30).await;
+            }
+            Json(out).into_response()
+        }
         Err(e) => {
             eprintln!("chat messages error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -1212,6 +1254,13 @@ async fn persist_turn(
         eprintln!("chat persist error: {e}");
     }
     drop(conn);
+    state
+        .redis
+        .del(&[
+            &format!("cartis:{session_id}:chat_messages"),
+            &format!("cartis:{_uid}:chat_sessions"),
+        ])
+        .await;
     // Long-term memory embedding is owned by the Python embed-chats cron on
     // the server — nothing to do here.
 }

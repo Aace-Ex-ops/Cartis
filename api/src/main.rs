@@ -17,6 +17,7 @@ use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::Deserialize;
 mod admin;
+mod cache;
 mod chat;
 mod email;
 mod graphql;
@@ -26,6 +27,7 @@ mod usage;
 pub struct AppState {
     pub pg: deadpool_postgres::Pool,
     pub admin_tokens: Mutex<HashSet<String>>,
+    pub redis: cache::Cache,
 }
 
 #[tokio::main]
@@ -39,10 +41,12 @@ async fn main() {
     let pg = pg_cfg
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
         .expect("postgres pool creation failed");
+    let redis = cache::Cache::connect(&env::var("REDIS_URL").unwrap_or_default()).await;
 
     let state = Arc::new(AppState {
         pg,
         admin_tokens: Mutex::new(HashSet::new()),
+        redis,
     });
     bootstrap_admin(&state).await;
     if let Ok(conn) = state.pg.get().await {

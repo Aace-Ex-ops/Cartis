@@ -950,9 +950,6 @@ app.post('/api/consumer/coach', auth, async (c) => {
 
 app.post('/api/budget/suggest', auth, async (c) => {
   const userId = c.get('session').user_id
-  const cacheKey = `budget:ai:${userId}`
-  const cached = await c.env.SESSIONS.get(cacheKey)
-  if (cached) return c.json(JSON.parse(cached))
 
   let data: {
     wallet?: { balance: number; tabLimit: number }
@@ -1078,7 +1075,6 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
     )
 
     const result = { suggestedLimit: limit, reasoning }
-    await c.env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 86400 })
     return c.json(result)
   } catch {
     return c.json({ suggestedLimit: currentLimit, reasoning: 'AI could not compute a suggestion right now.' })
