@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { MetallicLogo } from "@/components/shared/metallic-logo";
-import { ShieldCheck, ArrowLeft, AlertCircle } from "lucide-react";
+import { ShieldCheck, ArrowLeft, AlertCircle, Sparkles } from "lucide-react";
 
 const ERRORS: Record<string, string> = {
   google_denied: "Google declined the sign-in. Please try again.",
@@ -14,7 +14,7 @@ const ERRORS: Record<string, string> = {
     "No Cartis account found with this email — create one instead.",
 };
 
-export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" | "signup" }) {
+export function AuthUI({ defaultMode = "signin" }: { defaultMode?: "signin" | "signup" }) {
   const [mode, setMode] = useState<"signin" | "signup">(defaultMode);
   const [error, setError] = useState("");
 
@@ -28,7 +28,12 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
   }, []);
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center p-4 sm:p-6 lg:p-8">
+    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden p-4 sm:p-6 lg:p-8">
+      {/* Soft ambient glow behind the card */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+      </div>
+
       {/* Back to Home button */}
       <Link
         href="/"
@@ -46,52 +51,16 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           className="rounded-2xl border border-border/50 bg-card p-8 shadow-xl shadow-black/[0.04] sm:p-10"
         >
-          {/* Header Brand & Mode Switcher */}
+          {/* Header Brand */}
           <div className="flex flex-col items-center text-center">
             <Link href="/" className="group flex items-center gap-2 transition-transform duration-300 hover:scale-105">
               <div className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/5 shadow-sm backdrop-blur-md">
-                <span className="text-sm font-black text-primary drop-shadow-sm">
-                  C
-                </span>
+                <span className="text-sm font-black text-primary drop-shadow-sm">C</span>
               </div>
               <MetallicLogo className="h-7 w-24" />
             </Link>
 
-            {/* Mode Switcher Tabs */}
-            <div className="mt-6 flex w-full rounded-full border border-border/50 bg-muted/50 p-1 backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={() => setMode("signin")}
-                className="relative flex-1 rounded-full py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
-                style={{ color: !isSignup ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))" }}
-              >
-                {!isSignup && (
-                  <motion.div
-                    layoutId="activeAuthTab"
-                    className="absolute inset-0 rounded-full bg-background border border-primary/30 shadow-sm"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  />
-                )}
-                <span className="relative z-10">Sign In</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("signup")}
-                className="relative flex-1 rounded-full py-2 text-xs font-semibold uppercase tracking-wider transition-colors"
-                style={{ color: isSignup ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))" }}
-              >
-                {isSignup && (
-                  <motion.div
-                    layoutId="activeAuthTab"
-                    className="absolute inset-0 rounded-full bg-background border border-primary/30 shadow-sm"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  />
-                )}
-                <span className="relative z-10">Create Account</span>
-              </button>
-            </div>
-
-            <h1 className="mt-6 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+            <h1 className="mt-8 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               {isSignup ? "Start your journey" : "Welcome back"}
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -150,6 +119,7 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
             <div className="h-px flex-1 bg-border" />
           </div>
 
+          {/* Mode Switch */}
           <div className="mt-6 flex flex-col items-center gap-1.5 text-center">
             <p className="text-xs leading-relaxed text-muted-foreground">
               {isSignup ? "Already have an account?" : "New to Cartis?"}{" "}
@@ -163,8 +133,16 @@ export function SigninForm({ defaultMode = "signin" }: { defaultMode?: "signin" 
             </p>
           </div>
 
+          {/* Recipe Switch */}
+          <div className="mt-8 flex items-center justify-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-4 py-3">
+            <Sparkles className="h-4 w-4 text-primary/70" />
+            <p className="text-xs text-muted-foreground">
+              {isSignup ? "No credit card required." : "One tap to your dashboard."}
+            </p>
+          </div>
+
           {/* Security Footer Badge */}
-          <div className="mt-8 flex items-center justify-center gap-1.5 border-t border-border/50 pt-5 text-center text-[10px] font-normal text-muted-foreground">
+          <div className="mt-6 flex items-center justify-center gap-1.5 border-t border-border/50 pt-5 text-center text-[10px] font-normal text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-primary/70" />
             <span>Bank-grade encryption</span>
           </div>
