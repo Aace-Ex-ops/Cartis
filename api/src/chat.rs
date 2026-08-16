@@ -188,21 +188,26 @@ pub async fn chat_stream(
     drop(conn);
 
     let seller = mode == "seller";
-    let ctx_key = format!("cartis:{uid}:chat_context:{seller}");
+    let model = match fetch_model(&state, &uid).await {
+        Ok(Some(m)) if !m.is_empty() => m,
+        _ => DEFAULT_MODEL.to_string(),
+    };
+    let tier = context_tier(&model);
+    let ctx_key = format!("cartis:{uid}:chat_context:{seller}:{tier:?}");
     let cached_ctx = state.redis.get(&ctx_key).await;
     let (context, memories, history) = tokio::join!(
         async {
             if let Some(c) = cached_ctx {
                 return c;
             }
-            let c = match build_context(&state, &uid, seller).await {
+            let c = match build_context(&state, &uid, seller, tier).await {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("chat context error: {e}");
                     "No data available.".to_string()
                 }
             };
-            state.redis.set(&ctx_key, &c, 60).await;
+            state.redis.set(&ctx_key, &c, 900).await;
             c
         },
         memory_context(&state, &uid, &message),
@@ -216,10 +221,6 @@ pub async fn chat_stream(
             }
         },
     );
-    let model = match fetch_model(&state, &uid).await {
-        Ok(Some(m)) if !m.is_empty() && !m.starts_with("groq/") => m,
-        _ => "@cf/meta/llama-4-scout-17b-16e-instruct".to_string(),
-    };
     let mut system = system_prompt(seller, &context);
     if !memories.is_empty() {
         system = format!("{system}\n\n{memories}");
@@ -633,20 +634,6 @@ async fn persist_and_stream(
 
     send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
 
-    if env::var("CHAT_PROVIDER").as_deref() == Ok("groq") {
-        return groq_stream(
-            system,
-            messages,
-            tx,
-            state,
-            session_id,
-            uid,
-            user_message,
-            mode,
-        )
-        .await;
-    }
-
     let token = match crate::insights::ai_token().await {
         Ok(t) => t,
         Err(e) => {
@@ -694,6 +681,7 @@ async fn persist_and_stream(
     let res = match client
         .post(&url)
         .bearer_auth(&token)
+        .header("x-session-affinity", &session_id)
         .json(&payload)
         .send()
         .await
@@ -736,6 +724,9 @@ async fn persist_and_stream(
                 return;
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(u) = v.pointer("/usage") {
+                    eprintln!("chat usage ({model}): {u}");
+                }
                 if let Some(content) = v
                     .pointer("/choices/0/delta/content")
                     .and_then(|c| c.as_str())
@@ -769,13 +760,6 @@ const SELLER_PROMPT: &str = "You extract business finance events from a seller's
 {\"expense\":{\"entry_type\":\"<expense|cogs|salary|rent|other>\",\"amount\":<INR>,\"category\":\"<Materials|Payroll|Rent|Logistics|Utilities|Other>\",\"description\":\"<one line>\"}} when the user records a BUSINESS spend — buying stock, goods for resale, or raw material is cogs/Materials (e.g. \"bought 50 bottles of shampoo for the shop\", \"bought raw material for 1500\"); wages are salary/Payroll, premises are rent/Rent, anything else is expense/Other (e.g. \"paid 8000 salary\", \"paid 12000 shop rent\").
 {\"inventory\":{\"name\":\"<item>\",\"stock\":<qty>,\"unit_cost\":<INR per unit if known>}} when the user orders or restocks inventory (e.g. \"ordered 50 bottles of shampoo at 40 each\").
 Never extract personal consumer purchases (products bought for personal use, subscriptions, personal bills) as income/expense — those are purchases, not business events. Only use numbers the user stated or the assistant computed; never invent amounts. Return {} when nothing applies.";
-
-fn groq_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(90))
-        .build()
-        .unwrap_or_default()
-}
 
 fn validate_goal(parsed: &serde_json::Value) -> Option<serde_json::Value> {
     let goal = parsed.get("goal")?;
@@ -1079,150 +1063,6 @@ async fn extract_captures(
     pack_captures(goal, holding, profile, budget, purchase, income, expense, inventory)
 }
 
-async fn groq_json(
-    client: &reqwest::Client,
-    model: &str,
-    system: &str,
-    user_message: &str,
-    reply: &str,
-) -> Option<serde_json::Value> {
-    let key = env::var("GROQ_API_KEY").ok()?;
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 200,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": format!("USER: {user_message}\n\nASSISTANT: {reply}")},
-        ],
-    });
-    let resp = client
-        .post("https://api.groq.com/openai/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&body)
-        .send()
-        .await
-        .ok()?;
-    let parsed: serde_json::Value = resp.json().await.ok()?;
-    let text = parsed.pointer("/choices/0/message/content").and_then(|t| t.as_str())?;
-    let text = text
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    serde_json::from_str(text).ok()
-}
-
-async fn extract_captures_groq(
-    client: &reqwest::Client,
-    model: &str,
-    user_message: &str,
-    reply: &str,
-) -> Option<serde_json::Value> {
-    let (goal, holding, profile, budget, purchase, seller) = tokio::join!(
-        async { groq_json(client, model, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
-        async { groq_json(client, model, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
-        async { groq_json(client, model, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
-        async { groq_json(client, model, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
-        async { groq_json(client, model, PURCHASE_PROMPT, user_message, reply).await.and_then(|v| validate_purchase(&v)) },
-        async { groq_json(client, model, SELLER_PROMPT, user_message, reply).await },
-    );
-    let income = seller.as_ref().and_then(|v| validate_income(v));
-    let expense = seller.as_ref().and_then(|v| validate_expense(v));
-    let inventory = seller.as_ref().and_then(|v| validate_inventory(v));
-    pack_captures(goal, holding, profile, budget, purchase, income, expense, inventory)
-}
-
-// Groq chat: single non-streaming reply, same SSE contract as CF path.
-async fn groq_stream(
-    system: String,
-    messages: Vec<Msg>,
-    tx: mpsc::Sender<String>,
-    state: Arc<AppState>,
-    session_id: String,
-    uid: String,
-    user_message: String,
-    mode: String,
-) {
-    let send = |data: String| async {
-        let _ = tx.send(data).await;
-    };
-
-    send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
-
-    let client = groq_client();
-    let model = match fetch_model(&state, &uid).await {
-        Ok(Some(m)) if m.starts_with("groq/") => m["groq/".len()..].to_string(),
-        _ => env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string()),
-    };
-    let key = match env::var("GROQ_API_KEY") {
-        Ok(k) => k,
-        Err(_) => {
-            send(sse(r#"{"error":"GROQ_API_KEY not set"}"#)).await;
-            return;
-        }
-    };
-
-    let llm_messages: Vec<serde_json::Value> = std::iter::once(serde_json::json!({
-        "role": "system",
-        "content": system,
-    }))
-    .chain(messages.iter().map(|m| {
-        serde_json::json!({ "role": m.role, "content": m.content })
-    }))
-    .collect();
-
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "messages": llm_messages,
-    });
-
-    let resp = match client
-        .post("https://api.groq.com/openai/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            send(sse(&format!(r#"{{"error":"groq: {e}"}}"#))).await;
-            return;
-        }
-    };
-    let parsed: serde_json::Value = match resp.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            send(sse(&format!(r#"{{"error":"groq parse: {e}"}}"#))).await;
-            return;
-        }
-    };
-    let full = parsed
-        .pointer("/choices/0/message/content")
-        .and_then(|t| t.as_str())
-        .unwrap_or("")
-        .to_string();
-    if !full.trim().is_empty() {
-        let ev = serde_json::json!({ "token": full });
-        send(sse(&ev.to_string())).await;
-    }
-
-    if match crate::usage::bump(&state, &uid, "ai_capture").await {
-        Ok(ok) => ok,
-        Err(e) => {
-            eprintln!("usage capture gate error: {e}");
-            false
-        }
-    } {
-        if let Some(capture) = extract_captures_groq(&client, &model, &user_message, &full).await {
-            send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
-        }
-    }
-    persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
-    send(sse("[DONE]")).await;
-}
-
 async fn persist_turn(
     state: &Arc<AppState>,
     _uid: &str,
@@ -1290,11 +1130,45 @@ async fn fetch_model(state: &Arc<AppState>, uid: &str) -> Result<Option<String>,
     Ok(row.map(|r| r.get::<_, Option<String>>(0)).flatten().map(normalize_model))
 }
 
+const DEFAULT_MODEL: &str = "@cf/meta/llama-4-scout-17b-16e-instruct";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextTier {
+    Full,
+    Compact,
+}
+
+// Context window per allowed model. Future models get appended here; any
+// window below 96k resolves to the Compact context tier.
+fn context_window(model: &str) -> usize {
+    match model {
+        DEFAULT_MODEL => 131_000,
+        _ => 131_000,
+    }
+}
+
+fn context_tier(model: &str) -> ContextTier {
+    if context_window(model) >= 96_000 {
+        ContextTier::Full
+    } else {
+        ContextTier::Compact
+    }
+}
+
+// Compact contexts cap per-section lengths so small-window models never overflow.
+fn apply_cap(parts: Vec<String>, tier: ContextTier, n: usize) -> Vec<String> {
+    if tier == ContextTier::Compact {
+        parts.into_iter().take(n).collect()
+    } else {
+        parts
+    }
+}
+
 fn normalize_model(m: String) -> String {
-    match m.as_str() {
-        "@cf/meta/llama-3.3-70b-instruct" => "@cf/meta/llama-3.3-70b-instruct-fp8-fast".to_string(),
-        "@cf/meta/llama-3.1-8b-instruct" => "@cf/meta/llama-3.1-8b-instruct-fp8".to_string(),
-        other => other.to_string(),
+    if m == DEFAULT_MODEL {
+        m
+    } else {
+        DEFAULT_MODEL.to_string()
     }
 }
 
@@ -1302,6 +1176,7 @@ async fn build_context(
     state: &Arc<AppState>,
     uid: &str,
     seller: bool,
+    tier: ContextTier,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let conn = state.pg.get().await?;
     let lines: Vec<String> = if seller {
@@ -1319,6 +1194,45 @@ async fn build_context(
             )
             .await?;
         let mut l = vec![];
+        if tier == ContextTier::Full {
+            if let Some(r) = conn
+                .query_opt(
+                    "SELECT COALESCE(business_name, ''), COALESCE(business_type, ''), plan
+                     FROM users WHERE user_id::text = $1",
+                    &[&uid],
+                )
+                .await?
+            {
+                let name: String = r.get(0);
+                let btype: String = r.get(1);
+                let plan: String = r.get(2);
+                if !name.is_empty() {
+                    l.push(format!("Business: {name} ({btype}), plan {plan}."));
+                }
+            }
+            let streams = conn
+                .query(
+                    "SELECT COALESCE(source, 'Other'), COALESCE(amount, 0)::float8, COALESCE(frequency, ''), COALESCE(currency, 'INR')
+                     FROM income_streams WHERE user_id::text = $1 ORDER BY from_date DESC",
+                    &[&uid],
+                )
+                .await?;
+            if !streams.is_empty() {
+                let parts: Vec<String> = streams
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{} ₹{:.0}/{} ({})",
+                            r.get::<_, String>(0),
+                            r.get::<_, f64>(1),
+                            r.get::<_, String>(2),
+                            r.get::<_, String>(3)
+                        )
+                    })
+                    .collect();
+                l.push(format!("Income streams: {}", parts.join(", ")));
+            }
+        }
         if let Some(r) = d {
             let revenue: f64 = r.get(0);
             let expenses: f64 = r.get(1);
@@ -1465,7 +1379,7 @@ async fn build_context(
         }
         let accs = conn
             .query(
-                "SELECT b.name, balance::float8
+                "SELECT b.name, balance::float8, ba.account_type
                  FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id
                  WHERE ba.user_id::text = $1 ORDER BY ba.created_at",
                 &[&uid],
@@ -1476,11 +1390,19 @@ async fn build_context(
                 .iter()
                 .map(|r| {
                     let bal: Option<f64> = r.get(1);
-                    format!(
-                        "{} balance {}",
-                        r.get::<_, String>(0),
-                        bal.map(|b| format!("₹{b:.0}")).unwrap_or_else(|| "unknown".to_string())
-                    )
+                    let atype: Option<String> = r.get(2);
+                    let suffix = bal
+                        .map(|b| format!("₹{b:.0}"))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let label = if tier == ContextTier::Full {
+                        atype
+                            .filter(|t| !t.is_empty())
+                            .map(|t| format!("{} ({t})", r.get::<_, String>(0)))
+                            .unwrap_or_else(|| r.get::<_, String>(0))
+                    } else {
+                        r.get::<_, String>(0)
+                    };
+                    format!("{label} balance {suffix}")
                 })
                 .collect();
             l.push(format!("Bank accounts: {}", parts.join("; ")));
@@ -1498,7 +1420,9 @@ async fn build_context(
                     u.dependents,
                     CASE WHEN u.debt_emis IS NULL THEN NULL ELSE u.debt_emis::float8 END,
                     CASE WHEN u.monthly_tax IS NULL THEN NULL ELSE u.monthly_tax::float8 END,
-                    CASE WHEN u.monthly_income IS NULL THEN NULL ELSE u.monthly_income::float8 END
+                    CASE WHEN u.monthly_income IS NULL THEN NULL ELSE u.monthly_income::float8 END,
+                    u.financial_health_score,
+                    u.plan
                  FROM users u WHERE u.user_id::text = $1",
                 &[&uid],
             )
@@ -1536,42 +1460,84 @@ async fn build_context(
             if let Some(v) = stated_tax {
                 prof.push(format!("tax ₹{v:.0}/mo"));
             }
+            if tier == ContextTier::Full {
+                let score: i32 = r.get(8);
+                let plan: String = r.get(9);
+                prof.push(format!("health score {score}, plan {plan}"));
+            }
             if !prof.is_empty() {
                 l.push(format!("Profile: {}", prof.join(", ")));
+            }
+            if tier == ContextTier::Full {
+                let mut missing = vec![];
+                if income.is_none() {
+                    missing.push("monthly income");
+                }
+                if spend.is_none() {
+                    missing.push("monthly spend");
+                }
+                if inv_pct.is_none() {
+                    missing.push("investment %");
+                }
+                if housing.is_none() {
+                    missing.push("housing cost");
+                }
+                if emis.is_none() {
+                    missing.push("EMI/debt payments");
+                }
+                if stated_tax.is_none() {
+                    missing.push("monthly tax");
+                }
+                if !missing.is_empty() {
+                    l.push(format!(
+                        "Missing profile info: {}. Ask about these when relevant.",
+                        missing.join(", ")
+                    ));
+                }
             }
         }
         let goals = conn
             .query(
-                "SELECT goal_type, name, target_amount::float8, current_amount::float8
+                "SELECT goal_type, name, target_amount::float8, current_amount::float8, target_date::text
                  FROM financial_goals WHERE user_id::text = $1
-                 ORDER BY created_at DESC LIMIT 3",
+                 ORDER BY created_at DESC",
                 &[&uid],
             )
             .await?;
         if !goals.is_empty() {
-            let parts: Vec<String> = goals
+            let goal_parts: Vec<String> = goals
                 .iter()
                 .map(|r| {
                     let gtype: String = r.get(0);
                     let name: String = r.get(1);
                     let target: f64 = r.get(2);
                     let current: f64 = r.get(3);
-                    format!(
+                    let date: Option<String> = r.get(4);
+                    let mut s = format!(
                         "{name} ({gtype}) ₹{target:.0} target, ₹{current:.0} saved"
-                    )
+                    );
+                    if tier == ContextTier::Full {
+                        let pct = if target > 0.0 { (current / target * 100.0).round() } else { 0.0 };
+                        let due = date.map(|d| format!(", due {d}")).unwrap_or_default();
+                        s = format!("{s} ({pct:.0}%{due})");
+                    }
+                    s
                 })
                 .collect();
-            l.push(format!("Goals: {}", parts.join("; ")));
+            let goal_parts = apply_cap(goal_parts, tier, 3);
+            l.push(format!("Goals: {}", goal_parts.join("; ")));
         }
         let holdings = conn
             .query(
                 "SELECT name, asset_type, quantity::float8, COALESCE(avg_price, 0)::float8, COALESCE(current_price, 0)::float8
-                 FROM holdings WHERE user_id::text = $1 ORDER BY created_at DESC LIMIT 5",
+                 FROM holdings WHERE user_id::text = $1 ORDER BY created_at DESC",
                 &[&uid],
             )
             .await?;
         if !holdings.is_empty() {
-            let parts: Vec<String> = holdings
+            let mut total = 0.0f64;
+            let mut classes: std::collections::BTreeMap<String, f64> = Default::default();
+            let holding_parts: Vec<String> = holdings
                 .iter()
                 .map(|r| {
                     let name: String = r.get(0);
@@ -1580,10 +1546,23 @@ async fn build_context(
                     let avg: f64 = r.get(3);
                     let cur: f64 = r.get(4);
                     let value = qty * if cur > 0.0 { cur } else { avg };
+                    total += value;
+                    *classes.entry(atype.clone()).or_insert(0.0) += value;
                     format!("{name} ({atype}) {qty} units @ ₹{avg:.0}, value ₹{value:.0}")
                 })
                 .collect();
-            l.push(format!("Holdings: {}", parts.join("; ")));
+            let holding_parts = apply_cap(holding_parts, tier, 5);
+            if tier == ContextTier::Full {
+                let classes_s: Vec<String> = classes
+                    .into_iter()
+                    .map(|(k, v)| format!("{k} ₹{v:.0}"))
+                    .collect();
+                l.push(format!(
+                    "Portfolio: total ₹{total:.0} ({}).",
+                    classes_s.join(", ")
+                ));
+            }
+            l.push(format!("Holdings: {}", holding_parts.join("; ")));
         }
         let purchases = conn
             .query(
@@ -1631,4 +1610,31 @@ async fn build_context(
         l
     };
     Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tier_maps_by_window() {
+        assert_eq!(context_tier(DEFAULT_MODEL), ContextTier::Full);
+        assert_eq!(context_tier("unknown-model"), ContextTier::Full);
+        assert_eq!(context_window(DEFAULT_MODEL), 131_000);
+    }
+
+    #[test]
+    fn compact_caps_keep_today_s_shape() {
+        let parts: Vec<String> = (1..=6).map(|i| format!("item {i}")).collect();
+        let capped = apply_cap(parts.clone(), ContextTier::Compact, 3);
+        assert_eq!(capped.len(), 3);
+        assert_eq!(apply_cap(parts, ContextTier::Full, 3).len(), 6);
+    }
+
+    #[test]
+    fn non_default_models_normalize_to_scout() {
+        assert_eq!(normalize_model(DEFAULT_MODEL.to_string()), DEFAULT_MODEL);
+        assert_eq!(normalize_model("groq/llama-3.3-70b-versatile".to_string()), DEFAULT_MODEL);
+        assert_eq!(normalize_model("@cf/meta/llama-3.3-70b-instruct".to_string()), DEFAULT_MODEL);
+    }
 }
