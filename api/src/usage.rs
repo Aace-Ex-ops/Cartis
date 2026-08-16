@@ -6,17 +6,16 @@ pub struct Tier {
     pub chat: i64,
     pub capture: i64,
     pub insights: i64,
-    pub sm_push: i64,
 }
 
-// Daily per-user AI/SuperMemory limits, tiered by effective plan.
+// Daily per-user AI limits, tiered by effective plan.
 pub fn tier(plan: &str) -> Tier {
     match plan {
-        "max" | "team_premium" => Tier { chat: 500, capture: 500, insights: 20, sm_push: 200 },
-        "pro" | "team_standard" => Tier { chat: 200, capture: 200, insights: 10, sm_push: 100 },
-        "enterprise" => Tier { chat: 1500, capture: 1500, insights: 60, sm_push: 500 },
+        "max" | "team_premium" => Tier { chat: 500, capture: 500, insights: 20 },
+        "pro" | "team_standard" => Tier { chat: 200, capture: 200, insights: 10 },
+        "enterprise" => Tier { chat: 1500, capture: 1500, insights: 60 },
         // free / trial
-        _ => Tier { chat: 20, capture: 20, insights: 2, sm_push: 20 },
+        _ => Tier { chat: 20, capture: 20, insights: 2 },
     }
 }
 
@@ -26,7 +25,6 @@ fn allowed(plan: &str, metric: &str) -> Result<i64, String> {
         "ai_chat" => t.chat,
         "ai_capture" => t.capture,
         "ai_insights" => t.insights,
-        "sm_push" => t.sm_push,
         _ => return Err(format!("unknown usage metric: {metric}")),
     })
 }

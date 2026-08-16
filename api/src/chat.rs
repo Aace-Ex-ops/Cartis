@@ -188,29 +188,39 @@ pub async fn chat_stream(
     drop(conn);
 
     let seller = mode == "seller";
-    let context = match build_context(&state, &uid, seller).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("chat context error: {e}");
-            "No data available.".to_string()
-        }
-    };
+    let (context, memories, history) = tokio::join!(
+        async {
+            match build_context(&state, &uid, seller).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("chat context error: {e}");
+                    "No data available.".to_string()
+                }
+            }
+        },
+        memory_context(&state, &uid, &message),
+        async {
+            match load_history(&state, &session_id).await {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("chat history error: {e}");
+                    vec![]
+                }
+            }
+        },
+    );
     let model = match fetch_model(&state, &uid).await {
         Ok(Some(m)) if !m.is_empty() && !m.starts_with("groq/") => m,
         _ => "@cf/meta/llama-4-scout-17b-16e-instruct".to_string(),
     };
     let mut system = system_prompt(seller, &context);
+    if !memories.is_empty() {
+        system = format!("{system}\n\n{memories}");
+    }
     if let Some(t) = tool_system(&tool) {
         system = format!("{t}\n\n{system}");
     }
 
-    let history = match load_history(&state, &session_id).await {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!("chat history error: {e}");
-            vec![]
-        }
-    };
     let mut llm_history = history;
     llm_history.push(Msg {
         role: "user".to_string(),
@@ -260,6 +270,103 @@ async fn load_history(
             content: r.get(1),
         })
         .collect())
+}
+
+// Semantic long-term memory: embed the user's message (bge-m3 via Cloudflare
+// AI) and pull the most relevant past chat turns from chat_memories by cosine
+// distance. Returns a prompt section, or empty string on any failure — memory
+// must never block or break a chat.
+async fn memory_context(state: &Arc<AppState>, uid: &str, message: &str) -> String {
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let has_memories: bool = match conn
+        .query_one(
+            "SELECT EXISTS(SELECT 1 FROM chat_memories WHERE user_id::text = $1)",
+            &[&uid],
+        )
+        .await
+    {
+        Ok(r) => r.get(0),
+        Err(_) => return String::new(),
+    };
+    if !has_memories {
+        return String::new();
+    }
+    drop(conn);
+    let token = match crate::insights::ai_token().await {
+        Ok(t) => t,
+        Err(_) => return String::new(),
+    };
+    let Ok(account) = env::var("CF_ACCOUNT_ID") else {
+        return String::new();
+    };
+    let client = reqwest::Client::new();
+    let res = match client
+        .post(format!(
+            "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/baai/bge-m3"
+        ))
+        .bearer_auth(&token)
+        .timeout(Duration::from_secs(30))
+        .json(&serde_json::json!({ "text": [message] }))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return String::new(),
+    };
+    if !res.status().is_success() {
+        return String::new();
+    }
+    let Ok(json) = res.json::<serde_json::Value>().await else {
+        return String::new();
+    };
+    let Some(embedding) = json
+        .pointer("/result/data/0")
+        .and_then(|v| v.as_array())
+        .map(|v| {
+            v.iter()
+                .map(|x| x.as_f64().unwrap_or(0.0))
+                .collect::<Vec<f64>>()
+        })
+    else {
+        return String::new();
+    };
+    let vec_sql = embedding
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>()
+        .join(",");
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let rows = match conn
+        .query(
+            "SELECT content, to_char(created_at, 'YYYY-MM-DD') FROM chat_memories
+             WHERE user_id::text = $1
+             ORDER BY embedding <=> $2::vector
+             LIMIT 4",
+            &[&uid, &format!("[{vec_sql}]")],
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return String::new(),
+    };
+    if rows.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let content: String = r.get(0);
+            let date: String = r.get(1);
+            format!("[{date}] {content}")
+        })
+        .collect();
+    format!("Past conversation memories (from this user's older chats):\n{}", parts.join("\n"))
 }
 
 pub async fn create_session(
@@ -1063,11 +1170,11 @@ async fn groq_stream(
 
 async fn persist_turn(
     state: &Arc<AppState>,
-    uid: &str,
+    _uid: &str,
     session_id: &str,
     user_message: &str,
     assistant: &str,
-    mode: &str,
+    _mode: &str,
 ) {
     let conn = match state.pg.get().await {
         Ok(c) => c,
@@ -1091,158 +1198,9 @@ async fn persist_turn(
     if let Err(e) = (&*conn).batch_execute(&sql).await {
         eprintln!("chat persist error: {e}");
     }
-    if !assistant.trim().is_empty() {
-        tokio::spawn(push_supermemory(
-            state.clone(),
-            uid.to_string(),
-            session_id.to_string(),
-            user_message.to_string(),
-            assistant.to_string(),
-            mode.to_string(),
-        ));
-    }
-}
-
-async fn push_supermemory(
-    state: Arc<AppState>,
-    uid: String,
-    session_id: String,
-    user: String,
-    assistant: String,
-    mode: String,
-) {
-    let key = match env::var("SM_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => return,
-    };
-    match crate::usage::bump(&state, &uid, "sm_push").await {
-        Ok(true) => {}
-        _ => {
-            eprintln!("supermemory push skipped: daily storage limit");
-            return;
-        }
-    }
-    let entity_context = match state.pg.get().await {
-        Ok(conn) => {
-            let name: Option<String> = conn
-                .query_opt(
-                    "SELECT full_name FROM users WHERE user_id::text = $1",
-                    &[&uid],
-                )
-                .await
-                .ok()
-                .flatten()
-                .and_then(|r| r.try_get(0).ok());
-            match name {
-                Some(n) if !n.trim().is_empty() => {
-                    let bank: Option<String> = conn
-                        .query_opt(
-                            "SELECT b.name FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id WHERE ba.user_id::text = $1 AND ba.is_primary ORDER BY ba.created_at DESC LIMIT 1",
-                            &[&uid],
-                        )
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|r| r.try_get(0).ok());
-                    match bank {
-                        Some(b) if !b.trim().is_empty() => format!(
-                            "User {n} is a Cartis user who banks with {b}. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                        ),
-                        _ => format!(
-                            "User {n} is a Cartis user. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                        ),
-                    }
-                }
-                _ => "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                    .to_string(),
-            }
-        }
-        Err(e) => {
-            eprintln!("entity context db error: {e}");
-            "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                .to_string()
-        }
-    };
-    let body = serde_json::json!({
-        "content": format!("user: {user}\nassistant: {assistant}"),
-        "containerTag": format!("user_{uid}"),
-        "customId": format!("cartis_{session_id}"),
-        "metadata": { "type": "chat", "mode": mode, "source": "cartis" },
-        "entityContext": entity_context,
-    });
-    let client = reqwest::Client::new();
-    for attempt in 0..3 {
-        match client
-            .post("https://api.supermemory.ai/v3/documents")
-            .bearer_auth(&key)
-            .timeout(Duration::from_secs(30))
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(r) if r.status().as_u16() == 429 => {
-                eprintln!("supermemory push rate limited (attempt {})", attempt + 1);
-                if attempt < 2 {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
-                }
-            }
-            Ok(r) if !r.status().is_success() => {
-                eprintln!("supermemory push status {}", r.status().as_u16());
-            }
-            Ok(_) => {}
-            Err(e) => eprintln!("supermemory push error: {e}"),
-        }
-        break;
-    }
-}
-
-pub async fn purge_supermemory(uid: String) {
-    let key = match env::var("SM_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => return,
-    };
-    let url = format!("https://api.supermemory.ai/v3/container-tags/user_{uid}");
-    let client = reqwest::Client::new();
-    for attempt in 0..3 {
-        match client
-            .delete(&url)
-            .bearer_auth(&key)
-            .timeout(Duration::from_secs(30))
-            .send()
-            .await
-        {
-            // 404 = container already gone
-            Ok(r) if r.status().as_u16() == 404 => {
-                eprintln!("supermemory purge user_{uid}: nothing to delete");
-                return;
-            }
-            Ok(r) if r.status().as_u16() == 429 || r.status().is_server_error() => {
-                eprintln!(
-                    "supermemory purge user_{uid}: status {} (attempt {})",
-                    r.status().as_u16(),
-                    attempt + 1
-                );
-                if attempt < 2 {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
-                }
-            }
-            Ok(r) if !r.status().is_success() => {
-                eprintln!("supermemory purge status {}", r.status().as_u16());
-            }
-            Ok(r) => {
-                let v: serde_json::Value = r.json().await.unwrap_or_default();
-                eprintln!(
-                    "supermemory purge user_{uid}: deleted {} docs, {} memories",
-                    v["deletedDocumentsCount"].as_u64().unwrap_or(0),
-                    v["deletedMemoriesCount"].as_u64().unwrap_or(0)
-                );
-            }
-            Err(e) => eprintln!("supermemory purge error: {e}"),
-        }
-        break;
-    }
+    drop(conn);
+    // Long-term memory embedding is owned by the Python embed-chats cron on
+    // the server — nothing to do here.
 }
 
 fn system_prompt(seller: bool, context: &str) -> String {
@@ -1467,6 +1425,152 @@ async fn build_context(
         }
         if l.is_empty() {
             l.push("No financial data available yet.".to_string());
+        }
+        if let Some(r) = conn
+            .query_opt(
+                "SELECT
+                    CASE WHEN u.monthly_income IS NULL THEN NULL ELSE u.monthly_income::float8 END,
+                    CASE WHEN u.monthly_spend IS NULL THEN NULL ELSE u.monthly_spend::float8 END,
+                    CASE WHEN u.investment_pct IS NULL THEN NULL ELSE u.investment_pct::float8 END,
+                    CASE WHEN u.housing_cost IS NULL THEN NULL ELSE u.housing_cost::float8 END,
+                    u.dependents,
+                    CASE WHEN u.debt_emis IS NULL THEN NULL ELSE u.debt_emis::float8 END,
+                    CASE WHEN u.monthly_tax IS NULL THEN NULL ELSE u.monthly_tax::float8 END,
+                    CASE WHEN u.monthly_income IS NULL THEN NULL ELSE u.monthly_income::float8 END
+                 FROM users u WHERE u.user_id::text = $1",
+                &[&uid],
+            )
+            .await?
+        {
+            let income: Option<f64> = r.get(0);
+            let spend: Option<f64> = r.get(1);
+            let inv_pct: Option<f64> = r.get(2);
+            let housing: Option<f64> = r.get(3);
+            let dependents: Option<i32> = r.get(4);
+            let emis: Option<f64> = r.get(5);
+            let tax: Option<f64> = r.get(6);
+            let annual_income: Option<f64> = r.get(7);
+            let mut prof = vec![];
+            if let Some(v) = income {
+                prof.push(format!("income ₹{v:.0}/mo"));
+            }
+            if let Some(v) = spend {
+                prof.push(format!("spend ₹{v:.0}/mo"));
+            }
+            if let Some(v) = inv_pct {
+                prof.push(format!("invests {v:.0}%"));
+            }
+            if let Some(v) = housing {
+                prof.push(format!("housing ₹{v:.0}/mo"));
+            }
+            if let Some(v) = dependents {
+                prof.push(format!("dependents {v}"));
+            }
+            if let Some(v) = emis {
+                prof.push(format!("EMIs ₹{v:.0}/mo"));
+            }
+            let computed_tax = annual_income.map(|a| crate::insights::new_regime_tax(a) / 12.0);
+            let stated_tax = tax.or(computed_tax);
+            if let Some(v) = stated_tax {
+                prof.push(format!("tax ₹{v:.0}/mo"));
+            }
+            if !prof.is_empty() {
+                l.push(format!("Profile: {}", prof.join(", ")));
+            }
+        }
+        let goals = conn
+            .query(
+                "SELECT goal_type, name, target_amount::float8, current_amount::float8
+                 FROM financial_goals WHERE user_id::text = $1
+                 ORDER BY created_at DESC LIMIT 3",
+                &[&uid],
+            )
+            .await?;
+        if !goals.is_empty() {
+            let parts: Vec<String> = goals
+                .iter()
+                .map(|r| {
+                    let gtype: String = r.get(0);
+                    let name: String = r.get(1);
+                    let target: f64 = r.get(2);
+                    let current: f64 = r.get(3);
+                    format!(
+                        "{name} ({gtype}) ₹{target:.0} target, ₹{current:.0} saved"
+                    )
+                })
+                .collect();
+            l.push(format!("Goals: {}", parts.join("; ")));
+        }
+        let holdings = conn
+            .query(
+                "SELECT name, asset_type, quantity::float8, COALESCE(avg_price, 0)::float8, COALESCE(current_price, 0)::float8
+                 FROM holdings WHERE user_id::text = $1 ORDER BY created_at DESC LIMIT 5",
+                &[&uid],
+            )
+            .await?;
+        if !holdings.is_empty() {
+            let parts: Vec<String> = holdings
+                .iter()
+                .map(|r| {
+                    let name: String = r.get(0);
+                    let atype: String = r.get(1);
+                    let qty: f64 = r.get(2);
+                    let avg: f64 = r.get(3);
+                    let cur: f64 = r.get(4);
+                    let value = qty * if cur > 0.0 { cur } else { avg };
+                    format!("{name} ({atype}) {qty} units @ ₹{avg:.0}, value ₹{value:.0}")
+                })
+                .collect();
+            l.push(format!("Holdings: {}", parts.join("; ")));
+        }
+        let purchases = conn
+            .query(
+                "SELECT p.name, p.price::float8, a.verdict, a.created_at::date
+                 FROM analysis_log a JOIN products p ON p.product_id = a.product_id
+                 WHERE a.user_id::text = $1 AND p.site_name = 'Twin Chat'
+                 ORDER BY a.created_at DESC LIMIT 5",
+                &[&uid],
+            )
+            .await?;
+        if !purchases.is_empty() {
+            let parts: Vec<String> = purchases
+                .iter()
+                .map(|r| {
+                    let name: String = r.get(0);
+                    let price: f64 = r.get(1);
+                    let verdict: String = r.get(2);
+                    let date: String = r.get(3);
+                    format!("{name} ₹{price:.0} ({verdict}, {date})")
+                })
+                .collect();
+            l.push(format!("Recent purchases: {}", parts.join("; ")));
+        }
+        let entries = conn
+            .query(
+                "SELECT amount::float8, category, description, to_char(transaction_date, 'YYYY-MM-DD')
+                 FROM ledger_entries
+                 WHERE user_id::text = $1 AND account_type = 'budget'
+                 ORDER BY created_at DESC LIMIT 5",
+                &[&uid],
+            )
+            .await?;
+        if !entries.is_empty() {
+            let parts: Vec<String> = entries
+                .iter()
+                .map(|r| {
+                    let amount: f64 = r.get(0);
+                    let category: Option<String> = r.get(1);
+                    let description: Option<String> = r.get(2);
+                    let date: String = r.get(3);
+                    let desc = description.unwrap_or_default();
+                    format!(
+                        "₹{amount:.0} {} ({})",
+                        if desc.is_empty() { category.unwrap_or_default() } else { desc },
+                        date
+                    )
+                })
+                .collect();
+            l.push(format!("Recent entries: {}", parts.join(" | ")));
         }
         l
     };

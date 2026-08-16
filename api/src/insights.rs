@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 
-fn new_regime_tax(annual: f64) -> f64 {
+pub fn new_regime_tax(annual: f64) -> f64 {
     let taxable = annual.max(0.0) - 75_000.0;
     if taxable <= 1_200_000.0 {
         return 0.0;

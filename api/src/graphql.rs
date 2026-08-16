@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use async_graphql::{Context, Object, Result};
 
-use crate::chat::purge_supermemory;
 use crate::AppState;
 
 fn user_id(ctx: &Context<'_>) -> Option<String> {
@@ -40,7 +39,7 @@ fn revoke_gateway_sessions(uid: String) {
     });
 }
 
-const USER_CHILD_TABLES: [&str; 16] = [
+const USER_CHILD_TABLES: [&str; 17] = [
     "sessions",
     "bank_accounts",
     "analysis_log",
@@ -53,6 +52,7 @@ const USER_CHILD_TABLES: [&str; 16] = [
     "budget_suggestions",
     "coach_insights",
     "chat_sessions",
+    "chat_memories",
     "financial_goals",
     "holdings",
     "user_actions",
@@ -771,7 +771,6 @@ impl MutationRoot {
         tx.execute("DELETE FROM users WHERE user_id::text = $1", &[&uid])
             .await?;
         tx.commit().await?;
-        tokio::spawn(purge_supermemory(uid.clone()));
         revoke_gateway_sessions(uid);
         Ok(true)
     }
