@@ -47,15 +47,15 @@ export function PersonalDashboard() {
   const totalNetWorth = bankBalance + holdingsValue;
 
   return (
-    <div className="relative flex flex-col gap-6 text-[#132a13] pb-12">
+    <div className="relative flex flex-col gap-6 text-foreground pb-12">
       {/* Top Greeting Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="font-heading text-2xl font-bold tracking-tight text-[#132a13] md:text-3xl">
+        <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground md:text-3xl">
           Hello, {firstName}! 👋
         </h1>
 
-        <button className="flex items-center gap-2 rounded-xl border border-[#7ec151]/30 bg-white px-4 py-2 text-xs font-bold text-[#132a13] hover:bg-[#b2d959]/15 transition-all shadow-sm">
-          <SlidersHorizontal className="h-3.5 w-3.5 text-[#7ec151]" />
+        <button className="flex items-center gap-2 rounded-xl border border-primary/30 bg-background px-4 py-2 text-xs font-bold text-foreground hover:bg-chart-2/15 transition-all shadow-sm">
+          <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
           <span>Customize</span>
         </button>
       </div>
@@ -87,9 +87,10 @@ export function PersonalDashboard() {
         </div>
       </div>
 
-      {/* Floating Action AI Button (Color Hunt Meadow Green #7EC151 / Yellow #FED24F) */}
+      {/* Floating Action AI Button - opens AI Twin */}
       <button
-        className="fixed bottom-8 right-8 z-40 flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-tr from-[#7ec151] via-[#b2d959] to-[#fed24f] text-white shadow-[0_0_20px_rgba(126,193,81,0.5)] transition-transform duration-300 hover:scale-110 active:scale-95"
+        onClick={() => window.dispatchEvent(new CustomEvent("cartis:open-twin"))}
+        className="fixed bottom-8 right-8 z-40 flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-tr from-primary via-chart-2 to-chart-5 text-white shadow-[0_0_20px_rgba(126,193,81,0.5)] transition-transform duration-300 hover:scale-110 active:scale-95"
         title="Cartis AI Advisor"
       >
         <Sparkles className="h-6 w-6 text-white" />

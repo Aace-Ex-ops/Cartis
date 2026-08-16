@@ -129,7 +129,7 @@ export default function GoalsPage() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
+            <div key={i} className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
               <Skeleton className="h-4 w-32" />
               <Skeleton className="h-3 w-24" />
               <Skeleton className="h-2 w-full rounded-full" />
@@ -141,15 +141,15 @@ export default function GoalsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 text-[#132a13] pb-12">
+    <div className="flex flex-col gap-6 text-foreground pb-12">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight text-[#132a13] md:text-3xl">Financial Goals</h1>
-          <p className="mt-1 text-xs text-gray-500">Track targets like an emergency fund, home down payment, or retirement corpus.</p>
+          <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground md:text-3xl">Financial Goals</h1>
+          <p className="mt-1 text-xs text-muted-foreground">Track targets like an emergency fund, home down payment, or retirement corpus.</p>
         </div>
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#7ec151] to-[#b2d959] hover:from-[#6cae42] hover:to-[#9fc44a] px-4 py-2 text-xs font-bold text-white shadow-sm transition-all"
+          className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-chart-2 hover:from-chart-2 hover:to-chart-3 px-4 py-2 text-xs font-bold text-white shadow-sm transition-all"
         >
           <Plus className="h-4 w-4" />
           <span>Add Goal</span>
@@ -157,15 +157,15 @@ export default function GoalsPage() {
       </div>
 
       {open && (
-        <div className="rounded-2xl border border-[#7ec151]/30 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-primary/30 bg-card p-5 shadow-sm">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="goal-type" className="text-xs font-bold text-gray-700">Goal Type</Label>
+              <Label htmlFor="goal-type" className="text-xs font-bold text-foreground">Goal Type</Label>
               <select
                 id="goal-type"
                 value={type}
                 onChange={(e) => setType(e.target.value)}
-                className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-[#132a13]"
+                className="rounded-xl border border-border bg-muted px-3 py-2 text-xs text-foreground"
               >
                 {TYPES.map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
@@ -173,19 +173,19 @@ export default function GoalsPage() {
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="goal-name" className="text-xs font-bold text-gray-700">Goal Name</Label>
+              <Label htmlFor="goal-name" className="text-xs font-bold text-foreground">Goal Name</Label>
               <Input id="goal-name" placeholder="e.g. 6-month safety net" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="goal-target" className="text-xs font-bold text-gray-700">Target Amount (₹)</Label>
+              <Label htmlFor="goal-target" className="text-xs font-bold text-foreground">Target Amount (₹)</Label>
               <Input id="goal-target" type="number" placeholder="450000" value={target} onChange={(e) => setTarget(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="goal-current" className="text-xs font-bold text-gray-700">Already Saved (₹)</Label>
+              <Label htmlFor="goal-current" className="text-xs font-bold text-foreground">Already Saved (₹)</Label>
               <Input id="goal-current" type="number" placeholder="100000" value={current} onChange={(e) => setCurrent(e.target.value)} />
             </div>
             <button
-              className="sm:col-span-2 rounded-xl bg-gradient-to-r from-[#7ec151] to-[#b2d959] py-2.5 text-xs font-bold text-white shadow-sm transition-all"
+              className="sm:col-span-2 rounded-xl bg-gradient-to-r from-primary to-chart-2 py-2.5 text-xs font-bold text-white shadow-sm transition-all"
               onClick={() => void addGoal()}
               disabled={!name.trim() || !(parseFloat(target) > 0)}
             >
@@ -197,10 +197,10 @@ export default function GoalsPage() {
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {goals.map((g) => (
-          <div key={g.goalId} className="group relative overflow-hidden rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm transition-all duration-300">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <span className="truncate text-sm font-bold text-[#132a13]">{g.name}</span>
-              <span className="shrink-0 rounded-full bg-[#fed24f]/40 border border-[#fed24f] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#854d0e]">
+          <div key={g.goalId} className="group relative overflow-hidden rounded-2xl border border-primary/20 bg-card p-6 shadow-sm transition-all duration-300">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <span className="truncate text-sm font-bold text-foreground">{g.name}</span>
+              <span className="shrink-0 rounded-full bg-chart-5/40 border border-chart-5 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-foreground">
                 {TYPES.find(([v]) => v === g.goalType)?.[1] ?? g.goalType}
               </span>
             </div>
@@ -208,36 +208,36 @@ export default function GoalsPage() {
             <div className="mt-4 flex flex-col gap-3">
               <div>
                 <div className="flex items-baseline justify-between text-xs">
-                  <span className="text-gray-500 font-semibold">{fmt(g.currentAmount)} of {fmt(g.targetAmount)}</span>
-                  <span className="font-black text-[#132a13]">{Math.round(g.progressPct)}%</span>
+                  <span className="text-muted-foreground font-semibold">{fmt(g.currentAmount)} of {fmt(g.targetAmount)}</span>
+                  <span className="font-black text-foreground">{Math.round(g.progressPct)}%</span>
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-[#7ec151] to-[#b2d959]"
+                    className="h-full rounded-full bg-gradient-to-r from-primary to-chart-2"
                     style={{ width: `${Math.min(100, g.progressPct)}%` }}
                   />
                 </div>
               </div>
 
               {g.targetDate && (
-                <p className="text-[11px] text-gray-400 font-medium">Target Date: {new Date(g.targetDate).toLocaleDateString("en-IN")}</p>
+                <p className="text-[11px] text-muted-foreground font-medium">Target Date: {new Date(g.targetDate).toLocaleDateString("en-IN")}</p>
               )}
 
-              <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+              <div className="flex items-center gap-2 pt-2 border-t border-border">
                 <button
                   onClick={() => bump(g, 1000)}
-                  className="rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-700 hover:bg-[#b2d959]/20 transition-all"
+                  className="rounded-xl border border-border bg-muted px-2.5 py-1 text-xs font-bold text-foreground hover:bg-chart-2/20 transition-all"
                 >
                   + ₹1,000
                 </button>
                 <button
                   onClick={() => bump(g, 10000)}
-                  className="rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-700 hover:bg-[#b2d959]/20 transition-all"
+                  className="rounded-xl border border-border bg-muted px-2.5 py-1 text-xs font-bold text-foreground hover:bg-chart-2/20 transition-all"
                 >
                   + ₹10,000
                 </button>
                 <button
-                  className="ml-auto rounded-lg p-1.5 text-gray-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                  className="ml-auto rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
                   onClick={() => remove(g)}
                   title={`Delete ${g.name}`}
                 >
@@ -249,8 +249,8 @@ export default function GoalsPage() {
         ))}
       </div>
 
-      <div className="flex items-center gap-2 rounded-2xl border border-[#7ec151]/20 bg-white p-4 text-xs font-semibold text-gray-600 shadow-sm">
-        <TrendingUp className="h-4 w-4 text-[#7ec151]" />
+      <div className="flex items-center gap-2 rounded-2xl border border-primary/20 bg-card p-4 text-xs font-semibold text-muted-foreground shadow-sm">
+        <TrendingUp className="h-4 w-4 text-primary" />
         <span>Tip: Maintain your emergency fund at 6 months of expenses before expanding investment allocations.</span>
       </div>
     </div>

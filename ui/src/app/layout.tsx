@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
-import { Inter, Playfair_Display, JetBrains_Mono, Anybody, Inclusive_Sans, Gantari, Instrument_Serif } from "next/font/google";
+import { Chakra_Petch, Playfair_Display, IBM_Plex_Mono, Anybody, Inclusive_Sans, Gantari, Instrument_Serif } from "next/font/google";
 import { SmoothScrollProvider } from "@/components/providers/smooth-scroll-provider";
 import { Preloader } from "@/components/shared/preloader";
 import "./globals.css";
 
-const inter = Inter({
+const chakraPetch = Chakra_Petch({
   variable: "--font-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   preload: false,
 });
 
@@ -16,9 +17,10 @@ const playfair = Playfair_Display({
   preload: false,
 });
 
-const jetbrains = JetBrains_Mono({
+const ibmPlexMono = IBM_Plex_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
+  weight: ["400", "500"],
   preload: false,
 });
 
@@ -61,13 +63,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${playfair.variable} ${jetbrains.variable} ${anybody.variable} ${inclusiveSans.variable} ${gantari.variable} ${instrumentSerif.variable} h-full antialiased`}
+      className={`${chakraPetch.variable} ${playfair.variable} ${ibmPlexMono.variable} ${anybody.variable} ${inclusiveSans.variable} ${gantari.variable} ${instrumentSerif.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{var t=localStorage.getItem("theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.classList.add("dark")}catch(e){}`,
+            __html: `try{var t=localStorage.getItem("theme");var dark=t==="dark"||((!t||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark")}catch(e){}`,
           }}
         />
       </head>

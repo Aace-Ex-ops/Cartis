@@ -15,7 +15,6 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { SubscriptionPanel } from "@/components/consumer/subscription-panel";
-import { SettingsPanel } from "@/components/consumer/settings-panel";
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
 
 type User = {
@@ -25,11 +24,10 @@ type User = {
   userType: string;
 };
 
-type PanelKey = "subscription" | "settings";
+type PanelKey = "subscription";
 
 const PANELS: Record<PanelKey, { label: string; panel: React.ComponentType<{ effectivePlan?: string; userType?: string }> }> = {
   subscription: { label: "Subscription", panel: SubscriptionPanel },
-  settings: { label: "Settings", panel: SettingsPanel },
 };
 
 export function UserMenu({
@@ -64,9 +62,9 @@ export function UserMenu({
           {collapsed ? (
             <button
               title={user.fullName}
-              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl p-1 transition-all hover:bg-white/10 focus:outline-none"
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl p-1 transition-all focus:outline-none"
             >
-              <Avatar className="h-9 w-9 shrink-0 rounded-xl bg-primary text-primary-foreground shadow-md border border-white/20">
+              <Avatar className="h-9 w-9 shrink-0 rounded-xl bg-primary text-primary-foreground after:border-0">
                 <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
                 <AvatarFallback className="bg-primary text-xs font-bold text-primary-foreground">
                   {initials}
@@ -76,7 +74,7 @@ export function UserMenu({
           ) : (
             <button className="flex w-full cursor-pointer items-center justify-between rounded-xl px-2.5 py-2 text-left transition-all hover:bg-white/10 focus:outline-none">
               <span className="flex min-w-0 items-center gap-2.5">
-                <Avatar className="h-8 w-8 shrink-0 rounded-lg bg-primary text-primary-foreground border border-white/15">
+                <Avatar className="h-8 w-8 shrink-0 rounded-lg bg-primary text-primary-foreground after:border-0">
                   <AvatarImage src={user.avatarUrl ?? undefined} alt={user.fullName} />
                   <AvatarFallback className="bg-primary text-[12px] font-semibold text-primary-foreground">
                     {initials}
@@ -91,7 +89,7 @@ export function UserMenu({
             </button>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-56 shadow-none ring-0">
           <div className="flex items-center gap-2 px-2 py-1.5">
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-sm font-medium text-foreground">{user.fullName}</span>
