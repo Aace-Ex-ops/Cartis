@@ -28,25 +28,5 @@
   "workers_dev": true,
   "observability": {
     "enabled": true
-  },
-  "env": {
-    "preview": {
-      "name": "cartis-gateway-preview",
-      "kv_namespaces": [
-        { "binding": "SESSIONS", "id": "540329106cb74e56a5a2c659ccb98b49" }
-      ],
-      "ai": {
-        "binding": "AI"
-      },
-      "vars": {
-        "YODLEE_BASE_URL": "https://sandbox.api.yodlee.com/ysl",
-        "YODLEE_FASTLINK_URL": "https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink",
-        "YODLEE_CONFIG_NAME": "Aggregation"
-      },
-      "routes": [],
-      "triggers": {
-        "crons": []
-      }
-    }
   }
 }
