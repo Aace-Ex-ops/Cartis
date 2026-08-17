@@ -7,6 +7,7 @@ type AccountItem = {
   id: string;
   name: string;
   amount: number;
+  tooltip?: string;
   subItems?: AccountItem[];
 };
 
@@ -26,7 +27,34 @@ const fmt = (n: number) => {
 export type BankAccount = {
   accountId: string;
   bankName: string;
+  accountType: string | null;
+  maskedAccountNumber: string | null;
+  accountName: string | null;
   balance: number | null;
+};
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  SAVINGS: "Savings",
+  CHECKING: "Checking",
+  CREDIT: "Credit card",
+  CHARGE: "Charge card",
+  CD: "Fixed deposit",
+  BROKERAGE_CASH: "Brokerage",
+  EMPLOYEE_RETIREMENT_ACCOUNT_401K: "401(k)",
+  INDIVIDUAL_RETIREMENT_ACCOUNT_IRA: "Retirement (IRA)",
+  REWARD_POINTS: "Reward points",
+  LIFE_INSURANCE: "Life insurance",
+  INSURANCE: "Insurance",
+  OTHER: "Other",
+};
+
+export const accountLabel = (a: Pick<BankAccount, "accountType" | "maskedAccountNumber">) => {
+  const type =
+    (a.accountType && ACCOUNT_TYPE_LABELS[a.accountType]) ??
+    (a.accountType
+      ? a.accountType.charAt(0) + a.accountType.slice(1).toLowerCase().replace(/_/g, " ")
+      : "Account");
+  return a.maskedAccountNumber ? `${type} ••${a.maskedAccountNumber.replace(/[^0-9]/g, "").slice(-4)}` : type;
 };
 
 export type Holding = {
@@ -46,7 +74,8 @@ function buildGroups(accounts: BankAccount[], holdings: Holding[]): CategoryGrou
       total: accounts.reduce((s, a) => s + (a.balance ?? 0), 0),
       items: accounts.map((a) => ({
         id: `bank-${a.accountId}`,
-        name: a.bankName,
+        name: a.accountName?.trim() || accountLabel(a),
+        tooltip: a.bankName,
         amount: a.balance ?? 0,
       })),
     });
@@ -137,7 +166,7 @@ export function AccountsTree({ accounts, holdings, totalNetWorth }: { accounts: 
                                 <ChevronRight className="h-3 w-3 text-chart-2 shrink-0" />
                               )
                             )}
-                            <span className="text-xs font-semibold text-foreground truncate">{sub.name}</span>
+                            <span className="text-xs font-semibold text-foreground truncate" title={sub.tooltip ?? sub.name}>{sub.name}</span>
                           </div>
                           <span className="text-xs font-semibold tabular-nums text-foreground">{fmt(sub.amount)}</span>
                         </button>

@@ -23,7 +23,7 @@ type HomeData = {
 };
 
 const QUERY = `{
-  bankAccounts { accountId bankName balance }
+  bankAccounts { accountId bankName accountType maskedAccountNumber accountName balance }
   holdings { holdingId assetType name quantity currentPrice }
   ledgerTransactions(limit: 5) { txnType amount description transactionDate }
   incomeStreams { source frequency amount currency fromDate }

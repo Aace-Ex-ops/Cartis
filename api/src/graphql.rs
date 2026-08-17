@@ -211,7 +211,7 @@ impl QueryRoot {
         let rows = pg(ctx).get().await?
             .query(
                 "SELECT account_id::text, b.name, mobile_number, account_type,
-                        balance::float8, last_sync_at::text, is_primary
+                        masked_account_number, COALESCE(account_name, ''), balance::float8, last_sync_at::text, is_primary
                  FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id
                  WHERE ba.user_id::text = $1 ORDER BY ba.is_primary DESC, ba.created_at",
                 &[&uid],
@@ -1321,18 +1321,18 @@ impl MutationRoot {
             if let Some(ref aid) = existing {
                 tx.execute(
                     "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now(),
-                        account_type = COALESCE($4, account_type)
+                        account_type = COALESCE($4, account_type), account_name = COALESCE(NULLIF($5, ''), account_name)
                      WHERE account_id::text = $1",
-                    &[aid, &acct.balance.to_string(), &acct.fip_id, &acct.account_type],
+                    &[aid, &acct.balance.to_string(), &acct.fip_id, &acct.account_type, &acct.account_name],
                 ).await?;
                 account_id = Some(aid.clone());
             } else {
                 let new_id: String = tx
                     .query_one(
-                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, account_type, last_sync_at)
-                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), $6, now())
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, account_type, account_name, last_sync_at)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), $6, NULLIF($7, ''), now())
                          RETURNING account_id::text",
-                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref, &acct.account_type],
+                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref, &acct.account_type, &acct.account_name],
                     )
                     .await?
                     .get(0);
@@ -1774,6 +1774,8 @@ struct BankAccount {
     bank_name: String,
     mobile_number: Option<String>,
     account_type: Option<String>,
+    masked_account_number: Option<String>,
+    account_name: Option<String>,
     balance: Option<f64>,
     last_sync_at: Option<String>,
     is_primary: bool,
@@ -1849,6 +1851,8 @@ impl BankAccount {
     async fn bank_name(&self) -> &str { &self.bank_name }
     async fn mobile_number(&self) -> Option<&str> { self.mobile_number.as_deref() }
     async fn account_type(&self) -> Option<&str> { self.account_type.as_deref() }
+    async fn masked_account_number(&self) -> Option<&str> { self.masked_account_number.as_deref() }
+    async fn account_name(&self) -> Option<&str> { self.account_name.as_deref() }
     async fn balance(&self) -> Option<f64> { self.balance }
     async fn last_sync_at(&self) -> Option<&str> { self.last_sync_at.as_deref() }
     async fn is_primary(&self) -> bool { self.is_primary }
@@ -1861,9 +1865,11 @@ impl BankAccount {
             bank_name: r.get(1),
             mobile_number: r.get(2),
             account_type: r.get(3),
-            balance: r.get(4),
-            last_sync_at: r.get(5),
-            is_primary: r.get(6),
+            masked_account_number: r.get(4),
+            account_name: r.get(5),
+            balance: r.get(6),
+            last_sync_at: r.get(7),
+            is_primary: r.get(8),
         }
     }
 }
@@ -2095,6 +2101,7 @@ struct AaAccountInput {
     fip_id: Option<String>,
     account_ref: Option<String>,
     account_type: Option<String>,
+    account_name: Option<String>,
 }
 
 #[derive(async_graphql::InputObject)]

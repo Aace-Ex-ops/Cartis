@@ -229,6 +229,7 @@ type YodleeAccount = {
   id?: number
   accountNumber?: string
   accountName?: string
+  displayName?: string
   accountType?: string
   providerAccountId?: number
   providerName?: string
@@ -244,8 +245,8 @@ type YodleeTx = {
   merchant?: { name?: string }
 }
 
-function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[]; holding?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]; holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] } {
-  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[] = []
+function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[]; holding?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null; accountName: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]; holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] } {
+  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null; accountName: string }[] = []
   const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
   const income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] = []
   const holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] = []
@@ -259,6 +260,7 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
       fipId: String(a.providerAccountId ?? a.id ?? ''),
       accountRef: String(a.id ?? ''),
       accountType: a.accountType ?? null,
+      accountName: a.displayName ?? a.accountName ?? '',
     })
   }
 
@@ -305,7 +307,7 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
 }
 
 type YodleeSyncPayload = {
-  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[]
+  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null; accountName: string }[]
   transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]
   income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]
   holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[]
@@ -1255,6 +1257,7 @@ app.get('/api/aa/status/:consentId', auth, async (c) => {
       maskedAccNumber: a.accountNumber ?? a.accountName ?? '',
       fipId: String(a.providerAccountId ?? a.id ?? ''),
       accType: a.accountType ?? '',
+      accountName: a.displayName ?? a.accountName ?? '',
       linkRefNumber: String(a.id ?? ''),
     }))
     return c.json({ consentStatus: 'ACTIVE', consentId: c.req.param('consentId'), accounts })
