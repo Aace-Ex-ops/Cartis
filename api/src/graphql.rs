@@ -129,7 +129,7 @@ impl QueryRoot {
     }
 
     #[graphql(name = "spending30d")]
-    async fn spending_30d(&self, ctx: &Context<'_>) -> Result<Vec<SpendingDay>> {
+    async fn spending_30d(&self, ctx: &Context<'_>, #[graphql(default = 30)] days: i32) -> Result<Vec<SpendingDay>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
@@ -137,12 +137,73 @@ impl QueryRoot {
                  FROM ledger_entries
                  WHERE user_id::text = $1 AND account_type = 'budget'
                    AND transaction_type = 'debit'
-                   AND COALESCE(transaction_date, created_at) >= now() - interval '30 days'
+                   AND COALESCE(transaction_date, created_at) >= now() - ($2::int4 * interval '1 day')
                  GROUP BY 1 ORDER BY 1",
-                &[&uid],
+                &[&uid, &days],
             )
             .await?;
         Ok(rows.iter().map(|r| SpendingDay { day: r.get(0), spend: r.get(1) }).collect())
+    }
+
+    #[graphql(name = "netWorthSeries")]
+    async fn net_worth_series(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 90)] days: i32,
+        #[graphql(default = "day")] bucket: String,
+    ) -> Result<Vec<NetWorthPoint>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let fmt = match bucket.as_str() {
+            "week" => "'IYYY-\"W\"IW'",
+            "month" => "'Mon YYYY'",
+            _ => "'DD Mon'",
+        };
+        let pool = pg(ctx);
+        let rows = pool.get().await?
+            .query(
+                &format!(
+                    "SELECT to_char(COALESCE(transaction_date, created_at), {fmt}) AS day,
+                            COALESCE(SUM(CASE WHEN transaction_type = 'credit' THEN amount ELSE -amount END), 0)::float8 AS net
+                     FROM ledger_entries
+                     WHERE user_id::text = $1 AND account_type = 'budget'
+                       AND COALESCE(transaction_date, created_at) >= now() - ($2::int4 * interval '1 day')
+                     GROUP BY 1 ORDER BY 1"
+                ),
+                &[&uid, &days],
+            )
+            .await?;
+        if rows.is_empty() {
+            return Ok(vec![]);
+        }
+        let bank: f64 = pool.get().await?
+            .query_one("SELECT COALESCE(SUM(balance), 0)::float8 FROM bank_accounts WHERE user_id::text = $1", &[&uid])
+            .await?
+            .get(0);
+        let invested: f64 = pool.get().await?
+            .query_one("SELECT COALESCE(SUM(quantity * current_price), 0)::float8 FROM holdings WHERE user_id::text = $1", &[&uid])
+            .await?
+            .get(0);
+        let current_total = bank + invested;
+        let mut cum = 0.0;
+        let mut pts: Vec<NetWorthPoint> = Vec::with_capacity(rows.len() + 1);
+        for r in &rows {
+            cum += r.get::<_, f64>(1);
+            pts.push(NetWorthPoint { day: r.get(0), value: cum });
+        }
+        let last_cum = cum;
+        for p in &mut pts {
+            p.value = current_total + (p.value - last_cum);
+        }
+        let today: String = pool.get().await?
+            .query_one("SELECT to_char(now(), 'DD Mon')", &[])
+            .await?
+            .get(0);
+        if pts.last().map(|p| &p.day) == Some(&today) {
+            pts.last_mut().unwrap().value = current_total;
+        } else {
+            pts.push(NetWorthPoint { day: today, value: current_total });
+        }
+        Ok(pts)
     }
 
     async fn bank_accounts(&self, ctx: &Context<'_>) -> Result<Vec<BankAccount>> {
@@ -964,6 +1025,21 @@ impl MutationRoot {
         Ok(rows > 0)
     }
 
+    async fn add_income_stream(&self, ctx: &Context<'_>, input: IncomeStreamInput) -> Result<IncomeStream> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO income_streams (user_id, account_ref, source, frequency, amount, currency, from_date, to_date)
+                 VALUES ($1::text::uuid, '', $2, $3, $4::text::numeric, $5, $6, '')
+                 ON CONFLICT (user_id, source, from_date, frequency) DO UPDATE SET
+                    amount = EXCLUDED.amount, currency = EXCLUDED.currency
+                 RETURNING account_ref, source, frequency, amount::float8, currency, from_date::text, to_date::text",
+                &[&uid, &input.source, &input.frequency, &input.amount.to_string(), &input.currency, &input.from_date],
+            )
+            .await?;
+        Ok(IncomeStream::from_row(&row))
+    }
+
     async fn add_inventory_item(
         &self,
         ctx: &Context<'_>,
@@ -1682,6 +1758,17 @@ impl SpendingDay {
     async fn spend(&self) -> f64 { self.spend }
 }
 
+struct NetWorthPoint {
+    day: String,
+    value: f64,
+}
+
+#[Object]
+impl NetWorthPoint {
+    async fn day(&self) -> &str { &self.day }
+    async fn value(&self) -> f64 { self.value }
+}
+
 struct BankAccount {
     account_id: String,
     bank_name: String,
@@ -1980,6 +2067,18 @@ struct FinanceEntryInput {
     category: Option<String>,
     description: Option<String>,
     transaction_date: String,
+}
+
+#[derive(async_graphql::InputObject)]
+struct IncomeStreamInput {
+    source: String,
+    amount: f64,
+    #[graphql(default = "MONTHLY")]
+    frequency: String,
+    #[graphql(default = "INR")]
+    currency: String,
+    #[graphql(default = "")]
+    from_date: String,
 }
 
 #[derive(async_graphql::InputObject)]

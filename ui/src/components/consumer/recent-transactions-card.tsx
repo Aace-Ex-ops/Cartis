@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { ArrowRightLeft } from "lucide-react";
 
 export type LedgerTx = {
@@ -10,6 +11,7 @@ export type LedgerTx = {
 };
 
 export function RecentTransactionsCard({ transactions }: { transactions: LedgerTx[] }) {
+  const router = useRouter();
   const moneySpent = transactions
     .filter((t) => t.amount < 0)
     .reduce((s, t) => s + t.amount, 0);
@@ -53,7 +55,10 @@ export function RecentTransactionsCard({ transactions }: { transactions: LedgerT
         ))}
       </div>
 
-      <button className="mt-4 w-full rounded-xl bg-chart-2/30 hover:bg-chart-2/50 border border-primary/30 py-2.5 text-xs font-bold text-foreground transition-all">
+      <button
+        onClick={() => router.push("/dashboard/search")}
+        className="mt-4 w-full rounded-xl bg-chart-2/30 hover:bg-chart-2/50 border border-primary/30 py-2.5 text-xs font-bold text-foreground transition-all"
+      >
         See all other Transactions
       </button>
     </div>
