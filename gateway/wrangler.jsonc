@@ -19,7 +19,7 @@
     "YODLEE_FASTLINK_URL": "https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink",
     "YODLEE_CONFIG_NAME": "Aggregation"
   },
-  "workers_dev": true,
+  "workers_dev": false,
   "observability": {
     "enabled": true
   }
