@@ -19,12 +19,6 @@
     "YODLEE_FASTLINK_URL": "https://fl4.sandbox.yodlee.com/authenticate/restserver/fastlink",
     "YODLEE_CONFIG_NAME": "Aggregation"
   },
-  "routes": [
-    { "pattern": "cartis.dpdns.org/*", "zone_id": "12c93c063d628e35c8800043a1af33f6" }
-  ],
-  "triggers": {
-    "crons": ["30 5 * * *"]
-  },
   "workers_dev": true,
   "observability": {
     "enabled": true
