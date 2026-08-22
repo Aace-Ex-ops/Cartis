@@ -1,142 +1,113 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { SelectAPlan, type Tier } from "@/components/ui/select-a-plan-4";
 
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
-const CURRENCY = "₹";
 
-type Plan = {
-  plan: string;
-  name: string;
-  price: string;
-  desc: string;
-  cta: string;
-  productId: string;
-};
-
-const PERSONAL_PLANS: Plan[] = [
+const PERSONAL_TIERS: Tier[] = [
   {
     plan: "free",
     name: "Free",
-    price: "Free",
-    desc: "Core personal finance — budget, spend tracking, AI Twin basics.",
-    cta: "Current plan",
+    seatsMin: 1,
+    seatsMax: 1,
+    monthly: 0,
+    yearly: 0,
+    desc: "Core personal finance for getting started.",
+    features: ["Budget & spend tracking", "AI Twin basics", "Purchase verdicts"],
     productId: "",
   },
   {
     plan: "pro",
     name: "Pro",
-    price: `${CURRENCY}499/mo`,
-    desc: "Everything in Free, plus unlimited AI coaching and insights.",
-    cta: "Upgrade to Pro",
+    seatsMin: 2,
+    seatsMax: 4,
+    monthly: 499,
+    yearly: 4990,
+    desc: "Everything in Free, plus unlimited AI coaching.",
+    features: ["Everything in Free", "Unlimited AI coaching & insights", "Price-drop alerts"],
     productId: "57780d49-cca0-43eb-91fd-6a538e261f67",
+    popular: true,
   },
   {
     plan: "max",
     name: "Max",
-    price: `${CURRENCY}1,499/mo`,
-    desc: "Everything in Pro, plus priority support and advanced analytics.",
-    cta: "Upgrade to Max",
+    seatsMin: 5,
+    seatsMax: 14,
+    monthly: 1499,
+    yearly: 14990,
+    desc: "Everything in Pro, plus advanced analytics.",
+    features: ["Everything in Pro", "Priority support", "Advanced analytics"],
     productId: "c70e8ce4-7151-4705-adbf-7c828a1cb7fe",
   },
 ];
 
-const BUSINESS_PLANS: Plan[] = [
+const BUSINESS_TIERS: Tier[] = [
   {
     plan: "team_standard",
     name: "Team · Standard",
-    price: `${CURRENCY}4,999/mo`,
-    desc: "SMB essentials — P&L, cash flow, GST & tax, inventory, advisor.",
-    cta: "Start Team",
+    seatsMin: 15,
+    seatsMax: 99,
+    monthly: 4999,
+    yearly: 49990,
+    desc: "SMB essentials — P&L, cash flow, GST & tax, inventory.",
+    features: ["Profit & Loss", "Cash flow", "GST & tax", "Inventory", "AI advisor"],
     productId: "4caad456-f357-4934-8afe-b73af5b0872f",
   },
   {
     plan: "team_premium",
     name: "Team · Premium",
-    price: `${CURRENCY}9,999/mo`,
-    desc: "Everything in Standard, plus premium seats and advanced tools.",
-    cta: "Go Premium",
+    seatsMin: 100,
+    seatsMax: 399,
+    monthly: 9999,
+    yearly: 99990,
+    desc: "Everything in Standard, plus premium seats and tools.",
+    features: ["Everything in Standard", "Premium seats", "Advanced tools"],
     productId: "b5ca8384-87d0-4a59-9229-95c2be263df8",
+    popular: true,
   },
   {
     plan: "enterprise",
     name: "Enterprise",
-    price: `${CURRENCY}24,999/mo`,
-    desc: "All features. Up to 400 employees — above that, contact sales.",
-    cta: "Contact us",
+    seatsMin: 400,
+    seatsMax: 500,
+    monthly: 24999,
+    yearly: null,
+    desc: "All features. Tailored to your organization.",
+    features: ["All features", "Dedicated support"],
     productId: "",
   },
 ];
 
-function PlanCard({
-  plan,
-  current,
-  onSelect,
-  loading,
+export function SubscriptionPanel({
+  effectivePlan = "free",
+  userType = "personal",
 }: {
-  plan: Plan;
-  current: boolean;
-  onSelect: (plan: Plan) => void;
-  loading: boolean;
+  effectivePlan?: string;
+  userType?: string;
 }) {
-  return (
-    <Card key={plan.plan} className="flex flex-col justify-between">
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-[15px]">{plan.name}</CardTitle>
-          {current && (
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-              Current
-            </span>
-          )}
-        </div>
-        <span className="text-[14px] font-semibold text-foreground">{plan.price}</span>
-        <CardDescription>{plan.desc}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button
-          className="w-full"
-          disabled={current || !plan.productId || loading}
-          onClick={() => onSelect(plan)}
-        >
-          {!plan.productId
-            ? plan.plan === "enterprise"
-              ? "Contact us"
-              : plan.cta
-            : loading
-              ? "Redirecting…"
-              : plan.cta}
-        </Button>
-        {!plan.productId && plan.plan === "enterprise" && (
-          <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            <a href="mailto:support@cartis.app" className="underline">
-              support@cartis.app
-            </a>{" "}
-            · {CURRENCY}200/mo up to 400 employees
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-export function SubscriptionPanel() {
   const [loading, setLoading] = useState<string | null>(null);
+  const [interval, setInterval] = useState<"month" | "year">("month");
+  const [tab, setTab] = useState<"personal" | "business">(
+    userType === "business" || userType === "seller" ? "business" : "personal"
+  );
+  const [personalSeats, setPersonalSeats] = useState(1);
+  const [businessSeats, setBusinessSeats] = useState(15);
 
-  async function checkout(plan: Plan) {
-    if (!plan.productId) {
+  async function checkout(tier: Tier, billInterval: "month" | "year") {
+    if (tier.plan === "enterprise") {
       window.location.href = "mailto:support@cartis.app?subject=Cartis%20Enterprise%20inquiry";
       return;
     }
-    setLoading(plan.plan);
+    if (!tier.productId) return;
+    setLoading(tier.plan);
     try {
       const res = await fetch(`${GATEWAY}/api/subscription/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ productId: plan.productId, plan: plan.plan }),
+        body: JSON.stringify({ productId: tier.productId, plan: tier.plan, interval: billInterval }),
       });
       const data = (await res.json()) as { url?: string };
       if (data.url) {
@@ -149,41 +120,66 @@ export function SubscriptionPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-6 overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight text-foreground">Subscription</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Pick a plan. Personal finance and business plans are separate.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Pick a plan. Personal finance and business plans are separate.
+        </p>
       </div>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Personal finance</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          {PERSONAL_PLANS.map((plan) => (
-            <PlanCard
-              key={plan.plan}
-              plan={plan}
-              current={plan.plan === "free"}
-              onSelect={checkout}
-              loading={loading === plan.plan}
-            />
-          ))}
-        </div>
-      </section>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as "personal" | "business")}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList>
+            <TabsTrigger value="personal">Personal finance</TabsTrigger>
+            <TabsTrigger value="business">Business</TabsTrigger>
+          </TabsList>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Business</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          {BUSINESS_PLANS.map((plan) => (
-            <PlanCard
-              key={plan.plan}
-              plan={plan}
-              current={false}
-              onSelect={checkout}
-              loading={loading === plan.plan}
-            />
-          ))}
+          <Tabs value={interval} onValueChange={(v) => setInterval(v as "month" | "year")}>
+            <TabsList>
+              <TabsTrigger value="month">Monthly</TabsTrigger>
+              <TabsTrigger value="year">
+                Yearly
+                <span className="ml-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  −17%
+                </span>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
-      </section>
+
+        <TabsContent value="personal" className="mt-0">
+          <div className="pt-1">
+            <SelectAPlan
+              tiers={PERSONAL_TIERS}
+              seats={personalSeats}
+              interval={interval}
+              effectivePlan={effectivePlan}
+              onSeatsChange={setPersonalSeats}
+              onCheckout={checkout}
+              loading={loading != null}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="business" className="mt-0">
+          <div className="pt-1">
+            <SelectAPlan
+              tiers={BUSINESS_TIERS}
+              seats={businessSeats}
+              interval={interval}
+              effectivePlan={effectivePlan}
+              onSeatsChange={setBusinessSeats}
+              onCheckout={checkout}
+              loading={loading != null}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

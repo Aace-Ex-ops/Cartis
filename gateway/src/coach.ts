@@ -23,7 +23,6 @@ type Verdict = {
   explanation: string
   alternatives: Array<{ site: string; price: number; url?: string }>
   coach_note?: string
-  cached?: boolean
   sources: { extraction: string; budget: string; trust: string }
 }
 
@@ -63,7 +62,7 @@ async function step3(env: CoachEnv, p: ScrapedProduct, model?: string) {
   )
 }
 
-async function step4(env: CoachEnv, p: ScrapedProduct, s1: unknown, s3: unknown, budget: unknown, price: unknown, model?: string) {
+async function step4(env: CoachEnv, p: ScrapedProduct, s1: unknown, s3: unknown, budget: unknown, model?: string) {
   const system = `You are the Cartis financial coach. Decide if the user should buy now, wait, or avoid this product.
 Return ONLY JSON:
 {"verdict":"buy"|"wait"|"avoid","explanation":"2-3 plain-English sentences","coach_note":"how this affects the user's goals"}`
@@ -73,42 +72,17 @@ Return ONLY JSON:
     extraction: s1,
     trust: s3,
     budget: budget ?? 'unavailable',
-    price_index: price ?? 'unavailable',
   }
-  return extractJson<Omit<Verdict, 'cached' | 'sources' | 'alternatives'>>(
+  return extractJson<Omit<Verdict, 'sources' | 'alternatives'>>(
     await llm(env, `${system}\n\nProduct: ${JSON.stringify(context).slice(0, 4000)}`, model)
   )
 }
 
-async function priceIndex(env: CoachEnv, p: ScrapedProduct): Promise<unknown | null> {
-  if (!p.gtin) return null
-  const raw = await env.SESSIONS.get(`price_index:${p.gtin}`)
-  return raw ? (JSON.parse(raw) as unknown) : null
-}
-
-async function recordObservation(env: CoachEnv, p: ScrapedProduct): Promise<void> {
-  if (!p.gtin) return
-  const key = `price_index:${p.gtin}`
-  const raw = await env.SESSIONS.get(key)
-  let keep: { price: number; site: string; url: string; currency?: string; observedAt: string }
-  const now = new Date().toISOString()
-  if (raw) {
-    const prev = JSON.parse(raw) as { price: number; site: string; url: string; currency?: string; observedAt: string }
-    keep = prev.observedAt.slice(0, 10) === now.slice(0, 10) && prev.price <= p.price ? prev : { price: p.price, site: p.site, url: p.url, currency: p.currency, observedAt: now }
-  } else {
-    keep = { price: p.price, site: p.site, url: p.url, currency: p.currency, observedAt: now }
-  }
-  await env.SESSIONS.put(key, JSON.stringify(keep), { expirationTtl: 86400 * 365 })
-}
-
 // Real alternatives via Exa AI (works from Cloudflare IPs; Indian aggregators 403 datacenter traffic).
-// Single query "<name>" price India; 24h KV cache `exa:<gtin>`. Bare-GTIN queries
-// match junk (digits hit model numbers), so the name query is primary.
+// Single query "<name>" price India. Bare-GTIN queries match junk (digits hit
+// model numbers), so the name query is primary.
 async function alternativesFromExa(env: CoachEnv, p: ScrapedProduct): Promise<Array<{ site: string; price: number; url?: string }>> {
   if (!p.gtin || !env.EXA_API_KEY) return []
-  const cacheKey = `exa:${p.gtin}`
-  const cached = await env.SESSIONS.get(cacheKey)
-  if (cached) return JSON.parse(cached) as Array<{ site: string; price: number; url?: string }>
   const out: Array<{ site: string; price: number; url?: string }> = []
   try {
     const res = await fetch('https://api.exa.ai/search', {
@@ -144,7 +118,6 @@ async function alternativesFromExa(env: CoachEnv, p: ScrapedProduct): Promise<Ar
     return []
   }
   const deduped = out.filter((x, i) => out.findIndex((y) => y.site === x.site) === i).slice(0, 5)
-  await env.SESSIONS.put(cacheKey, JSON.stringify(deduped), { expirationTtl: 86400 })
   return deduped
 }
 
@@ -165,10 +138,6 @@ async function budgetCheck(env: CoachEnv, price: number): Promise<unknown | null
 }
 
 export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: string): Promise<Verdict> {
-  const cacheKey = `coach:${p.site}:${p.gtin ?? p.url}`
-  const cached = await env.SESSIONS.get(cacheKey)
-  if (cached) return { ...(JSON.parse(cached) as Verdict), cached: true }
-
   // Step 1: extraction
   let s1: unknown
   try {
@@ -177,24 +146,12 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
     throw new Error(`cannot analyze this product: ${String(e)}`)
   }
 
-  // Step 2 (parallel): RAG (Vectorize), budget (Rust backend), price index (KV)
-  // ponytail: Vectorize index is not provisioned — degrades to null per coach.md
-  // fallback. Wire env.VECTORIZE when the index exists.
-  const [budget, price] = await Promise.all([
-    budgetCheck(env, p.price).catch(() => null),
-    priceIndex(env, p).catch(() => null),
-  ])
+  // Step 2 (parallel): budget (Rust backend). RAG and price-index history were
+  // dropped with the KV AI caches — see plan doc.
+  const budget = await budgetCheck(env, p.price).catch(() => null)
 
-  // Record our own observation into the price index (newer/cheaper wins).
-  await recordObservation(env, p).catch(() => {})
-
-  // Real alternatives: Google Shopping first, own history second, none last.
-  // Alternatives come from code, never from the model — no hallucinated prices.
-  let realAlternatives = await alternativesFromExa(env, p).catch(() => [])
-  if (!realAlternatives.length && price) {
-    const rec = price as { site: string; price: number; url?: string }
-    if (rec.site !== p.site && rec.price > 0) realAlternatives = [{ site: rec.site, price: rec.price, url: rec.url }]
-  }
+  // Real alternatives from Exa AI (code, never the model — no hallucinated prices).
+  const realAlternatives = await alternativesFromExa(env, p).catch(() => [])
 
   // Step 3: trust check
   let s3: unknown = null
@@ -206,9 +163,9 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
   }
 
   // Step 4: verdict
-  let verdict: Omit<Verdict, 'cached' | 'sources' | 'alternatives'>
+  let verdict: Omit<Verdict, 'sources' | 'alternatives'>
   try {
-    verdict = await step4(env, p, s1, s3, budget, price, model)
+    verdict = await step4(env, p, s1, s3, budget, model)
   } catch {
     verdict = {
       verdict: 'wait',
@@ -225,10 +182,8 @@ export async function analyzeProduct(env: CoachEnv, p: ScrapedProduct, model?: s
       extraction: s1 ? 'ai' : 'none',
       budget: budget ? 'live' : 'unavailable',
       trust: s3 ? 'ai' : 'fallback',
-      ...(price ? { price: 'kv' } : {}),
-      ...(realAlternatives.length ? { alternatives: env.EXA_API_KEY ? 'exa' : 'kv' } : {}),
+      ...(realAlternatives.length ? { alternatives: 'exa' } : {}),
     },
   }
-  await env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 })
   return result
 }

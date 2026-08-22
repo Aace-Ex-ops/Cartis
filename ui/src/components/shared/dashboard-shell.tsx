@@ -18,11 +18,13 @@ const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === "1";
 export function DashboardShell({
   groups,
   userType,
+  effectivePlan,
   upgrade,
   children,
 }: {
   groups: NavGroup[];
   userType: string;
+  effectivePlan?: string;
   upgrade?: { title: string; subtitle: string; href: string };
   children: React.ReactNode;
 }) {
@@ -30,8 +32,6 @@ export function DashboardShell({
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    // Ensure clean light background matching Color Hunt #FDFEF7 palette
-    document.documentElement.classList.remove("dark");
     document.documentElement.style.removeProperty("overflow");
     document.body.style.removeProperty("overflow");
     document.body.style.overflow = "auto";
@@ -55,7 +55,7 @@ export function DashboardShell({
   }, []);
 
   return (
-    <div className="relative flex min-h-screen w-full bg-[#fdfef7] text-[#132a13] font-sans">
+    <div className="relative flex min-h-screen w-full bg-background text-foreground font-sans">
       {/* Sticky Sidebar Rail */}
       <aside
         className={`sticky top-0 h-screen shrink-0 transition-all duration-300 ease-in-out z-20 ${
@@ -76,10 +76,13 @@ export function DashboardShell({
       {/* Main Content Column */}
       <div className="relative z-10 flex min-h-screen min-w-0 flex-1 flex-col">
         <HeaderBar
+          user={user ?? undefined}
+          userType={userType}
+          effectivePlan={effectivePlan}
           leading={
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="rounded-full p-1.5 text-gray-500 transition-colors hover:bg-[#b2d959]/20 hover:text-[#7ec151]"
+              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-primary/20 hover:text-primary"
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {collapsed ? (

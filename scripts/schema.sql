@@ -251,3 +251,22 @@ CREATE TABLE IF NOT EXISTS user_actions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS user_actions_user_idx ON user_actions(user_id, status);
+
+-- ============ RAG memory (pgvector) — Part 1 ============
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS chat_memories (
+    memory_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+    session_id UUID REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    embedding vector(1024),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(session_id, content)
+);
+CREATE INDEX IF NOT EXISTS chat_memories_user_idx ON chat_memories(user_id);
+
+-- sync schema.sql with live DB (columns added via ALTER at runtime)
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS transaction_date TIMESTAMPTZ;
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS payee TEXT;
+ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS description TEXT;

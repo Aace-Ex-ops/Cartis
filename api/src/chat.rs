@@ -22,6 +22,8 @@ struct ChatRequest {
     mode: Option<String>,
     #[serde(default)]
     tool: Option<String>,
+    #[serde(default)]
+    image: Option<String>,
     message: String,
 }
 
@@ -63,7 +65,7 @@ pub struct RenameSessionRequest {
     title: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SessionOut {
     session_id: String,
     mode: String,
@@ -71,7 +73,7 @@ struct SessionOut {
     updated_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct MessageOut {
     role: String,
     content: String,
@@ -110,8 +112,21 @@ pub async fn chat_stream(
         Err(_) => return json_err(StatusCode::BAD_REQUEST, "invalid json"),
     };
     let message = req.message.trim().to_string();
-    if message.is_empty() {
+    let has_image = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty());
+    if message.is_empty() && !has_image {
         return json_err(StatusCode::BAD_REQUEST, "message required");
+    }
+
+    match crate::usage::bump(&state, &uid, "ai_chat").await {
+        Ok(true) => {}
+        Ok(false) => return json_err(StatusCode::TOO_MANY_REQUESTS, "daily AI chat limit reached — upgrade for more"),
+        Err(e) => {
+            eprintln!("usage gate error: {e}");
+        }
     }
 
     let conn = match state.pg.get().await {
@@ -121,6 +136,41 @@ pub async fn chat_stream(
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
         }
     };
+
+    let image = req
+        .image
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(img) = &image {
+        if !img.starts_with("data:image/")
+            || !["png", "jpeg", "jpg", "webp", "gif"]
+                .iter()
+                .any(|e| img.starts_with(&format!("data:image/{e};base64,")))
+        {
+            return json_err(
+                StatusCode::BAD_REQUEST,
+                "image must be a base64 data URL (png/jpeg/webp/gif)",
+            );
+        }
+        if img.len() > 10_000_000 {
+            return json_err(StatusCode::BAD_REQUEST, "image too large");
+        }
+        let plan: String = match conn
+            .query_one("SELECT plan FROM users WHERE user_id::text = $1", &[&uid])
+            .await
+        {
+            Ok(r) => r.get(0),
+            Err(_) => "free".to_string(),
+        };
+        if plan == "free" {
+            return json_err(
+                StatusCode::PAYMENT_REQUIRED,
+                "Image input is a Pro feature — upgrade to use it",
+            );
+        }
+    }
 
     // Resolve session: verify ownership if given, else create one.
     let sid = req
@@ -180,29 +230,50 @@ pub async fn chat_stream(
     drop(conn);
 
     let seller = mode == "seller";
-    let context = match build_context(&state, &uid, seller).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("chat context error: {e}");
-            "No data available.".to_string()
-        }
-    };
     let model = match fetch_model(&state, &uid).await {
-        Ok(Some(m)) if !m.is_empty() && !m.starts_with("groq/") => m,
-        _ => "@cf/meta/llama-4-scout-17b-16e-instruct".to_string(),
+        Ok(Some(m)) if !m.is_empty() => m,
+        _ => DEFAULT_MODEL.to_string(),
     };
+    let tier = context_tier(&model);
+    let ctx_key = format!("cartis:{uid}:chat_context:{seller}:{tier:?}");
+    let cached_ctx = state.redis.get(&ctx_key).await;
+    let (context, memories, history) = tokio::join!(
+        async {
+            if let Some(c) = cached_ctx {
+                return c;
+            }
+            let c = match build_context(&state, &uid, seller, tier).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("chat context error: {e}");
+                    "No data available.".to_string()
+                }
+            };
+            state.redis.set(&ctx_key, &c, 900).await;
+            c
+        },
+        memory_context(&state, &uid, &message),
+        async {
+            match load_history(&state, &session_id).await {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!("chat history error: {e}");
+                    vec![]
+                }
+            }
+        },
+    );
     let mut system = system_prompt(seller, &context);
+    if !memories.is_empty() {
+        system = format!("{system}\n\n{memories}");
+    }
     if let Some(t) = tool_system(&tool) {
         system = format!("{t}\n\n{system}");
     }
+    if image.is_some() {
+        system = format!("{system}\n\nThe user attached a photo. If it shows a purchase (receipt, invoice, or product photo): extract each product bought (name, quantity, price if visible) and, in seller mode, list which items should be added to inventory. Never invent values not visible in the image — say clearly what you cannot read.");
+    }
 
-    let history = match load_history(&state, &session_id).await {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!("chat history error: {e}");
-            vec![]
-        }
-    };
     let mut llm_history = history;
     llm_history.push(Msg {
         role: "user".to_string(),
@@ -219,6 +290,7 @@ pub async fn chat_stream(
         session_id.clone(),
         uid,
         message,
+        image,
         mode,
     ));
 
@@ -229,6 +301,103 @@ pub async fn chat_stream(
         .header("cache-control", "no-cache")
         .body(Body::from_stream(stream))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn llm_content(m: &Msg, image: Option<&str>) -> serde_json::Value {
+    match image {
+        Some(url) if m.role == "user" => serde_json::json!([
+            { "type": "text", "text": m.content },
+            { "type": "image_url", "image_url": { "url": url } }
+        ]),
+        _ => serde_json::json!(m.content),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TranscribeRequest {
+    audio: String,
+}
+
+pub async fn transcribe(
+    state: State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(uid) = uid_from(&headers) else {
+        return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
+    };
+    if body.len() > 12_000_000 {
+        return json_err(StatusCode::BAD_REQUEST, "audio too large");
+    }
+    if !headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .starts_with("audio/")
+    {
+        return json_err(StatusCode::BAD_REQUEST, "content-type must be audio/*");
+    }
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("transcribe db error: {e}");
+            return json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error");
+        }
+    };
+    let plan: String = match conn
+        .query_one("SELECT plan FROM users WHERE user_id::text = $1", &[&uid])
+        .await
+    {
+        Ok(r) => r.get(0),
+        Err(_) => "free".to_string(),
+    };
+    if plan == "free" {
+        return json_err(
+            StatusCode::PAYMENT_REQUIRED,
+            "Voice input is a Max feature — upgrade to use it",
+        );
+    }
+    let token = match crate::insights::ai_token().await {
+        Ok(t) => t,
+        Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+    };
+    let account = match env::var("CF_ACCOUNT_ID") {
+        Ok(a) if !a.is_empty() => a,
+        _ => return json_err(StatusCode::INTERNAL_SERVER_ERROR, "CF_ACCOUNT_ID not set"),
+    };
+    let url = format!(
+        "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/openai/whisper-large-v3-turbo"
+    );
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("audio/wav")
+        .to_string();
+    let res = match reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(&token)
+        .header("content-type", &content_type)
+        .body(body.to_vec())
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return json_err(StatusCode::INTERNAL_SERVER_ERROR, &format!("ai error: {e}")),
+    };
+    let json: serde_json::Value = match res.json().await {
+        Ok(j) => j,
+        Err(_) => return json_err(StatusCode::BAD_GATEWAY, "ai bad response"),
+    };
+    if let Some(text) = json.pointer("/result/text").and_then(|t| t.as_str()) {
+        return (StatusCode::OK, Json(serde_json::json!({ "text": text }))).into_response();
+    }
+    if let Some(err) = json.pointer("/errors/0/message").and_then(|t| t.as_str()) {
+        return json_err(StatusCode::BAD_GATEWAY, err);
+    }
+    json_err(
+        StatusCode::BAD_GATEWAY,
+        &json.to_string().chars().take(200).collect::<String>(),
+    )
 }
 
 async fn load_history(
@@ -254,6 +423,116 @@ async fn load_history(
         .collect())
 }
 
+// Semantic long-term memory: embed the user's message (bge-m3 via Cloudflare
+// AI) and pull the most relevant past chat turns from chat_memories by cosine
+// distance. Returns a prompt section, or empty string on any failure — memory
+// must never block or break a chat.
+async fn memory_context(state: &Arc<AppState>, uid: &str, message: &str) -> String {
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let has_memories: bool = match conn
+        .query_one(
+            "SELECT EXISTS(SELECT 1 FROM chat_memories WHERE user_id::text = $1)",
+            &[&uid],
+        )
+        .await
+    {
+        Ok(r) => r.get(0),
+        Err(e) => {
+            eprintln!("memory: exists query failed: {e}");
+            return String::new();
+        }
+    };
+    if !has_memories {
+        return String::new();
+    }
+    drop(conn);
+    let token = match crate::insights::ai_token().await {
+        Ok(t) => t,
+        Err(_) => return String::new(),
+    };
+    let Ok(account) = env::var("CF_ACCOUNT_ID") else {
+        return String::new();
+    };
+    let client = reqwest::Client::new();
+    let res = match client
+        .post(format!(
+            "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/baai/bge-m3"
+        ))
+        .bearer_auth(&token)
+        .timeout(Duration::from_secs(30))
+        .json(&serde_json::json!({ "text": [message] }))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("memory: embed call failed: {e}");
+            return String::new();
+        }
+    };
+    if !res.status().is_success() {
+        eprintln!("memory: embed status {}", res.status().as_u16());
+        return String::new();
+    }
+    let Ok(json) = res.json::<serde_json::Value>().await else {
+        eprintln!("memory: embed json parse failed");
+        return String::new();
+    };
+    let Some(embedding) = json
+        .pointer("/result/data/0")
+        .and_then(|v| v.as_array())
+        .map(|v| {
+            v.iter()
+                .map(|x| x.as_f64().unwrap_or(0.0))
+                .collect::<Vec<f64>>()
+        })
+    else {
+        eprintln!("memory: embed response shape unexpected");
+        return String::new();
+    };
+    let vec_sql = embedding
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<String>>()
+        .join(",");
+    let conn = match state.pg.get().await {
+        Ok(c) => c,
+        Err(_) => return String::new(),
+    };
+    let rows = match conn
+        .query(
+            "SELECT content, to_char(created_at, 'YYYY-MM-DD') FROM chat_memories
+             WHERE user_id::text = $1::text
+             ORDER BY embedding <=> $2::text::vector
+             LIMIT 4",
+            &[&uid, &format!("[{vec_sql}]")],
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("memory: recall query failed: {e}");
+            return String::new();
+        }
+    };
+    eprintln!("memory: recall got {} rows", rows.len());
+    if rows.is_empty() {
+        return String::new();
+    }
+let parts: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let content: String = r.get(0);
+            let date: String = r.get(1);
+            format!("[{date}] {content}")
+        })
+        .collect();
+    format!("Past conversation memories (from this user's older chats):\n{}", parts.join("\n"))
+}
+
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -277,13 +556,16 @@ pub async fn create_session(
         )
         .await
     {
-        Ok(r) => Json(SessionOut {
-            session_id: r.get(0),
-            mode: r.get(1),
-            title: r.get(2),
-            updated_at: r.get(3),
-        })
-        .into_response(),
+        Ok(r) => {
+            state.redis.del(&[&format!("cartis:{uid}:chat_sessions")]).await;
+            Json(SessionOut {
+                session_id: r.get(0),
+                mode: r.get(1),
+                title: r.get(2),
+                updated_at: r.get(3),
+            })
+            .into_response()
+        }
         Err(e) => {
             eprintln!("chat session create error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -314,7 +596,16 @@ pub async fn delete_session(
         .await
     {
         Ok(0) => json_err(StatusCode::NOT_FOUND, "session not found"),
-        Ok(_) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(_) => {
+            state
+                .redis
+                .del(&[
+                    &format!("cartis:{uid}:chat_sessions"),
+                    &format!("cartis:{session_id}:chat_messages"),
+                ])
+                .await;
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
         Err(e) => {
             eprintln!("chat session delete error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -349,13 +640,16 @@ pub async fn rename_session(
         )
         .await
     {
-        Ok(Some(r)) => Json(SessionOut {
-            session_id: r.get(0),
-            mode: r.get(1),
-            title: r.get(2),
-            updated_at: r.get(3),
-        })
-        .into_response(),
+        Ok(Some(r)) => {
+            state.redis.del(&[&format!("cartis:{uid}:chat_sessions")]).await;
+            Json(SessionOut {
+                session_id: r.get(0),
+                mode: r.get(1),
+                title: r.get(2),
+                updated_at: r.get(3),
+            })
+            .into_response()
+        }
         Ok(None) => json_err(StatusCode::NOT_FOUND, "session not found"),
         Err(e) => {
             eprintln!("chat session rename error: {e}");
@@ -371,6 +665,12 @@ pub async fn list_sessions(
     let Some(uid) = uid_from(&headers) else {
         return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
     };
+    let key = format!("cartis:{uid}:chat_sessions");
+    if let Some(cached) = state.redis.get(&key).await {
+        if let Ok(json) = serde_json::from_str::<Vec<SessionOut>>(&cached) {
+            return Json(json).into_response();
+        }
+    }
     let conn = match state.pg.get().await {
         Ok(c) => c,
         Err(e) => {
@@ -385,17 +685,21 @@ pub async fn list_sessions(
         )
         .await
     {
-        Ok(rows) => Json(
-            rows.iter()
+        Ok(rows) => {
+            let out: Vec<SessionOut> = rows
+                .iter()
                 .map(|r| SessionOut {
                     session_id: r.get(0),
                     mode: r.get(1),
                     title: r.get(2),
                     updated_at: r.get(3),
                 })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+                .collect();
+            if let Ok(json) = serde_json::to_string(&out) {
+                state.redis.set(&key, &json, 30).await;
+            }
+            Json(out).into_response()
+        }
         Err(e) => {
             eprintln!("chat sessions error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -411,6 +715,12 @@ pub async fn session_messages(
     let Some(uid) = uid_from(&headers) else {
         return json_err(StatusCode::UNAUTHORIZED, "missing x-user-id");
     };
+    let key = format!("cartis:{session_id}:chat_messages");
+    if let Some(cached) = state.redis.get(&key).await {
+        if let Ok(json) = serde_json::from_str::<Vec<MessageOut>>(&cached) {
+            return Json(json).into_response();
+        }
+    }
     let conn = match state.pg.get().await {
         Ok(c) => c,
         Err(e) => {
@@ -425,16 +735,20 @@ pub async fn session_messages(
         )
         .await
     {
-        Ok(rs) => Json(
-            rs.iter()
+        Ok(rs) => {
+            let out: Vec<MessageOut> = rs
+                .iter()
                 .map(|r| MessageOut {
                     role: r.get(0),
                     content: r.get(1),
                     created_at: r.get(2),
                 })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+                .collect();
+            if let Ok(json) = serde_json::to_string(&out) {
+                state.redis.set(&key, &json, 30).await;
+            }
+            Json(out).into_response()
+        }
         Err(e) => {
             eprintln!("chat messages error: {e}");
             json_err(StatusCode::INTERNAL_SERVER_ERROR, "db error")
@@ -455,6 +769,7 @@ async fn persist_and_stream(
     session_id: String,
     uid: String,
     user_message: String,
+    image: Option<String>,
     mode: String,
 ) {
     let send = |data: String| async {
@@ -462,20 +777,6 @@ async fn persist_and_stream(
     };
 
     send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
-
-    if env::var("CHAT_PROVIDER").as_deref() == Ok("groq") {
-        return groq_stream(
-            system,
-            messages,
-            tx,
-            state,
-            session_id,
-            uid,
-            user_message,
-            mode,
-        )
-        .await;
-    }
 
     let token = match crate::insights::ai_token().await {
         Ok(t) => t,
@@ -499,8 +800,9 @@ async fn persist_and_stream(
         "role": "system",
         "content": system,
     }))
-    .chain(messages.iter().map(|m| {
-        serde_json::json!({ "role": m.role, "content": m.content })
+    .chain(messages.iter().enumerate().map(|(i, m)| {
+        let is_last_user = i == messages.len() - 1 && m.role == "user";
+        serde_json::json!({ "role": m.role, "content": llm_content(m, image.as_deref().filter(|_| is_last_user)) })
     }))
     .collect();
 
@@ -524,6 +826,7 @@ async fn persist_and_stream(
     let res = match client
         .post(&url)
         .bearer_auth(&token)
+        .header("x-session-affinity", &session_id)
         .json(&payload)
         .send()
         .await
@@ -566,6 +869,9 @@ async fn persist_and_stream(
                 return;
             }
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                if let Some(u) = v.pointer("/usage") {
+                    eprintln!("chat usage ({model}): {u}");
+                }
                 if let Some(content) = v
                     .pointer("/choices/0/delta/content")
                     .and_then(|c| c.as_str())
@@ -599,13 +905,6 @@ const SELLER_PROMPT: &str = "You extract business finance events from a seller's
 {\"expense\":{\"entry_type\":\"<expense|cogs|salary|rent|other>\",\"amount\":<INR>,\"category\":\"<Materials|Payroll|Rent|Logistics|Utilities|Other>\",\"description\":\"<one line>\"}} when the user records a BUSINESS spend — buying stock, goods for resale, or raw material is cogs/Materials (e.g. \"bought 50 bottles of shampoo for the shop\", \"bought raw material for 1500\"); wages are salary/Payroll, premises are rent/Rent, anything else is expense/Other (e.g. \"paid 8000 salary\", \"paid 12000 shop rent\").
 {\"inventory\":{\"name\":\"<item>\",\"stock\":<qty>,\"unit_cost\":<INR per unit if known>}} when the user orders or restocks inventory (e.g. \"ordered 50 bottles of shampoo at 40 each\").
 Never extract personal consumer purchases (products bought for personal use, subscriptions, personal bills) as income/expense — those are purchases, not business events. Only use numbers the user stated or the assistant computed; never invent amounts. Return {} when nothing applies.";
-
-fn groq_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(90))
-        .build()
-        .unwrap_or_default()
-}
 
 fn validate_goal(parsed: &serde_json::Value) -> Option<serde_json::Value> {
     let goal = parsed.get("goal")?;
@@ -909,149 +1208,13 @@ async fn extract_captures(
     pack_captures(goal, holding, profile, budget, purchase, income, expense, inventory)
 }
 
-async fn groq_json(
-    client: &reqwest::Client,
-    model: &str,
-    system: &str,
-    user_message: &str,
-    reply: &str,
-) -> Option<serde_json::Value> {
-    let key = env::var("GROQ_API_KEY").ok()?;
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 200,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": format!("USER: {user_message}\n\nASSISTANT: {reply}")},
-        ],
-    });
-    let resp = client
-        .post("https://api.groq.com/openai/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&body)
-        .send()
-        .await
-        .ok()?;
-    let parsed: serde_json::Value = resp.json().await.ok()?;
-    let text = parsed.pointer("/choices/0/message/content").and_then(|t| t.as_str())?;
-    let text = text
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    serde_json::from_str(text).ok()
-}
-
-async fn extract_captures_groq(
-    client: &reqwest::Client,
-    model: &str,
-    user_message: &str,
-    reply: &str,
-) -> Option<serde_json::Value> {
-    let (goal, holding, profile, budget, purchase, seller) = tokio::join!(
-        async { groq_json(client, model, GOAL_PROMPT, user_message, reply).await.and_then(|v| validate_goal(&v)) },
-        async { groq_json(client, model, HOLDING_PROMPT, user_message, reply).await.and_then(|v| validate_holding(&v)) },
-        async { groq_json(client, model, PROFILE_PROMPT, user_message, reply).await.and_then(|v| validate_profile(&v)) },
-        async { groq_json(client, model, BUDGET_PROMPT, user_message, reply).await.and_then(|v| validate_budget(&v)) },
-        async { groq_json(client, model, PURCHASE_PROMPT, user_message, reply).await.and_then(|v| validate_purchase(&v)) },
-        async { groq_json(client, model, SELLER_PROMPT, user_message, reply).await },
-    );
-    let income = seller.as_ref().and_then(|v| validate_income(v));
-    let expense = seller.as_ref().and_then(|v| validate_expense(v));
-    let inventory = seller.as_ref().and_then(|v| validate_inventory(v));
-    pack_captures(goal, holding, profile, budget, purchase, income, expense, inventory)
-}
-
-// Groq chat: single non-streaming reply, same SSE contract as CF path.
-async fn groq_stream(
-    system: String,
-    messages: Vec<Msg>,
-    tx: mpsc::Sender<String>,
-    state: Arc<AppState>,
-    session_id: String,
-    uid: String,
-    user_message: String,
-    mode: String,
-) {
-    let send = |data: String| async {
-        let _ = tx.send(data).await;
-    };
-
-    send(sse(&serde_json::json!({ "sessionId": session_id }).to_string())).await;
-
-    let client = groq_client();
-    let model = match fetch_model(&state, &uid).await {
-        Ok(Some(m)) if m.starts_with("groq/") => m["groq/".len()..].to_string(),
-        _ => env::var("GROQ_MODEL").unwrap_or_else(|_| "llama-3.3-70b-versatile".to_string()),
-    };
-    let key = match env::var("GROQ_API_KEY") {
-        Ok(k) => k,
-        Err(_) => {
-            send(sse(r#"{"error":"GROQ_API_KEY not set"}"#)).await;
-            return;
-        }
-    };
-
-    let llm_messages: Vec<serde_json::Value> = std::iter::once(serde_json::json!({
-        "role": "system",
-        "content": system,
-    }))
-    .chain(messages.iter().map(|m| {
-        serde_json::json!({ "role": m.role, "content": m.content })
-    }))
-    .collect();
-
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "messages": llm_messages,
-    });
-
-    let resp = match client
-        .post("https://api.groq.com/openai/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            send(sse(&format!(r#"{{"error":"groq: {e}"}}"#))).await;
-            return;
-        }
-    };
-    let parsed: serde_json::Value = match resp.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            send(sse(&format!(r#"{{"error":"groq parse: {e}"}}"#))).await;
-            return;
-        }
-    };
-    let full = parsed
-        .pointer("/choices/0/message/content")
-        .and_then(|t| t.as_str())
-        .unwrap_or("")
-        .to_string();
-    if !full.trim().is_empty() {
-        let ev = serde_json::json!({ "token": full });
-        send(sse(&ev.to_string())).await;
-    }
-
-    if let Some(capture) = extract_captures_groq(&client, &model, &user_message, &full).await {
-        send(sse(&serde_json::json!({ "capture": capture }).to_string())).await;
-    }
-    persist_turn(&state, &uid, &session_id, &user_message, &full, &mode).await;
-    send(sse("[DONE]")).await;
-}
-
 async fn persist_turn(
     state: &Arc<AppState>,
-    uid: &str,
+    _uid: &str,
     session_id: &str,
     user_message: &str,
     assistant: &str,
-    mode: &str,
+    _mode: &str,
 ) {
     let conn = match state.pg.get().await {
         Ok(c) => c,
@@ -1075,151 +1238,16 @@ async fn persist_turn(
     if let Err(e) = (&*conn).batch_execute(&sql).await {
         eprintln!("chat persist error: {e}");
     }
-    if !assistant.trim().is_empty() {
-        tokio::spawn(push_supermemory(
-            state.clone(),
-            uid.to_string(),
-            session_id.to_string(),
-            user_message.to_string(),
-            assistant.to_string(),
-            mode.to_string(),
-        ));
-    }
-}
-
-async fn push_supermemory(
-    state: Arc<AppState>,
-    uid: String,
-    session_id: String,
-    user: String,
-    assistant: String,
-    mode: String,
-) {
-    let key = match env::var("SM_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => return,
-    };
-    let entity_context = match state.pg.get().await {
-        Ok(conn) => {
-            let name: Option<String> = conn
-                .query_opt(
-                    "SELECT full_name FROM users WHERE user_id::text = $1",
-                    &[&uid],
-                )
-                .await
-                .ok()
-                .flatten()
-                .and_then(|r| r.try_get(0).ok());
-            match name {
-                Some(n) if !n.trim().is_empty() => {
-                    let bank: Option<String> = conn
-                        .query_opt(
-                            "SELECT b.name FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id WHERE ba.user_id::text = $1 AND ba.is_primary ORDER BY ba.created_at DESC LIMIT 1",
-                            &[&uid],
-                        )
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|r| r.try_get(0).ok());
-                    match bank {
-                        Some(b) if !b.trim().is_empty() => format!(
-                            "User {n} is a Cartis user who banks with {b}. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                        ),
-                        _ => format!(
-                            "User {n} is a Cartis user. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                        ),
-                    }
-                }
-                _ => "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                    .to_string(),
-            }
-        }
-        Err(e) => {
-            eprintln!("entity context db error: {e}");
-            "A Cartis user's AI financial twin. Focus on this user's financial goals, spending patterns, balances, and money decisions."
-                .to_string()
-        }
-    };
-    let body = serde_json::json!({
-        "content": format!("user: {user}\nassistant: {assistant}"),
-        "containerTag": format!("user_{uid}"),
-        "customId": format!("cartis_{session_id}"),
-        "metadata": { "type": "chat", "mode": mode, "source": "cartis" },
-        "entityContext": entity_context,
-    });
-    let client = reqwest::Client::new();
-    for attempt in 0..3 {
-        match client
-            .post("https://api.supermemory.ai/v3/documents")
-            .bearer_auth(&key)
-            .timeout(Duration::from_secs(30))
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(r) if r.status().as_u16() == 429 => {
-                eprintln!("supermemory push rate limited (attempt {})", attempt + 1);
-                if attempt < 2 {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
-                }
-            }
-            Ok(r) if !r.status().is_success() => {
-                eprintln!("supermemory push status {}", r.status().as_u16());
-            }
-            Ok(_) => {}
-            Err(e) => eprintln!("supermemory push error: {e}"),
-        }
-        break;
-    }
-}
-
-pub async fn purge_supermemory(uid: String) {
-    let key = match env::var("SM_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => return,
-    };
-    let url = format!("https://api.supermemory.ai/v3/container-tags/user_{uid}");
-    let client = reqwest::Client::new();
-    for attempt in 0..3 {
-        match client
-            .delete(&url)
-            .bearer_auth(&key)
-            .timeout(Duration::from_secs(30))
-            .send()
-            .await
-        {
-            // 404 = container already gone
-            Ok(r) if r.status().as_u16() == 404 => {
-                eprintln!("supermemory purge user_{uid}: nothing to delete");
-                return;
-            }
-            Ok(r) if r.status().as_u16() == 429 || r.status().is_server_error() => {
-                eprintln!(
-                    "supermemory purge user_{uid}: status {} (attempt {})",
-                    r.status().as_u16(),
-                    attempt + 1
-                );
-                if attempt < 2 {
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
-                }
-            }
-            Ok(r) if !r.status().is_success() => {
-                eprintln!("supermemory purge status {}", r.status().as_u16());
-            }
-            Ok(r) => {
-                let v: serde_json::Value = r.json().await.unwrap_or_default();
-                eprintln!(
-                    "supermemory purge user_{uid}: deleted {} docs, {} memories",
-                    v["deletedDocumentsCount"].as_u64().unwrap_or(0),
-                    v["deletedMemoriesCount"].as_u64().unwrap_or(0)
-                );
-            }
-            Err(e) => eprintln!("supermemory purge error: {e}"),
-        }
-        break;
-    }
+    drop(conn);
+    state
+        .redis
+        .del(&[
+            &format!("cartis:{session_id}:chat_messages"),
+            &format!("cartis:{_uid}:chat_sessions"),
+        ])
+        .await;
+    // Long-term memory embedding is owned by the Python embed-chats cron on
+    // the server — nothing to do here.
 }
 
 fn system_prompt(seller: bool, context: &str) -> String {
@@ -1247,11 +1275,45 @@ async fn fetch_model(state: &Arc<AppState>, uid: &str) -> Result<Option<String>,
     Ok(row.map(|r| r.get::<_, Option<String>>(0)).flatten().map(normalize_model))
 }
 
+const DEFAULT_MODEL: &str = "@cf/meta/llama-4-scout-17b-16e-instruct";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextTier {
+    Full,
+    Compact,
+}
+
+// Context window per allowed model. Future models get appended here; any
+// window below 96k resolves to the Compact context tier.
+fn context_window(model: &str) -> usize {
+    match model {
+        DEFAULT_MODEL => 131_000,
+        _ => 131_000,
+    }
+}
+
+fn context_tier(model: &str) -> ContextTier {
+    if context_window(model) >= 96_000 {
+        ContextTier::Full
+    } else {
+        ContextTier::Compact
+    }
+}
+
+// Compact contexts cap per-section lengths so small-window models never overflow.
+fn apply_cap(parts: Vec<String>, tier: ContextTier, n: usize) -> Vec<String> {
+    if tier == ContextTier::Compact {
+        parts.into_iter().take(n).collect()
+    } else {
+        parts
+    }
+}
+
 fn normalize_model(m: String) -> String {
-    match m.as_str() {
-        "@cf/meta/llama-3.3-70b-instruct" => "@cf/meta/llama-3.3-70b-instruct-fp8-fast".to_string(),
-        "@cf/meta/llama-3.1-8b-instruct" => "@cf/meta/llama-3.1-8b-instruct-fp8".to_string(),
-        other => other.to_string(),
+    if m == DEFAULT_MODEL {
+        m
+    } else {
+        DEFAULT_MODEL.to_string()
     }
 }
 
@@ -1259,6 +1321,7 @@ async fn build_context(
     state: &Arc<AppState>,
     uid: &str,
     seller: bool,
+    tier: ContextTier,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let conn = state.pg.get().await?;
     let lines: Vec<String> = if seller {
@@ -1276,6 +1339,45 @@ async fn build_context(
             )
             .await?;
         let mut l = vec![];
+        if tier == ContextTier::Full {
+            if let Some(r) = conn
+                .query_opt(
+                    "SELECT COALESCE(business_name, ''), COALESCE(business_type, ''), plan
+                     FROM users WHERE user_id::text = $1",
+                    &[&uid],
+                )
+                .await?
+            {
+                let name: String = r.get(0);
+                let btype: String = r.get(1);
+                let plan: String = r.get(2);
+                if !name.is_empty() {
+                    l.push(format!("Business: {name} ({btype}), plan {plan}."));
+                }
+            }
+            let streams = conn
+                .query(
+                    "SELECT COALESCE(source, 'Other'), COALESCE(amount, 0)::float8, COALESCE(frequency, ''), COALESCE(currency, 'INR')
+                     FROM income_streams WHERE user_id::text = $1 ORDER BY from_date DESC",
+                    &[&uid],
+                )
+                .await?;
+            if !streams.is_empty() {
+                let parts: Vec<String> = streams
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "{} ₹{:.0}/{} ({})",
+                            r.get::<_, String>(0),
+                            r.get::<_, f64>(1),
+                            r.get::<_, String>(2),
+                            r.get::<_, String>(3)
+                        )
+                    })
+                    .collect();
+                l.push(format!("Income streams: {}", parts.join(", ")));
+            }
+        }
         if let Some(r) = d {
             let revenue: f64 = r.get(0);
             let expenses: f64 = r.get(1);
@@ -1422,7 +1524,7 @@ async fn build_context(
         }
         let accs = conn
             .query(
-                "SELECT b.name, balance::float8
+                "SELECT b.name, balance::float8, ba.account_type
                  FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id
                  WHERE ba.user_id::text = $1 ORDER BY ba.created_at",
                 &[&uid],
@@ -1433,11 +1535,19 @@ async fn build_context(
                 .iter()
                 .map(|r| {
                     let bal: Option<f64> = r.get(1);
-                    format!(
-                        "{} balance {}",
-                        r.get::<_, String>(0),
-                        bal.map(|b| format!("₹{b:.0}")).unwrap_or_else(|| "unknown".to_string())
-                    )
+                    let atype: Option<String> = r.get(2);
+                    let suffix = bal
+                        .map(|b| format!("₹{b:.0}"))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let label = if tier == ContextTier::Full {
+                        atype
+                            .filter(|t| !t.is_empty())
+                            .map(|t| format!("{} ({t})", r.get::<_, String>(0)))
+                            .unwrap_or_else(|| r.get::<_, String>(0))
+                    } else {
+                        r.get::<_, String>(0)
+                    };
+                    format!("{label} balance {suffix}")
                 })
                 .collect();
             l.push(format!("Bank accounts: {}", parts.join("; ")));
@@ -1445,7 +1555,242 @@ async fn build_context(
         if l.is_empty() {
             l.push("No financial data available yet.".to_string());
         }
+        if let Some(r) = conn
+            .query_opt(
+                "SELECT
+                    CASE WHEN u.monthly_income IS NULL THEN NULL ELSE u.monthly_income::float8 END,
+                    CASE WHEN u.monthly_spend IS NULL THEN NULL ELSE u.monthly_spend::float8 END,
+                    CASE WHEN u.investment_pct IS NULL THEN NULL ELSE u.investment_pct::float8 END,
+                    CASE WHEN u.housing_cost IS NULL THEN NULL ELSE u.housing_cost::float8 END,
+                    u.dependents,
+                    CASE WHEN u.debt_emis IS NULL THEN NULL ELSE u.debt_emis::float8 END,
+                    CASE WHEN u.monthly_tax IS NULL THEN NULL ELSE u.monthly_tax::float8 END,
+                    CASE WHEN u.monthly_income IS NULL THEN NULL ELSE u.monthly_income::float8 END,
+                    u.financial_health_score,
+                    u.plan
+                 FROM users u WHERE u.user_id::text = $1",
+                &[&uid],
+            )
+            .await?
+        {
+            let income: Option<f64> = r.get(0);
+            let spend: Option<f64> = r.get(1);
+            let inv_pct: Option<f64> = r.get(2);
+            let housing: Option<f64> = r.get(3);
+            let dependents: Option<i32> = r.get(4);
+            let emis: Option<f64> = r.get(5);
+            let tax: Option<f64> = r.get(6);
+            let annual_income: Option<f64> = r.get(7);
+            let mut prof = vec![];
+            if let Some(v) = income {
+                prof.push(format!("income ₹{v:.0}/mo"));
+            }
+            if let Some(v) = spend {
+                prof.push(format!("spend ₹{v:.0}/mo"));
+            }
+            if let Some(v) = inv_pct {
+                prof.push(format!("invests {v:.0}%"));
+            }
+            if let Some(v) = housing {
+                prof.push(format!("housing ₹{v:.0}/mo"));
+            }
+            if let Some(v) = dependents {
+                prof.push(format!("dependents {v}"));
+            }
+            if let Some(v) = emis {
+                prof.push(format!("EMIs ₹{v:.0}/mo"));
+            }
+            let computed_tax = annual_income.map(|a| crate::insights::new_regime_tax(a) / 12.0);
+            let stated_tax = tax.or(computed_tax);
+            if let Some(v) = stated_tax {
+                prof.push(format!("tax ₹{v:.0}/mo"));
+            }
+            if tier == ContextTier::Full {
+                let score: i32 = r.get(8);
+                let plan: String = r.get(9);
+                prof.push(format!("health score {score}, plan {plan}"));
+            }
+            if !prof.is_empty() {
+                l.push(format!("Profile: {}", prof.join(", ")));
+            }
+            if tier == ContextTier::Full {
+                let mut missing = vec![];
+                if income.is_none() {
+                    missing.push("monthly income");
+                }
+                if spend.is_none() {
+                    missing.push("monthly spend");
+                }
+                if inv_pct.is_none() {
+                    missing.push("investment %");
+                }
+                if housing.is_none() {
+                    missing.push("housing cost");
+                }
+                if emis.is_none() {
+                    missing.push("EMI/debt payments");
+                }
+                if stated_tax.is_none() {
+                    missing.push("monthly tax");
+                }
+                if !missing.is_empty() {
+                    l.push(format!(
+                        "Missing profile info: {}. Ask about these when relevant.",
+                        missing.join(", ")
+                    ));
+                }
+            }
+        }
+        let goals = conn
+            .query(
+                "SELECT goal_type, name, target_amount::float8, current_amount::float8, target_date::text
+                 FROM financial_goals WHERE user_id::text = $1
+                 ORDER BY created_at DESC",
+                &[&uid],
+            )
+            .await?;
+        if !goals.is_empty() {
+            let goal_parts: Vec<String> = goals
+                .iter()
+                .map(|r| {
+                    let gtype: String = r.get(0);
+                    let name: String = r.get(1);
+                    let target: f64 = r.get(2);
+                    let current: f64 = r.get(3);
+                    let date: Option<String> = r.get(4);
+                    let mut s = format!(
+                        "{name} ({gtype}) ₹{target:.0} target, ₹{current:.0} saved"
+                    );
+                    if tier == ContextTier::Full {
+                        let pct = if target > 0.0 { (current / target * 100.0).round() } else { 0.0 };
+                        let due = date.map(|d| format!(", due {d}")).unwrap_or_default();
+                        s = format!("{s} ({pct:.0}%{due})");
+                    }
+                    s
+                })
+                .collect();
+            let goal_parts = apply_cap(goal_parts, tier, 3);
+            l.push(format!("Goals: {}", goal_parts.join("; ")));
+        }
+        let holdings = conn
+            .query(
+                "SELECT name, asset_type, quantity::float8, COALESCE(avg_price, 0)::float8, COALESCE(current_price, 0)::float8
+                 FROM holdings WHERE user_id::text = $1 ORDER BY created_at DESC",
+                &[&uid],
+            )
+            .await?;
+        if !holdings.is_empty() {
+            let mut total = 0.0f64;
+            let mut classes: std::collections::BTreeMap<String, f64> = Default::default();
+            let holding_parts: Vec<String> = holdings
+                .iter()
+                .map(|r| {
+                    let name: String = r.get(0);
+                    let atype: String = r.get(1);
+                    let qty: f64 = r.get(2);
+                    let avg: f64 = r.get(3);
+                    let cur: f64 = r.get(4);
+                    let value = qty * if cur > 0.0 { cur } else { avg };
+                    total += value;
+                    *classes.entry(atype.clone()).or_insert(0.0) += value;
+                    format!("{name} ({atype}) {qty} units @ ₹{avg:.0}, value ₹{value:.0}")
+                })
+                .collect();
+            let holding_parts = apply_cap(holding_parts, tier, 5);
+            if tier == ContextTier::Full {
+                let classes_s: Vec<String> = classes
+                    .into_iter()
+                    .map(|(k, v)| format!("{k} ₹{v:.0}"))
+                    .collect();
+                l.push(format!(
+                    "Portfolio: total ₹{total:.0} ({}).",
+                    classes_s.join(", ")
+                ));
+            }
+            l.push(format!("Holdings: {}", holding_parts.join("; ")));
+        }
+        let purchases = conn
+            .query(
+                "SELECT p.name, p.price::float8, a.verdict, to_char(a.created_at, 'YYYY-MM-DD')
+                 FROM analysis_log a JOIN products p ON p.product_id = a.product_id
+                 WHERE a.user_id::text = $1 AND p.site_name = 'Twin Chat'
+                 ORDER BY a.created_at DESC LIMIT 5",
+                &[&uid],
+            )
+            .await?;
+        if !purchases.is_empty() {
+            let parts: Vec<String> = purchases
+                .iter()
+                .map(|r| {
+                    let name: String = r.get(0);
+                    let price: f64 = r.get(1);
+                    let verdict: String = r.get(2);
+                    let date: String = r.get(3);
+                    format!("{name} ₹{price:.0} ({verdict}, {date})")
+                })
+                .collect();
+            l.push(format!("Recent purchases: {}", parts.join("; ")));
+        }
+        let entries = conn
+            .query(
+                "SELECT amount::float8, COALESCE(description, payee), to_char(COALESCE(transaction_date, created_at), 'YYYY-MM-DD')
+                 FROM ledger_entries
+                 WHERE user_id::text = $1 AND account_type = 'budget'
+                 ORDER BY created_at DESC LIMIT 5",
+                &[&uid],
+            )
+            .await?;
+        if !entries.is_empty() {
+            let parts: Vec<String> = entries
+                .iter()
+                .map(|r| {
+                    let amount: f64 = r.get(0);
+                    let label: String = r.get(1);
+                    let date: String = r.get(2);
+                    format!("₹{amount:.0} {label} ({date})")
+                })
+                .collect();
+            l.push(format!("Recent entries: {}", parts.join(" | ")));
+        }
         l
     };
     Ok(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_content_only_on_last_user_message() {
+        let m = Msg { role: "user".to_string(), content: "hi".to_string() };
+        let parts = llm_content(&m, Some("data:image/png;base64,abc"));
+        let json = serde_json::to_string(&parts).unwrap();
+        assert!(json.contains("image_url") && json.contains("data:image/png;base64,abc"));
+        assert!(!serde_json::to_string(&llm_content(&m, None)).unwrap().contains("image_url"));
+        let a = Msg { role: "assistant".to_string(), content: "yo".to_string() };
+        assert!(!serde_json::to_string(&llm_content(&a, Some("data:image/png;base64,abc"))).unwrap().contains("image_url"));
+    }
+
+    #[test]
+    fn tier_maps_by_window() {
+        assert_eq!(context_tier(DEFAULT_MODEL), ContextTier::Full);
+        assert_eq!(context_tier("unknown-model"), ContextTier::Full);
+        assert_eq!(context_window(DEFAULT_MODEL), 131_000);
+    }
+
+    #[test]
+    fn compact_caps_keep_today_s_shape() {
+        let parts: Vec<String> = (1..=6).map(|i| format!("item {i}")).collect();
+        let capped = apply_cap(parts.clone(), ContextTier::Compact, 3);
+        assert_eq!(capped.len(), 3);
+        assert_eq!(apply_cap(parts, ContextTier::Full, 3).len(), 6);
+    }
+
+    #[test]
+    fn non_default_models_normalize_to_scout() {
+        assert_eq!(normalize_model(DEFAULT_MODEL.to_string()), DEFAULT_MODEL);
+        assert_eq!(normalize_model("groq/llama-3.3-70b-versatile".to_string()), DEFAULT_MODEL);
+        assert_eq!(normalize_model("@cf/meta/llama-3.3-70b-instruct".to_string()), DEFAULT_MODEL);
+    }
 }

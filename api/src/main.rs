@@ -17,14 +17,17 @@ use axum::routing::{get, patch, post};
 use axum::Router;
 use serde::Deserialize;
 mod admin;
+mod cache;
 mod chat;
 mod email;
 mod graphql;
 mod insights;
+mod usage;
 
 pub struct AppState {
     pub pg: deadpool_postgres::Pool,
     pub admin_tokens: Mutex<HashSet<String>>,
+    pub redis: cache::Cache,
 }
 
 #[tokio::main]
@@ -38,12 +41,19 @@ async fn main() {
     let pg = pg_cfg
         .create_pool(Some(deadpool_postgres::Runtime::Tokio1), tokio_postgres::NoTls)
         .expect("postgres pool creation failed");
+    let redis = cache::Cache::connect(&env::var("REDIS_URL").unwrap_or_default()).await;
 
     let state = Arc::new(AppState {
         pg,
         admin_tokens: Mutex::new(HashSet::new()),
+        redis,
     });
     bootstrap_admin(&state).await;
+    if let Ok(conn) = state.pg.get().await {
+        if let Err(e) = conn.batch_execute(usage::DDL).await {
+            eprintln!("usage table init error: {e}");
+        }
+    }
     let schema = Schema::build(graphql::QueryRoot, graphql::MutationRoot, EmptySubscription)
         .data(state.clone())
         .finish();
@@ -52,6 +62,7 @@ async fn main() {
         .route("/health", get(|| async { "ok" }))
         .route("/graphql", get(graphiql).post(graphql_handler))
         .route("/chat/stream", post(chat::chat_stream))
+        .route("/chat/transcribe", post(chat::transcribe))
         .route(
             "/chat/sessions",
             get(chat::list_sessions).post(chat::create_session),
@@ -78,7 +89,8 @@ async fn main() {
         .layer(axum::middleware::from_fn_with_state(
             backend_secret.clone(),
             require_backend_secret,
-        ));
+        ))
+        .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024));
 
     let addr = format!("0.0.0.0:{port}");
     println!("cartis-api listening on http://{addr}");

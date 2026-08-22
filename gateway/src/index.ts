@@ -229,6 +229,7 @@ type YodleeAccount = {
   id?: number
   accountNumber?: string
   accountName?: string
+  displayName?: string
   accountType?: string
   providerAccountId?: number
   providerName?: string
@@ -244,8 +245,8 @@ type YodleeTx = {
   merchant?: { name?: string }
 }
 
-function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[]; holding?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]; holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] } {
-  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[] = []
+function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; income?: unknown[]; holding?: unknown[] }): { accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null; accountName: string }[]; transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]; income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]; holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] } {
+  const accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null; accountName: string }[] = []
   const transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[] = []
   const income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[] = []
   const holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[] = []
@@ -259,6 +260,7 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
       fipId: String(a.providerAccountId ?? a.id ?? ''),
       accountRef: String(a.id ?? ''),
       accountType: a.accountType ?? null,
+      accountName: a.displayName ?? a.accountName ?? '',
     })
   }
 
@@ -305,7 +307,7 @@ function parseYodleeFetch(data: { account?: unknown[]; transaction?: unknown[]; 
 }
 
 type YodleeSyncPayload = {
-  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null }[]
+  accounts: { maskedAccNumber: string; bankName: string; balance: number; fipId: string; accountRef: string; accountType: string | null; accountName: string }[]
   transactions: { txnId: string; txnType: string; amount: number; narration: string; timestamp: string }[]
   income: { accountRef: string; source: string; frequency: string; amount: number; currency: string; fromDate: string; toDate: string }[]
   holdings: { symbol: string; holdingType: string; description: string; quantity: number; price: number; value: number; costBasis: number }[]
@@ -602,41 +604,6 @@ app.get('/auth/callback', async (c) => {
   return c.redirect(`${base}/${created ? 'onboarding' : 'dashboard'}`)
 })
 
-app.post('/auth/signup', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string; name?: string }
-  const email = (body.email ?? '').trim().toLowerCase()
-  const password = body.password ?? ''
-  const name = (body.name ?? '').trim()
-  if (!email.includes('@') || password.length < 8 || !name) return c.json({ error: 'invalid email, password (min 8 chars), or name' }, 400)
-  try {
-    const data = (await backendGql(c, `mutation { signup(email: ${JSON.stringify(email)}, fullName: ${JSON.stringify(name)}, password: ${JSON.stringify(password)}) }`)) as {
-      signup?: string | null
-    }
-    if (!data?.signup) return c.json({ error: 'email already registered' }, 409)
-    await createSession(c, { user_id: data.signup, email, name, avatar: '', provider: 'password' })
-    return c.json({ ok: true })
-  } catch (e) {
-    return c.json({ error: String(e) }, 502)
-  }
-})
-
-app.post('/auth/login', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string }
-  const email = (body.email ?? '').trim().toLowerCase()
-  const password = body.password ?? ''
-  if (!email || !password) return c.json({ error: 'email and password required' }, 400)
-  try {
-    const data = (await backendGql(c, `mutation { login(email: ${JSON.stringify(email)}, password: ${JSON.stringify(password)}) { userId fullName avatarUrl } }`)) as {
-      login?: { userId: string; fullName: string; avatarUrl?: string | null } | null
-    }
-    if (!data?.login) return c.json({ error: 'invalid email or password' }, 401)
-    await createSession(c, { user_id: data.login.userId, email, name: data.login.fullName, avatar: data.login.avatarUrl ?? '', provider: 'password' })
-    return c.json({ ok: true })
-  } catch (e) {
-    return c.json({ error: String(e) }, 502)
-  }
-})
-
 app.get('/auth/me', auth, (c) => {
   const session = c.get('session')
   return c.json({ user: { id: session.user_id, email: session.email, name: session.name, avatar: session.avatar } })
@@ -752,6 +719,10 @@ app.post('/api/coach/analyze', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { product?: ScrapedProduct }
   const p = body.product
   if (!p || !p.name || typeof p.price !== 'number') return c.json({ error: 'product with name and price is required' }, 400)
+  const ip = c.req.header('cf-connecting-ip') ?? 'unknown'
+  if (!(await gwBump(c.env.SESSIONS, `usage:ai_analyze:${ip}`, 20))) {
+    return c.json({ error: 'daily analysis limit reached — try again tomorrow' }, 429)
+  }
   try {
     const verdict = await analyzeProduct(c.env, p)
     return c.json(verdict)
@@ -765,9 +736,10 @@ app.post('/api/coach/chat', auth, async (c) => {
     session_id?: string
     mode?: string
     tool?: string
+    image?: string
     message?: string
   }
-  if (!body.message?.trim()) return c.json({ error: 'message required' }, 400)
+  if (!body.message?.trim() && !body.image) return c.json({ error: 'message required' }, 400)
   try {
     const res = await fetch(`${c.env.BACKEND_URL}/chat/stream`, {
       method: 'POST',
@@ -780,6 +752,7 @@ app.post('/api/coach/chat', auth, async (c) => {
         session_id: body.session_id,
         mode: body.mode,
         tool: body.tool,
+        image: body.image,
         message: body.message,
       }),
     })
@@ -793,6 +766,25 @@ app.post('/api/coach/chat', auth, async (c) => {
     c.header('content-type', 'text/event-stream')
     c.header('cache-control', 'no-cache')
     return c.body(res.body as unknown as ReadableStream)
+  } catch (e) {
+    return c.json({ error: String(e) }, 502)
+  }
+})
+
+app.post('/api/coach/transcribe', auth, async (c) => {
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/chat/transcribe`, {
+      method: 'POST',
+      headers: {
+        'content-type': c.req.header('content-type') ?? 'audio/wav',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': c.get('session').user_id,
+      },
+      body: c.req.raw.body as unknown as ReadableStream,
+    })
+    const json = (await res.json().catch(() => null)) as { text?: string; error?: string } | null
+    if (!res.ok || !json?.text) return c.json({ error: json?.error ?? `backend error ${res.status}` }, res.status as ContentfulStatusCode)
+    return c.json({ text: json.text })
   } catch (e) {
     return c.json({ error: String(e) }, 502)
   }
@@ -888,6 +880,48 @@ app.patch('/api/coach/sessions/:id', auth, async (c) => {
 
 type CoachInsight = { title: string; detail: string; tone: string }
 
+// ── Daily AI usage limits (KV), tiered by effective plan ──────────────────
+// Mirrors api/src/usage.rs caps for gateway-side AI calls.
+const AI_GW_CAPS: Record<string, number> = {
+  free: 10, trial: 10, pro: 50, max: 100,
+  team_standard: 50, team_premium: 100, enterprise: 300,
+}
+
+async function gwPlan(c: { env: Env }, userId: string): Promise<string> {
+  const cached = await c.env.SESSIONS.get(`plan:${userId}`)
+  if (cached) return cached
+  try {
+    const res = await fetch(`${c.env.BACKEND_URL}/graphql`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-cartis-backend-secret': c.env.BACKEND_SECRET,
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({ query: '{ me { effectivePlan } }' }),
+    })
+    const d = (await res.json()) as { data?: { me?: { effectivePlan?: string } | null } }
+    const plan = d.data?.me?.effectivePlan ?? 'free'
+    await c.env.SESSIONS.put(`plan:${userId}`, plan, { expirationTtl: 300 })
+    return plan
+  } catch {
+    return 'free'
+  }
+}
+
+async function gwBump(kv: KVNamespace, key: string, cap: number): Promise<boolean> {
+  const full = `${key}:${new Date().toISOString().slice(0, 10)}`
+  const n = Number((await kv.get(full)) ?? '0')
+  if (n >= cap) return false
+  await kv.put(full, String(n + 1), { expirationTtl: 172800 })
+  return true
+}
+
+async function gwGate(c: { env: Env }, userId: string, metric: string): Promise<boolean> {
+  const plan = await gwPlan(c, userId)
+  return gwBump(c.env.SESSIONS, `usage:${metric}:${userId}`, AI_GW_CAPS[plan] ?? 10)
+}
+
 async function coachInsightsViaBackend(
   c: { env: { BACKEND_URL: string; BACKEND_SECRET: string }; get: (k: 'session') => { user_id: string } },
   role: 'consumer' | 'seller',
@@ -939,9 +973,6 @@ app.post('/api/consumer/coach', auth, async (c) => {
 
 app.post('/api/budget/suggest', auth, async (c) => {
   const userId = c.get('session').user_id
-  const cacheKey = `budget:ai:${userId}`
-  const cached = await c.env.SESSIONS.get(cacheKey)
-  if (cached) return c.json(JSON.parse(cached))
 
   let data: {
     wallet?: { balance: number; tabLimit: number }
@@ -1024,8 +1055,11 @@ Rules:
 Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence explanation>" }`
 
   try {
-    const chosen = data.me?.aiModel?.startsWith('groq/') ? undefined : data.me?.aiModel
-    const out = (await c.env.AI.run(chosen || '@cf/meta/llama-4-scout-17b-16e-instruct', {
+    const chosen = data.me?.aiModel?.startsWith('@cf/') ? data.me.aiModel : '@cf/meta/llama-4-scout-17b-16e-instruct'
+    if (!(await gwGate(c, userId, 'ai_budget'))) {
+      return c.json({ error: 'daily AI limit reached — upgrade for more' }, 429)
+    }
+    const out = (await c.env.AI.run(chosen, {
       messages: [{ role: 'user', content: prompt }],
     })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }
     const content = typeof out.response === 'string' ? out.response : (out.choices?.[0]?.message?.content ?? '')
@@ -1064,7 +1098,6 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
     )
 
     const result = { suggestedLimit: limit, reasoning }
-    await c.env.SESSIONS.put(cacheKey, JSON.stringify(result), { expirationTtl: 86400 })
     return c.json(result)
   } catch {
     return c.json({ suggestedLimit: currentLimit, reasoning: 'AI could not compute a suggestion right now.' })
@@ -1073,8 +1106,10 @@ Return ONLY JSON: { "suggestedLimit": <number>, "reasoning": "<1-2 sentence expl
 
 app.post('/api/subscription/checkout', auth, async (c) => {
   const userId = c.get('session').user_id
-  const body = (await c.req.json().catch(() => ({}))) as { productId?: string; plan?: string }
-  if (!body.productId) return c.json({ error: 'productId required' }, 400)
+  const body = (await c.req.json().catch(() => ({}))) as { productId?: string; plan?: string; interval?: string }
+  const interval = body.interval === 'year' ? 'year' : 'month'
+  const productId = interval === 'year' && body.plan ? (POLAR_YEARLY_PRODUCTS[body.plan] ?? body.productId) : body.productId
+  if (!productId) return c.json({ error: 'productId required' }, 400)
 
   const res = await fetch(`${c.env.POLAR_API_URL}/v1/checkouts`, {
     method: 'POST',
@@ -1083,7 +1118,7 @@ app.post('/api/subscription/checkout', auth, async (c) => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      product_id: body.productId,
+      product_id: productId,
       success_url: new URL('/dashboard', c.req.url).toString(),
       metadata: { user_id: userId, plan: body.plan ?? '' },
     }),
@@ -1101,6 +1136,18 @@ const POLAR_PRODUCTS: Record<string, string> = {
   '4caad456-f357-4934-8afe-b73af5b0872f': 'team_standard',
   'b5ca8384-87d0-4a59-9229-95c2be263df8': 'team_premium',
   'b6647353-deea-4dea-bf7c-726fd8e11691': 'enterprise',
+  '942a7b95-8816-405d-b601-74bc66f6e545': 'pro',
+  '249c2f0f-e017-45bc-a197-64130f06025a': 'max',
+  '9ca35b4f-e93f-4d05-821e-ec0389f857fc': 'team_standard',
+  '84b31c0b-c254-45a0-9385-0b1b6e1a7881': 'team_premium',
+}
+
+// Plan → yearly Polar product (created 2026-08-13).
+const POLAR_YEARLY_PRODUCTS: Record<string, string> = {
+  'pro': '942a7b95-8816-405d-b601-74bc66f6e545',
+  'max': '249c2f0f-e017-45bc-a197-64130f06025a',
+  'team_standard': '9ca35b4f-e93f-4d05-821e-ec0389f857fc',
+  'team_premium': '84b31c0b-c254-45a0-9385-0b1b6e1a7881',
 }
 
 app.post('/webhooks/polar', async (c) => {
@@ -1210,6 +1257,7 @@ app.get('/api/aa/status/:consentId', auth, async (c) => {
       maskedAccNumber: a.accountNumber ?? a.accountName ?? '',
       fipId: String(a.providerAccountId ?? a.id ?? ''),
       accType: a.accountType ?? '',
+      accountName: a.displayName ?? a.accountName ?? '',
       linkRefNumber: String(a.id ?? ''),
     }))
     return c.json({ consentStatus: 'ACTIVE', consentId: c.req.param('consentId'), accounts })
@@ -1617,6 +1665,9 @@ Return ONLY JSON:
   "risks": [4-5 risks ranked by severity, each: { "risk": "...", "severity": "high|medium|low", "mitigation": "..." }]
 }
 Rules: be specific and actionable for an Indian SMB; mention concrete levers (GST input credit, vendor renegotiation, pricing tiers, retention); never invent numbers beyond the KPIs given; keep each field under 40 words.`
+    if (!(await gwGate(c, userId, 'ai_advisor'))) {
+      return c.json({ error: 'daily AI limit reached — upgrade for more' }, 429)
+    }
     const out = (await c.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
       messages: [{ role: 'user', content: prompt }],
     })) as { response?: string; choices?: Array<{ message?: { content?: string } }> }

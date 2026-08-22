@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString, rand_core::OsRng};
-use argon2::{Argon2, PasswordVerifier};
 use async_graphql::{Context, Object, Result};
 
-use crate::chat::purge_supermemory;
 use crate::AppState;
 
 fn user_id(ctx: &Context<'_>) -> Option<String> {
@@ -42,7 +39,7 @@ fn revoke_gateway_sessions(uid: String) {
     });
 }
 
-const USER_CHILD_TABLES: [&str; 16] = [
+const USER_CHILD_TABLES: [&str; 17] = [
     "sessions",
     "bank_accounts",
     "analysis_log",
@@ -55,6 +52,7 @@ const USER_CHILD_TABLES: [&str; 16] = [
     "budget_suggestions",
     "coach_insights",
     "chat_sessions",
+    "chat_memories",
     "financial_goals",
     "holdings",
     "user_actions",
@@ -131,7 +129,7 @@ impl QueryRoot {
     }
 
     #[graphql(name = "spending30d")]
-    async fn spending_30d(&self, ctx: &Context<'_>) -> Result<Vec<SpendingDay>> {
+    async fn spending_30d(&self, ctx: &Context<'_>, #[graphql(default = 30)] days: i32) -> Result<Vec<SpendingDay>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
@@ -139,12 +137,73 @@ impl QueryRoot {
                  FROM ledger_entries
                  WHERE user_id::text = $1 AND account_type = 'budget'
                    AND transaction_type = 'debit'
-                   AND COALESCE(transaction_date, created_at) >= now() - interval '30 days'
+                   AND COALESCE(transaction_date, created_at) >= now() - ($2::int4 * interval '1 day')
                  GROUP BY 1 ORDER BY 1",
-                &[&uid],
+                &[&uid, &days],
             )
             .await?;
         Ok(rows.iter().map(|r| SpendingDay { day: r.get(0), spend: r.get(1) }).collect())
+    }
+
+    #[graphql(name = "netWorthSeries")]
+    async fn net_worth_series(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 90)] days: i32,
+        #[graphql(default = "day")] bucket: String,
+    ) -> Result<Vec<NetWorthPoint>> {
+        let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
+        let fmt = match bucket.as_str() {
+            "week" => "'IYYY-\"W\"IW'",
+            "month" => "'Mon YYYY'",
+            _ => "'DD Mon'",
+        };
+        let pool = pg(ctx);
+        let rows = pool.get().await?
+            .query(
+                &format!(
+                    "SELECT to_char(COALESCE(transaction_date, created_at), {fmt}) AS day,
+                            COALESCE(SUM(CASE WHEN transaction_type = 'credit' THEN amount ELSE -amount END), 0)::float8 AS net
+                     FROM ledger_entries
+                     WHERE user_id::text = $1 AND account_type = 'budget'
+                       AND COALESCE(transaction_date, created_at) >= now() - ($2::int4 * interval '1 day')
+                     GROUP BY 1 ORDER BY 1"
+                ),
+                &[&uid, &days],
+            )
+            .await?;
+        if rows.is_empty() {
+            return Ok(vec![]);
+        }
+        let bank: f64 = pool.get().await?
+            .query_one("SELECT COALESCE(SUM(balance), 0)::float8 FROM bank_accounts WHERE user_id::text = $1", &[&uid])
+            .await?
+            .get(0);
+        let invested: f64 = pool.get().await?
+            .query_one("SELECT COALESCE(SUM(quantity * current_price), 0)::float8 FROM holdings WHERE user_id::text = $1", &[&uid])
+            .await?
+            .get(0);
+        let current_total = bank + invested;
+        let mut cum = 0.0;
+        let mut pts: Vec<NetWorthPoint> = Vec::with_capacity(rows.len() + 1);
+        for r in &rows {
+            cum += r.get::<_, f64>(1);
+            pts.push(NetWorthPoint { day: r.get(0), value: cum });
+        }
+        let last_cum = cum;
+        for p in &mut pts {
+            p.value = current_total + (p.value - last_cum);
+        }
+        let today: String = pool.get().await?
+            .query_one("SELECT to_char(now(), 'DD Mon')", &[])
+            .await?
+            .get(0);
+        if pts.last().map(|p| &p.day) == Some(&today) {
+            pts.last_mut().unwrap().value = current_total;
+        } else {
+            pts.push(NetWorthPoint { day: today, value: current_total });
+        }
+        Ok(pts)
     }
 
     async fn bank_accounts(&self, ctx: &Context<'_>) -> Result<Vec<BankAccount>> {
@@ -152,7 +211,7 @@ impl QueryRoot {
         let rows = pg(ctx).get().await?
             .query(
                 "SELECT account_id::text, b.name, mobile_number, account_type,
-                        balance::float8, last_sync_at::text, is_primary
+                        masked_account_number, COALESCE(account_name, ''), balance::float8, last_sync_at::text, is_primary
                  FROM bank_accounts ba JOIN banks b ON b.bank_id = ba.bank_id
                  WHERE ba.user_id::text = $1 ORDER BY ba.is_primary DESC, ba.created_at",
                 &[&uid],
@@ -162,14 +221,15 @@ impl QueryRoot {
     }
 
     #[graphql(name = "ledgerTransactions")]
-    async fn ledger_transactions(&self, ctx: &Context<'_>, limit: Option<i32>) -> Result<Vec<LedgerTx>> {
+    async fn ledger_transactions(&self, ctx: &Context<'_>, limit: Option<i32>, search: Option<String>) -> Result<Vec<LedgerTx>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
                 "SELECT transaction_type, amount::float8, description, transaction_date::text, created_at::text
                  FROM ledger_entries WHERE user_id::text = $1
+                   AND ($3::text IS NULL OR description ILIKE '%' || $3::text || '%')
                  ORDER BY COALESCE(transaction_date, created_at) DESC LIMIT $2::int4",
-                &[&uid, &limit.unwrap_or(10)],
+                &[&uid, &limit.unwrap_or(10), &search],
             )
             .await?;
         Ok(rows.iter().map(LedgerTx::from_row).collect())
@@ -201,7 +261,7 @@ impl QueryRoot {
         crate::insights::query(state, &uid, &role).await
     }
 
-    async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>) -> Result<Vec<AnalysisLog>> {
+    async fn analysis_history(&self, ctx: &Context<'_>, limit: Option<i32>, offset: Option<i32>, search: Option<String>) -> Result<Vec<AnalysisLog>> {
         let Some(uid) = user_id(ctx) else { return Ok(vec![]) };
         let rows = pg(ctx).get().await?
             .query(
@@ -210,9 +270,10 @@ impl QueryRoot {
                         al.user_action, al.created_at::text
                  FROM analysis_log al JOIN products p ON p.product_id = al.product_id
                  WHERE al.user_id::text = $1
+                   AND ($4::text IS NULL OR p.name ILIKE '%' || $4::text || '%')
                  ORDER BY al.created_at DESC
                  LIMIT $2 OFFSET $3",
-                &[&uid, &(limit.unwrap_or(50) as i64), &(offset.unwrap_or(0) as i64)],
+                &[&uid, &(limit.unwrap_or(50) as i64), &(offset.unwrap_or(0) as i64), &search],
             )
             .await?;
         Ok(rows.iter().map(AnalysisLog::from_row).collect())
@@ -771,61 +832,8 @@ impl MutationRoot {
         tx.execute("DELETE FROM users WHERE user_id::text = $1", &[&uid])
             .await?;
         tx.commit().await?;
-        tokio::spawn(purge_supermemory(uid.clone()));
         revoke_gateway_sessions(uid);
         Ok(true)
-    }
-
-    async fn signup(&self, ctx: &Context<'_>, email: String, full_name: String, password: String) -> Result<Option<String>> {
-        if !email.contains('@') || password.len() < 8 {
-            return Err("invalid email or password (min 8 chars)".into());
-        }
-        let salt = SaltString::generate(&mut OsRng);
-        let hash = Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| e.to_string())?
-            .to_string();
-        let row = pg(ctx).get().await?
-            .query_opt(
-                "INSERT INTO users (email, full_name, oauth_provider, password_hash)
-                 VALUES ($1, $2, 'password', $3)
-                 ON CONFLICT (email) DO NOTHING RETURNING user_id::text",
-                &[&email, &full_name, &hash],
-            )
-            .await?;
-        if row.is_some() {
-            crate::email::send_email(
-                pg(ctx),
-                &email,
-                "Welcome to Cartis!",
-                &format!("<p>Hey {full_name}, welcome to Cartis!</p><p>Start by syncing your bank account or exploring your dashboard.</p><p><a href='https://cartis-gateway.rz8m4crnwt.workers.dev/onboarding'>Open Cartis</a></p>"),
-            ).await;
-        }
-        Ok(row.map(|r| r.get(0)))
-    }
-
-    async fn login(&self, ctx: &Context<'_>, email: String, password: String) -> Result<Option<AuthUser>> {
-        let row = pg(ctx).get().await?
-            .query_opt(
-                "SELECT user_id::text, password_hash, full_name, avatar_url
-                 FROM users WHERE email = $1 AND oauth_provider = 'password' AND password_hash IS NOT NULL",
-                &[&email],
-            )
-            .await?;
-        let Some(row) = row else { return Ok(None) };
-        let hash: String = row.get(1);
-        let parsed = PasswordHash::new(&hash).map_err(|e| e.to_string())?;
-        if Argon2::default().verify_password(password.as_bytes(), &parsed).is_err() {
-            return Ok(None);
-        }
-        let _ = pg(ctx).get().await?
-            .execute("UPDATE users SET last_login_at = NOW() WHERE email = $1", &[&email])
-            .await;
-        Ok(Some(AuthUser {
-            user_id: row.get(0),
-            full_name: row.get(2),
-            avatar_url: row.get(3),
-        }))
     }
 
     async fn set_monthly_tab_limit(&self, ctx: &Context<'_>, limit: f64) -> Result<MonthlyTab> {
@@ -920,6 +928,11 @@ impl MutationRoot {
     async fn refresh_coach_insights(&self, ctx: &Context<'_>, role: String) -> Result<Vec<crate::insights::Insight>> {
         let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
         let state = ctx.data_unchecked::<Arc<AppState>>();
+        match crate::usage::bump(state, &uid, "ai_insights").await {
+            Ok(true) => {}
+            Ok(false) => return Err("daily insights limit reached — upgrade for more".into()),
+            Err(e) => eprintln!("usage insights gate error: {e}"),
+        }
         crate::insights::refresh(state, &uid, &role).await
     }
 
@@ -1010,6 +1023,21 @@ impl MutationRoot {
             )
             .await?;
         Ok(rows > 0)
+    }
+
+    async fn add_income_stream(&self, ctx: &Context<'_>, input: IncomeStreamInput) -> Result<IncomeStream> {
+        let Some(uid) = user_id(ctx) else { return Err("not authenticated".into()) };
+        let row = pg(ctx).get().await?
+            .query_one(
+                "INSERT INTO income_streams (user_id, account_ref, source, frequency, amount, currency, from_date, to_date)
+                 VALUES ($1::text::uuid, '', $2, $3, $4::text::numeric, $5, $6, '')
+                 ON CONFLICT (user_id, source, from_date, frequency) DO UPDATE SET
+                    amount = EXCLUDED.amount, currency = EXCLUDED.currency
+                 RETURNING account_ref, source, frequency, amount::float8, currency, from_date::text, to_date::text",
+                &[&uid, &input.source, &input.frequency, &input.amount.to_string(), &input.currency, &input.from_date],
+            )
+            .await?;
+        Ok(IncomeStream::from_row(&row))
     }
 
     async fn add_inventory_item(
@@ -1293,18 +1321,18 @@ impl MutationRoot {
             if let Some(ref aid) = existing {
                 tx.execute(
                     "UPDATE bank_accounts SET balance = $2::text::numeric, fip_id = $3, last_sync_at = now(),
-                        account_type = COALESCE($4, account_type)
+                        account_type = COALESCE($4, account_type), account_name = COALESCE(NULLIF($5, ''), account_name)
                      WHERE account_id::text = $1",
-                    &[aid, &acct.balance.to_string(), &acct.fip_id, &acct.account_type],
+                    &[aid, &acct.balance.to_string(), &acct.fip_id, &acct.account_type, &acct.account_name],
                 ).await?;
                 account_id = Some(aid.clone());
             } else {
                 let new_id: String = tx
                     .query_one(
-                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, account_type, last_sync_at)
-                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), $6, now())
+                        "INSERT INTO bank_accounts (account_id, user_id, bank_id, mobile_number, fip_id, balance, masked_account_number, account_type, account_name, last_sync_at)
+                         VALUES (gen_random_uuid(), $1::text::uuid, $2::text::uuid, '', $3, $4::text::numeric, COALESCE($5, ''), $6, NULLIF($7, ''), now())
                          RETURNING account_id::text",
-                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref, &acct.account_type],
+                        &[&uid, &bank_id, &acct.fip_id, &acct.balance.to_string(), &acct.account_ref, &acct.account_type, &acct.account_name],
                     )
                     .await?
                     .get(0);
@@ -1647,19 +1675,6 @@ impl User {
     async fn effective_plan(&self) -> &str { &self.effective_plan }
 }
 
-struct AuthUser {
-    user_id: String,
-    full_name: String,
-    avatar_url: Option<String>,
-}
-
-#[Object]
-impl AuthUser {
-    async fn user_id(&self) -> &str { &self.user_id }
-    async fn full_name(&self) -> &str { &self.full_name }
-    async fn avatar_url(&self) -> Option<&str> { self.avatar_url.as_deref() }
-}
-
 struct UpsertedUser {
     user_id: String,
     created: bool,
@@ -1743,11 +1758,24 @@ impl SpendingDay {
     async fn spend(&self) -> f64 { self.spend }
 }
 
+struct NetWorthPoint {
+    day: String,
+    value: f64,
+}
+
+#[Object]
+impl NetWorthPoint {
+    async fn day(&self) -> &str { &self.day }
+    async fn value(&self) -> f64 { self.value }
+}
+
 struct BankAccount {
     account_id: String,
     bank_name: String,
     mobile_number: Option<String>,
     account_type: Option<String>,
+    masked_account_number: Option<String>,
+    account_name: Option<String>,
     balance: Option<f64>,
     last_sync_at: Option<String>,
     is_primary: bool,
@@ -1823,6 +1851,8 @@ impl BankAccount {
     async fn bank_name(&self) -> &str { &self.bank_name }
     async fn mobile_number(&self) -> Option<&str> { self.mobile_number.as_deref() }
     async fn account_type(&self) -> Option<&str> { self.account_type.as_deref() }
+    async fn masked_account_number(&self) -> Option<&str> { self.masked_account_number.as_deref() }
+    async fn account_name(&self) -> Option<&str> { self.account_name.as_deref() }
     async fn balance(&self) -> Option<f64> { self.balance }
     async fn last_sync_at(&self) -> Option<&str> { self.last_sync_at.as_deref() }
     async fn is_primary(&self) -> bool { self.is_primary }
@@ -1835,9 +1865,11 @@ impl BankAccount {
             bank_name: r.get(1),
             mobile_number: r.get(2),
             account_type: r.get(3),
-            balance: r.get(4),
-            last_sync_at: r.get(5),
-            is_primary: r.get(6),
+            masked_account_number: r.get(4),
+            account_name: r.get(5),
+            balance: r.get(6),
+            last_sync_at: r.get(7),
+            is_primary: r.get(8),
         }
     }
 }
@@ -2044,6 +2076,18 @@ struct FinanceEntryInput {
 }
 
 #[derive(async_graphql::InputObject)]
+struct IncomeStreamInput {
+    source: String,
+    amount: f64,
+    #[graphql(default = "MONTHLY")]
+    frequency: String,
+    #[graphql(default = "INR")]
+    currency: String,
+    #[graphql(default = "")]
+    from_date: String,
+}
+
+#[derive(async_graphql::InputObject)]
 struct LedgerEntryInput {
     transaction_type: String,
     amount: f64,
@@ -2057,6 +2101,7 @@ struct AaAccountInput {
     fip_id: Option<String>,
     account_ref: Option<String>,
     account_type: Option<String>,
+    account_name: Option<String>,
 }
 
 #[derive(async_graphql::InputObject)]

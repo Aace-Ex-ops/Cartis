@@ -35,7 +35,7 @@ export function Sidebar({
 
   return (
     <aside
-      className={`flex h-full shrink-0 flex-col border-r border-[#7ec151]/20 bg-white text-[#132a13] font-sans transition-all duration-300 ${
+      className={`flex h-full shrink-0 flex-col border-r border-primary/20 bg-background text-foreground font-sans transition-all duration-300 ${
         collapsed ? "w-[72px] items-center p-2.5" : "w-[260px] p-4"
       }`}
     >
@@ -43,13 +43,13 @@ export function Sidebar({
       <Link
         href="/"
         aria-label="Cartis Home"
-        className="flex items-center gap-2.5 px-1 pb-4 border-b border-gray-100 transition-transform duration-200 hover:scale-[1.02]"
+        className="flex items-center gap-2.5 px-1 pb-4 border-b border-border transition-transform duration-200 hover:scale-[1.02]"
       >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-[#7ec151] to-[#b2d959] font-black text-white text-base shadow-sm">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-primary to-chart-2 font-black text-white text-base shadow-sm">
           C
         </div>
         {!collapsed && (
-          <MetallicLogo className="h-6 w-24 text-[#132a13]" />
+          <MetallicLogo className="h-6 w-24 text-foreground" />
         )}
       </Link>
 
@@ -57,12 +57,12 @@ export function Sidebar({
         {groups.map((group, i) => (
           <div key={i} className="flex flex-col gap-1.5 w-full">
             {group.heading && !collapsed && (
-              <span className="mb-1 px-3 text-[10px] font-extrabold uppercase tracking-[0.15em] text-[#7ec151]">
+              <span className="mb-1 px-3 text-[10px] font-extrabold uppercase tracking-[0.15em] text-primary">
                 {group.heading}
               </span>
             )}
             {group.heading && collapsed && i > 0 && (
-              <div className="my-2 h-px w-8 mx-auto bg-gray-200" />
+              <div className="my-2 h-px w-8 mx-auto bg-border" />
             )}
             {group.items.map((item) => {
               const Icon = item.icon;
@@ -82,15 +82,15 @@ export function Sidebar({
                     }}
                     className={`group relative flex h-11 w-11 mx-auto items-center justify-center rounded-2xl transition-all duration-300 ${
                       active
-                        ? "bg-gradient-to-tr from-[#b2d959]/40 to-[#7ec151]/30 text-[#132a13] font-bold shadow-[0_0_20px_rgba(126,193,81,0.3)] scale-105"
-                        : "text-gray-500 hover:bg-gradient-to-tr hover:from-[#b2d959]/20 hover:to-[#7ec151]/15 hover:text-[#7ec151] hover:scale-110"
+                        ? "bg-gradient-to-tr from-chart-2/40 to-primary/30 text-foreground font-bold shadow-[0_0_20px_rgba(126,193,81,0.3)] scale-105"
+                        : "text-muted-foreground hover:bg-gradient-to-tr hover:from-chart-2/20 hover:to-primary/15 hover:text-primary hover:scale-110"
                     }`}
                   >
                     <Icon
                       className={`h-5 w-5 shrink-0 transition-all duration-300 group-hover:scale-110 ${
                         active
-                          ? "text-[#7ec151] drop-shadow-[0_0_8px_rgba(126,193,81,0.7)]"
-                          : "text-gray-400 group-hover:text-[#7ec151]"
+                          ? "text-primary drop-shadow-[0_0_8px_rgba(126,193,81,0.7)]"
+                          : "text-muted-foreground group-hover:text-primary"
                       }`}
                       strokeWidth={active ? 2.2 : 1.75}
                     />
@@ -110,15 +110,15 @@ export function Sidebar({
                   }}
                   className={`group relative flex items-center gap-3.5 rounded-2xl px-3.5 py-2.5 text-xs font-semibold tracking-wide transition-all duration-300 ${
                     active
-                      ? "bg-gradient-to-r from-[#b2d959]/35 via-[#7ec151]/20 to-[#fed24f]/10 text-[#132a13] font-extrabold border-l-4 border-[#7ec151] shadow-[0_0_20px_rgba(126,193,81,0.2)] translate-x-1"
-                      : "text-gray-600 hover:bg-gradient-to-r hover:from-[#b2d959]/20 hover:to-transparent hover:text-[#132a13] hover:translate-x-1"
+                      ? "bg-gradient-to-r from-chart-2/35 via-primary/20 to-chart-5/10 text-foreground font-extrabold border-l-4 border-primary shadow-[0_0_20px_rgba(126,193,81,0.2)] translate-x-1"
+                      : "text-muted-foreground hover:bg-gradient-to-r hover:from-chart-2/20 hover:to-transparent hover:text-foreground hover:translate-x-1"
                   }`}
                 >
                   <Icon
                     className={`h-4.5 w-4.5 shrink-0 transition-all duration-300 group-hover:scale-110 ${
                       active
-                        ? "text-[#7ec151] drop-shadow-[0_0_8px_rgba(126,193,81,0.7)]"
-                        : "text-gray-400 group-hover:text-[#7ec151]"
+                        ? "text-primary drop-shadow-[0_0_8px_rgba(126,193,81,0.7)]"
+                        : "text-muted-foreground group-hover:text-primary"
                     }`}
                     strokeWidth={active ? 2.2 : 1.75}
                   />
@@ -131,24 +131,24 @@ export function Sidebar({
       </div>
 
       {upgrade && (
-        <div className="mt-auto flex flex-col gap-1 border-t border-gray-100 pt-3 w-full">
+        <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3 w-full">
           {collapsed ? (
             <Link
               href={upgrade.href ?? "/dashboard"}
               title={`${upgrade.title}: ${upgrade.subtitle}`}
-              className="flex h-11 w-11 mx-auto items-center justify-center rounded-2xl bg-[#b2d959]/30 text-[#7ec151] transition-all hover:bg-[#b2d959]/50"
+              className="flex h-11 w-11 mx-auto items-center justify-center rounded-2xl bg-chart-2/30 text-primary transition-all hover:bg-chart-2/50"
             >
-              <Sparkles className="h-5 w-5 text-[#7ec151]" strokeWidth={1.5} />
+              <Sparkles className="h-5 w-5 text-primary" strokeWidth={1.5} />
             </Link>
           ) : (
             <Link
               href={upgrade.href ?? "/dashboard"}
-              className="group flex items-center gap-3 rounded-2xl bg-gradient-to-r from-[#fed24f]/30 via-[#b2d959]/25 to-[#7ec151]/20 p-3 text-xs tracking-wide text-[#132a13] transition-all hover:shadow-[0_0_20px_rgba(126,193,81,0.25)] hover:scale-[1.02] border border-[#7ec151]/30"
+              className="group flex items-center gap-3 rounded-2xl bg-gradient-to-r from-chart-5/30 via-chart-2/25 to-primary/20 p-3 text-xs tracking-wide text-foreground transition-all hover:shadow-[0_0_20px_rgba(126,193,81,0.25)] hover:scale-[1.02] border border-primary/30"
             >
-              <Sparkles className="h-4 w-4 shrink-0 text-[#7ec151] animate-pulse" strokeWidth={1.5} />
+              <Sparkles className="h-4 w-4 shrink-0 text-primary animate-pulse" strokeWidth={1.5} />
               <span className="flex flex-col leading-tight">
-                <span className="font-bold text-[#132a13]">{upgrade.title}</span>
-                <span className="text-[10px] text-[#7ec151]">
+                <span className="font-bold text-foreground">{upgrade.title}</span>
+                <span className="text-[10px] text-primary">
                   {upgrade.subtitle}
                 </span>
               </span>

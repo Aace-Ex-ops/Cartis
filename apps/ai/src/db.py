@@ -11,3 +11,9 @@ def query(sql: str, params: tuple = ()) -> list[tuple]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+def execute(sql: str, params: tuple = ()) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        conn.commit()

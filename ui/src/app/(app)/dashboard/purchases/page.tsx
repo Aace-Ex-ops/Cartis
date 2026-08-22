@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { PiggyBank, Award, CheckCircle2, Clock, Ban } from "lucide-react";
 import { gql } from "@/lib/gql";
 import { useLiveData } from "@/lib/use-live-data";
+import { SkeletonHeading, SkeletonCard, SkeletonRow } from "@/components/shared/dashboard-skeleton";
 
 type Analysis = {
   analysisId: string;
@@ -58,14 +59,14 @@ const DUMMY_PURCHASES: Analysis[] = [
 ];
 
 const VERDICT_STYLE: Record<string, { label: string; cls: string; icon: React.ComponentType<{ className?: string }> }> = {
-  buy: { label: "Buy", cls: "bg-[#b2d959]/50 text-[#132a13] border-[#7ec151]/40 font-extrabold", icon: CheckCircle2 },
-  wait: { label: "Wait", cls: "bg-[#fed24f]/60 text-[#854d0e] border-[#fed24f] font-extrabold", icon: Clock },
+  buy: { label: "Buy", cls: "bg-chart-2/50 text-foreground border-primary/40 font-extrabold", icon: CheckCircle2 },
+  wait: { label: "Wait", cls: "bg-chart-5/60 text-foreground border-chart-5 font-extrabold", icon: Clock },
   skip: { label: "Skip", cls: "bg-rose-100 text-rose-800 border-rose-200 font-extrabold", icon: Ban },
 };
 
 const QUERY = `{ analysisHistory(limit: 50) { analysisId productName price verdict explanation createdAt } }`;
 
-function toVerdict(v: "good" | "warning" | "bad"): Verdict {
+function toVerdict(v: "good" | "warning" | "bad"): "buy" | "wait" | "skip" {
   if (v === "good") return "buy";
   if (v === "warning") return "wait";
   return "skip";
@@ -122,50 +123,50 @@ export default function PurchasesPage() {
   const adherence = decided > 0 ? Math.round((followed / decided) * 100) : 0;
 
   return (
-    <div className="flex flex-col gap-6 text-[#132a13] pb-12">
+    <div className="flex flex-col gap-6 text-foreground pb-12">
       <div>
-        <h1 className="font-heading text-2xl font-bold tracking-tight text-[#132a13] md:text-3xl">Purchase Tracker</h1>
-        <p className="mt-1 text-xs text-gray-500">What your coach advised, what you decided, and total money saved.</p>
+        <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground md:text-3xl">Purchase Tracker</h1>
+        <p className="mt-1 text-xs text-muted-foreground">What your coach advised, what you decided, and total money saved.</p>
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2">
-        <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-bold text-gray-500">
+        <div className="rounded-2xl border border-primary/20 bg-card p-6 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-muted-foreground">
             <span>Total Impulse Savings</span>
-            <PiggyBank className="h-4 w-4 text-[#7ec151]" />
+            <PiggyBank className="h-4 w-4 text-primary" />
           </div>
-          <p className="mt-3 text-3xl font-black text-[#132a13] tabular-nums">
+          <p className="mt-3 text-3xl font-black text-foreground tabular-nums">
             ₹{saved.toLocaleString("en-IN")}
           </p>
-          <p className="mt-1 text-[11px] text-[#7ec151] font-semibold">Saved by skipping unnecessary purchases</p>
+          <p className="mt-1 text-[11px] text-primary font-semibold">Saved by skipping unnecessary purchases</p>
         </div>
 
-        <div className="rounded-2xl border border-[#7ec151]/20 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-bold text-gray-500">
+        <div className="rounded-2xl border border-primary/20 bg-card p-6 shadow-sm">
+          <div className="flex items-center justify-between text-xs font-bold text-muted-foreground">
             <span>Coach Adherence</span>
-            <Award className="h-4 w-4 text-[#7ec151]" />
+            <Award className="h-4 w-4 text-primary" />
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-[#132a13]">{adherence}%</span>
-            <span className="text-xs text-gray-500 font-semibold">of {decided} decisions followed</span>
+            <span className="text-3xl font-black text-foreground">{adherence}%</span>
+            <span className="text-xs text-muted-foreground font-semibold">of {decided} decisions followed</span>
           </div>
-          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-gray-100">
-            <div className="h-full rounded-full bg-[#7ec151]" style={{ width: `${adherence}%` }} />
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${adherence}%` }} />
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col divide-y divide-gray-100 rounded-2xl border border-[#7ec151]/20 bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col divide-y divide-border rounded-2xl border border-primary/20 bg-card shadow-sm overflow-hidden">
         {purchases.map((p) => {
           const v = VERDICT_STYLE[p.verdict];
           const VerdictIcon = v.icon;
           return (
-            <div key={p.id} className="flex items-center justify-between gap-4 p-4 hover:bg-[#b2d959]/10 transition-colors">
+            <div key={p.id} className="flex items-center justify-between gap-4 p-4 hover:bg-chart-2/10 transition-colors">
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-bold text-[#132a13]">{p.product}</span>
-                <span className="text-xs text-gray-500">{p.date}</span>
+                <span className="truncate text-sm font-bold text-foreground">{p.product}</span>
+                <span className="text-xs text-muted-foreground">{p.date}</span>
               </div>
-              <span className="text-xs font-black tabular-nums text-[#132a13] bg-[#b2d959]/30 px-2.5 py-1 rounded-md border border-[#7ec151]/30">
+              <span className="text-xs font-black tabular-nums text-foreground bg-chart-2/30 px-2.5 py-1 rounded-md border border-primary/30">
                 ₹{p.price.toLocaleString("en-IN")}
               </span>
               <div className={`flex items-center gap-1.5 rounded-xl border px-3 py-1 text-xs ${v.cls}`}>
